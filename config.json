@@ -1,0 +1,13 @@
+{
+  "firmy": [
+    "FP",
+    "MR",
+    "CFF"
+  ],
+  "app_nazev": "Správa faktur",
+  "ico_map": {
+    "19436521": "FP",
+    "23134402": "MR",
+    "09762906": "CFF"
+  }
+}

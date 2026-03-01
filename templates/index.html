@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="cs" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Správa faktur</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<!-- SIDEBAR -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <span class="logo-icon">🧾</span>
+    <span class="logo-text" id="appNazev">Správa faktur</span>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="#" class="nav-item active" data-page="dashboard">
+      <span class="nav-icon">📊</span><span>Dashboard</span>
+    </a>
+    <a href="#" class="nav-item" data-page="faktury">
+      <span class="nav-icon">📄</span><span>Faktury</span>
+    </a>
+    <a href="#" class="nav-item" data-page="nahrat">
+      <span class="nav-icon">⬆️</span><span>Nahrát fakturu</span>
+    </a>
+    <a href="#" class="nav-item" data-page="rucni">
+      <span class="nav-icon">✏️</span><span>Ruční zadání</span>
+    </a>
+    <a href="#" class="nav-item" data-page="polozky">
+      <span class="nav-icon">📦</span><span>Zboží</span>
+    </a>
+    <a href="#" class="nav-item" data-page="statistiky">
+      <span class="nav-icon">📈</span><span>Statistiky</span>
+    </a>
+    <a href="#" class="nav-item" data-page="nastaveni">
+      <span class="nav-icon">⚙️</span><span>Nastavení</span>
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    <label class="theme-toggle">
+      <input type="checkbox" id="themeSwitch"> 🌙 Tmavý režim
+    </label>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<div class="main-wrap">
+  <header class="topbar">
+    <button class="menu-btn" id="menuBtn">☰</button>
+    <div class="topbar-filters">
+      <select id="globalFirmaFilter">
+        <option value="">Všechny firmy</option>
+      </select>
+    </div>
+    <div class="topbar-right">
+      <span id="todayDate"></span>
+    </div>
+  </header>
+
+  <main class="content" id="mainContent">
+    <!-- stránky jsou renderovány dynamicky -->
+  </main>
+</div>
+
+<!-- MODAL -->
+<div class="modal-overlay" id="modalOverlay" style="display:none">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <h3 id="modalTitle">Detail</h3>
+      <button class="modal-close" id="modalClose">✕</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div id="toastContainer"></div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
