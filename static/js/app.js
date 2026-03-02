@@ -1898,6 +1898,26 @@ function setupReportDropzone() {
     e.preventDefault(); dz.classList.remove("drag-over");
     if (e.dataTransfer.files[0]) uploadReportFoto(e.dataTransfer.files[0]);
   });
+
+  // Ctrl+V – vložení obrázku ze schránky (např. z WhatsApp Web)
+  document.addEventListener("paste", function reportPasteHandler(e) {
+    const modal = document.getElementById("modalOverlay");
+    if (!modal || modal.style.display === "none") return;
+    const fotaPanel = document.getElementById("rtabPanelFoto");
+    if (!fotaPanel || fotaPanel.style.display === "none") return;
+    const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) {
+          const statusEl = document.getElementById("reportFotoStatus");
+          if (statusEl) statusEl.innerHTML = `<span class="spinner"></span> Načítám obrázek ze schránky...`;
+          uploadReportFoto(file);
+        }
+        break;
+      }
+    }
+  });
 }
 
 async function uploadReportFoto(file) {
