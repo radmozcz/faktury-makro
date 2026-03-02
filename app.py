@@ -9,6 +9,8 @@ import sqlite3
 import csv
 import io
 import re
+import base64
+import anthropic
 from datetime import datetime, date, timedelta
 from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, send_from_directory
 from werkzeug.utils import secure_filename
@@ -121,6 +123,30 @@ def init_db():
             firma_zkratka TEXT  DEFAULT '',
             created_at  TEXT    DEFAULT (datetime('now','localtime'))
         );
+
+        CREATE TABLE IF NOT EXISTS reporty (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            datum         TEXT    NOT NULL UNIQUE,
+            den           TEXT,
+            smena         TEXT,
+            karty         REAL    DEFAULT 0,
+            kov           REAL    DEFAULT 0,
+            papir         REAL    DEFAULT 0,
+            hotovost      REAL    DEFAULT 0,
+            vydaje        REAL    DEFAULT 0,
+            trzba         REAL    DEFAULT 0,
+            trzba_vcpk    REAL    DEFAULT 0,
+            pk50_ks       INTEGER DEFAULT 0,
+            pk100_ks      INTEGER DEFAULT 0,
+            pk_celkem     REAL    DEFAULT 0,
+            pizza_cela    INTEGER DEFAULT 0,
+            pizza_ctvrt   INTEGER DEFAULT 0,
+            burger        INTEGER DEFAULT 0,
+            talire        INTEGER DEFAULT 0,
+            burtgulas     INTEGER DEFAULT 0,
+            poznamka      TEXT,
+            created_at    TEXT    DEFAULT (datetime('now','localtime'))
+        );
         """)
     print("✓ Databáze inicializována")
 
@@ -209,11 +235,8 @@ def parse_makro_pdf(filepath):
                         right_text = "".join(w["text"] for w in sorted(
                             [w for w in ws if w["x0"] > 265], key=lambda w: w["x0"]
                         ))
-                        # Hledej záporná čísla (sleva je záporná)
                         neg = re.findall(r"-?(\d+,\d{2})", right_text)
                         if neg:
-                            sleva = _parse_money(neg[0])  # první záporné číslo = sleva bez DPH, ale použij poslední = s DPH
-                            # Vezmi poslední číslo jako sleva s DPH
                             sleva = _parse_money(neg[-1])
                             all_items[-1]["celkem_s_dph"] = round(max(0, all_items[-1]["celkem_s_dph"] - sleva), 2)
                             mn = all_items[-1]["mnozstvi"]
@@ -291,7 +314,6 @@ def parse_makro_pdf(filepath):
                     if u and u.lower() not in ("praha", "pruhonice", "chudenicka", ""):
                         result["zpusob_uhrady"] = u
 
-            # Hledání celkové částky - pouze čísla do 6 číslic před desetinnou čárkou
             dl_line = despace(line)
             if "Celkov" in dl_line and "stka" in dl_line:
                 nums = re.findall(r"(\d{1,3}(?:\s\d{3})*[,\.]\d{2})", line)
@@ -613,6 +635,216 @@ def _map_unit(u):
     return mapping.get(u.upper(), u.lower())
 
 
+# ── REPORTY – Claude Vision parser ────────────────────────────────────────────
+JMENA_MAP = {
+    "rada": "Radek", "radek": "Radek", "ráďa": "Radek", "radi": "Radek",
+    "verka": "Věrka", "vera": "Věrka", "věra": "Věrka", "věrka": "Věrka",
+    "renča": "Renča", "renata": "Renča", "renata": "Renča", "renca": "Renča",
+    "vendy": "Vendy", "wendy": "Vendy",
+    "vali": "Vali",
+}
+
+def normalize_jmena(text):
+    """Převede různé tvary jmen na kanonické."""
+    if not text:
+        return ""
+    parts = re.split(r"[,/\s]+", text.strip())
+    result = []
+    for p in parts:
+        p = p.strip().lower().rstrip(".,")
+        if not p:
+            continue
+        canonical = JMENA_MAP.get(p, p.capitalize())
+        result.append(canonical)
+    return ", ".join(result)
+
+
+def parse_report_image_claude(filepath):
+    """Použije Claude Vision API pro přečtení ručně psaného reportu."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return None, "ANTHROPIC_API_KEY není nastaven"
+
+    try:
+        with open(filepath, "rb") as f:
+            img_data = base64.standard_b64encode(f.read()).decode("utf-8")
+
+        ext = filepath.rsplit(".", 1)[-1].lower()
+        media_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+                     "bmp": "image/bmp", "tiff": "image/tiff"}
+        media_type = media_map.get(ext, "image/jpeg")
+
+        client = anthropic.Anthropic(api_key=api_key)
+
+        prompt = """Přečti tento ručně psaný denní report z restaurace a extrahuj VŠECHNA čísla a údaje.
+Odpověz POUZE platným JSON objektem, žádný jiný text.
+
+Formát odpovědi:
+{
+  "datum": "DD.M" nebo "D.M" nebo null,
+  "den": "název dne česky" nebo null,
+  "smena": "jména oddělená čárkou" nebo null,
+  "karty": číslo nebo 0,
+  "kov": číslo nebo 0,
+  "papir": číslo nebo 0,
+  "vydaje": číslo nebo 0,
+  "trzba": číslo nebo 0,
+  "pk50_ks": počet kusů PK50 nebo 0,
+  "pk100_ks": počet kusů PK100 nebo 0,
+  "pizza_cela": číslo nebo 0,
+  "pizza_ctvrt": číslo nebo 0,
+  "burger": číslo nebo 0,
+  "talire": číslo nebo 0,
+  "burtgulas": číslo nebo 0
+}
+
+Pravidla:
+- Čísla bez mezer a čárek (např. 7599 ne 7.599)
+- PK: hledej formát jako "1x100" = pk100_ks:1, "2x50" = pk50_ks:2, "1×100=1100" atd.
+- Vydaje = součet všech výdajů na lístku
+- Pokud pole není vidět nebo je prázdné, použij 0
+- datum: pouze den a měsíc jako string např "19/2" nebo "19.2"
+"""
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1000,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": img_data}},
+                    {"type": "text", "text": prompt}
+                ]
+            }]
+        )
+
+        text = message.content[0].text.strip()
+        # Očisti markdown backticky pokud jsou
+        text = re.sub(r"^```json\s*", "", text)
+        text = re.sub(r"```$", "", text).strip()
+
+        parsed = json.loads(text)
+        return parsed, None
+
+    except Exception as e:
+        return None, str(e)
+
+
+def parse_report_text(text):
+    """Parsuje vložený text reportu (Ctrl+C/V ze zprávy)."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return None, "ANTHROPIC_API_KEY není nastaven"
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+
+        prompt = f"""Přečti tento text denního reportu z restaurace a extrahuj údaje.
+Odpověz POUZE platným JSON objektem, žádný jiný text.
+
+Text reportu:
+{text}
+
+Formát odpovědi:
+{{
+  "datum": "DD.M" nebo null,
+  "den": "název dne česky" nebo null,
+  "smena": "jména oddělená čárkou" nebo null,
+  "karty": číslo nebo 0,
+  "kov": číslo nebo 0,
+  "papir": číslo nebo 0,
+  "vydaje": číslo nebo 0,
+  "trzba": číslo nebo 0,
+  "pk50_ks": počet kusů PK50 nebo 0,
+  "pk100_ks": počet kusů PK100 nebo 0,
+  "pizza_cela": číslo nebo 0,
+  "pizza_ctvrt": číslo nebo 0,
+  "burger": číslo nebo 0,
+  "talire": číslo nebo 0,
+  "burtgulas": číslo nebo 0
+}}
+"""
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        text_resp = message.content[0].text.strip()
+        text_resp = re.sub(r"^```json\s*", "", text_resp)
+        text_resp = re.sub(r"```$", "", text_resp).strip()
+        parsed = json.loads(text_resp)
+        return parsed, None
+
+    except Exception as e:
+        return None, str(e)
+
+
+def datum_to_iso(datum_str, year=None):
+    """Převede '19/2' nebo '19.2' na '2026-02-19'."""
+    if not datum_str:
+        return None
+    datum_str = str(datum_str).strip()
+    # Zkus různé formáty
+    for sep in ["/", ".", "-"]:
+        parts = datum_str.split(sep)
+        if len(parts) == 2:
+            try:
+                d, m = int(parts[0]), int(parts[1])
+                if year is None:
+                    year = date.today().year
+                return date(year, m, d).isoformat()
+            except Exception:
+                pass
+    return None
+
+
+def build_report_from_parsed(parsed, year=None):
+    """Sestaví kompletní report dict z parsovaných dat."""
+    datum_iso = datum_to_iso(parsed.get("datum"), year)
+
+    karty   = float(parsed.get("karty", 0) or 0)
+    kov     = float(parsed.get("kov", 0) or 0)
+    papir   = float(parsed.get("papir", 0) or 0)
+    vydaje  = float(parsed.get("vydaje", 0) or 0)
+    hotovost = kov + papir
+    trzba    = karty + hotovost + vydaje
+
+    pk50_ks  = int(parsed.get("pk50_ks", 0) or 0)
+    pk100_ks = int(parsed.get("pk100_ks", 0) or 0)
+    pk_celkem = pk50_ks * 50 + pk100_ks * 100
+    trzba_vcpk = trzba + pk_celkem
+
+    # Pokud report obsahuje vlastní tržbu, použij ji (pro ruční zadání)
+    if parsed.get("trzba") and float(parsed.get("trzba")) > 0:
+        trzba = float(parsed["trzba"])
+        trzba_vcpk = trzba + pk_celkem
+
+    smena = normalize_jmena(parsed.get("smena", ""))
+
+    return {
+        "datum":       datum_iso,
+        "den":         parsed.get("den", ""),
+        "smena":       smena,
+        "karty":       karty,
+        "kov":         kov,
+        "papir":       papir,
+        "hotovost":    hotovost,
+        "vydaje":      vydaje,
+        "trzba":       trzba,
+        "trzba_vcpk":  trzba_vcpk,
+        "pk50_ks":     pk50_ks,
+        "pk100_ks":    pk100_ks,
+        "pk_celkem":   pk_celkem,
+        "pizza_cela":  int(parsed.get("pizza_cela", 0) or 0),
+        "pizza_ctvrt": int(parsed.get("pizza_ctvrt", 0) or 0),
+        "burger":      int(parsed.get("burger", 0) or 0),
+        "talire":      int(parsed.get("talire", 0) or 0),
+        "burtgulas":   int(parsed.get("burtgulas", 0) or 0),
+    }
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ROUTES
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -673,13 +905,22 @@ def api_dashboard():
             ORDER BY created_at DESC LIMIT 5
         """, params_base).fetchall()
 
+        # DPH alert – karty za posledních 12 měsíců z reportů
+        karty_12m = conn.execute("""
+            SELECT COALESCE(SUM(karty),0)
+            FROM reporty
+            WHERE datum >= date('now','-12 months')
+        """).fetchone()[0]
+
     return jsonify({
         "vydaje_mesic": round(vydaje_mesic, 2),
         "pocet_mesic": pocet_mesic,
         "pocet_po_splatnosti": pocet_po_spl,
         "castka_po_splatnosti": round(castka_po_spl, 2),
         "graf": [{"mesic": r[0], "castka": round(r[1], 2)} for r in graf],
-        "posledni_faktury": [dict(r) for r in posledni]
+        "posledni_faktury": [dict(r) for r in posledni],
+        "karty_12m": round(karty_12m, 2),
+        "karty_limit": 1500000,
     })
 
 @app.route("/api/faktury")
@@ -822,6 +1063,302 @@ def api_vyplata_update(vid):
     with get_db() as conn:
         conn.execute(f"UPDATE vyplaty SET {','.join(set_parts)} WHERE id=?", vals)
     return jsonify({"ok": True})
+
+# ── API: REPORTY ──────────────────────────────────────────────────────────────
+@app.route("/api/reporty/nahrat-foto", methods=["POST"])
+def api_report_nahrat_foto():
+    """Nahraje fotku lístku, přečte přes Claude Vision, vrátí parsed data."""
+    if "soubor" not in request.files:
+        return jsonify({"error": "Žádný soubor"}), 400
+    f = request.files["soubor"]
+    if not f.filename:
+        return jsonify({"error": "Prázdný soubor"}), 400
+
+    fname = secure_filename(f.filename)
+    ts    = datetime.now().strftime("%Y%m%d_%H%M%S_")
+    fname = "report_" + ts + fname
+    fpath = os.path.join(UPLOAD_DIR, fname)
+    f.save(fpath)
+
+    parsed, err = parse_report_image_claude(fpath)
+    if err:
+        return jsonify({"error": err}), 200
+
+    report = build_report_from_parsed(parsed)
+    return jsonify(report)
+
+
+@app.route("/api/reporty/nahrat-text", methods=["POST"])
+def api_report_nahrat_text():
+    """Přijme vložený text reportu (Ctrl+C/V), parsuje přes Claude."""
+    text = request.json.get("text", "").strip()
+    if not text:
+        return jsonify({"error": "Prázdný text"}), 400
+
+    parsed, err = parse_report_text(text)
+    if err:
+        return jsonify({"error": err}), 200
+
+    report = build_report_from_parsed(parsed)
+    return jsonify(report)
+
+
+@app.route("/api/reporty", methods=["GET"])
+def api_reporty_list():
+    od  = request.args.get("od", "")
+    do_ = request.args.get("do", "")
+    clauses, params = [], []
+    if od:  clauses.append("datum>=?"); params.append(od)
+    if do_: clauses.append("datum<=?"); params.append(do_)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    with get_db() as conn:
+        rows = conn.execute(f"""
+            SELECT * FROM reporty {where} ORDER BY datum DESC
+        """, params).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/reporty", methods=["POST"])
+def api_report_ulozit():
+    """Uloží report (nový nebo aktualizuje existující podle data)."""
+    data = request.json
+    if not data.get("datum"):
+        return jsonify({"error": "Chybí datum"}), 400
+
+    # Přepočítej odvozené hodnoty
+    karty    = float(data.get("karty", 0) or 0)
+    kov      = float(data.get("kov", 0) or 0)
+    papir    = float(data.get("papir", 0) or 0)
+    vydaje   = float(data.get("vydaje", 0) or 0)
+    hotovost = kov + papir
+    trzba    = karty + hotovost + vydaje
+    pk50_ks  = int(data.get("pk50_ks", 0) or 0)
+    pk100_ks = int(data.get("pk100_ks", 0) or 0)
+    pk_celkem  = pk50_ks * 50 + pk100_ks * 100
+    trzba_vcpk = trzba + pk_celkem
+
+    with get_db() as conn:
+        existing = conn.execute("SELECT id FROM reporty WHERE datum=?", (data["datum"],)).fetchone()
+        if existing:
+            conn.execute("""
+                UPDATE reporty SET den=?,smena=?,karty=?,kov=?,papir=?,hotovost=?,
+                vydaje=?,trzba=?,trzba_vcpk=?,pk50_ks=?,pk100_ks=?,pk_celkem=?,
+                pizza_cela=?,pizza_ctvrt=?,burger=?,talire=?,burtgulas=?,poznamka=?
+                WHERE datum=?
+            """, (
+                data.get("den",""), data.get("smena",""),
+                karty, kov, papir, hotovost, vydaje, trzba, trzba_vcpk,
+                pk50_ks, pk100_ks, pk_celkem,
+                int(data.get("pizza_cela",0) or 0), int(data.get("pizza_ctvrt",0) or 0),
+                int(data.get("burger",0) or 0), int(data.get("talire",0) or 0),
+                int(data.get("burtgulas",0) or 0),
+                data.get("poznamka",""),
+                data["datum"]
+            ))
+            rid = existing["id"]
+        else:
+            cur = conn.execute("""
+                INSERT INTO reporty (datum,den,smena,karty,kov,papir,hotovost,vydaje,
+                trzba,trzba_vcpk,pk50_ks,pk100_ks,pk_celkem,
+                pizza_cela,pizza_ctvrt,burger,talire,burtgulas,poznamka)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (
+                data["datum"], data.get("den",""), data.get("smena",""),
+                karty, kov, papir, hotovost, vydaje, trzba, trzba_vcpk,
+                pk50_ks, pk100_ks, pk_celkem,
+                int(data.get("pizza_cela",0) or 0), int(data.get("pizza_ctvrt",0) or 0),
+                int(data.get("burger",0) or 0), int(data.get("talire",0) or 0),
+                int(data.get("burtgulas",0) or 0),
+                data.get("poznamka","")
+            ))
+            rid = cur.lastrowid
+
+    return jsonify({"ok": True, "id": rid})
+
+
+@app.route("/api/reporty/<int:rid>", methods=["DELETE"])
+def api_report_delete(rid):
+    with get_db() as conn:
+        conn.execute("DELETE FROM reporty WHERE id=?", (rid,))
+    return jsonify({"ok": True})
+
+
+@app.route("/api/reporty/import-xlsx", methods=["POST"])
+def api_report_import_xlsx():
+    """Importuje historická data z xlsx souboru (formát CLAUDE_vykaz)."""
+    if "soubor" not in request.files:
+        return jsonify({"error": "Žádný soubor"}), 400
+    f = request.files["soubor"]
+    fname = secure_filename(f.filename)
+    fpath = os.path.join(UPLOAD_DIR, "import_" + fname)
+    f.save(fpath)
+
+    try:
+        wb = openpyxl.load_workbook(fpath, data_only=True)
+        imported = 0
+        skipped  = 0
+        errors   = []
+
+        # Dny v týdnu česky → zkratky pro den sloupec
+        den_map = {
+            "po": "Pondělí", "út": "Úterý", "st": "Středa",
+            "čt": "Čtvrtek", "pá": "Pátek", "so": "Sobota", "ne": "Neděle"
+        }
+        mesic_map = {
+            "LEDEN": 1, "ÚNOR": 2, "BŘEZEN": 3, "DUBEN": 4,
+            "KVĚTEN": 5, "ČERVEN": 6, "ČERVENEC": 7, "SRPEN": 8,
+            "ZÁŘÍ": 9, "ŘÍJEN": 10, "LISTOPAD": 11, "PROSINEC": 12
+        }
+
+        for sheet_name in wb.sheetnames:
+            if sheet_name not in ("2025", "2026"):
+                continue
+            year = int(sheet_name)
+            ws = wb[sheet_name]
+
+            current_mesic = None
+            for row in ws.iter_rows(min_row=2, values_only=True):
+                if not row or row[0] is None:
+                    continue
+                # Přeskočit řádky SOUČET, DNÍ, PRŮMĚR
+                if str(row[0]).upper() in ("SOUČET", "DNÍ", "PRŮMĚR", "SOU\u010cET"):
+                    continue
+                # Aktualizuj aktuální měsíc
+                if row[1] and str(row[1]).upper() in mesic_map:
+                    current_mesic = mesic_map[str(row[1]).upper()]
+
+                # Validace: row[0] musí být číslo (den v měsíci)
+                try:
+                    den_cislo = int(row[0])
+                except (TypeError, ValueError):
+                    continue
+
+                if not current_mesic:
+                    continue
+
+                # Přeskočit prázdné řádky (karty a hotovost = 0)
+                karty_val    = float(row[4] or 0)
+                hotovost_val = float(row[5] or 0)
+                if karty_val == 0 and hotovost_val == 0:
+                    skipped += 1
+                    continue
+
+                try:
+                    datum_iso = date(year, current_mesic, den_cislo).isoformat()
+                except ValueError:
+                    errors.append(f"Neplatné datum: {year}-{current_mesic}-{den_cislo}")
+                    continue
+
+                den_str = den_map.get(str(row[2] or "").lower(), str(row[2] or ""))
+                trzba_vcpk = float(row[3] or 0)
+                karty      = float(row[4] or 0)
+                hotovost   = float(row[5] or 0)
+                vydaje     = float(row[6] or 0)
+                trzba      = float(row[7] or 0)
+                pk50_ks    = int(row[8] or 0)
+                pk100_ks   = int(row[9] or 0)
+                pk_celkem  = float(row[10] or 0)
+                pizza_cela = int(row[11] or 0)
+                pizza_ctvrt= int(row[12] or 0)
+                burger     = int(row[13] or 0)
+                talire     = int(row[14] or 0)
+                burtgulas  = int(row[15] or 0)
+                smena      = normalize_jmena(str(row[16] or ""))
+
+                # Odhadni kov/papir z hotovosti (nemáme rozdělení v xlsx)
+                kov   = 0
+                papir = hotovost
+
+                with get_db() as conn:
+                    existing = conn.execute("SELECT id FROM reporty WHERE datum=?", (datum_iso,)).fetchone()
+                    if existing:
+                        skipped += 1
+                        continue
+                    conn.execute("""
+                        INSERT INTO reporty (datum,den,smena,karty,kov,papir,hotovost,vydaje,
+                        trzba,trzba_vcpk,pk50_ks,pk100_ks,pk_celkem,
+                        pizza_cela,pizza_ctvrt,burger,talire,burtgulas)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """, (
+                        datum_iso, den_str, smena, karty, kov, papir, hotovost,
+                        vydaje, trzba, trzba_vcpk, pk50_ks, pk100_ks, pk_celkem,
+                        pizza_cela, pizza_ctvrt, burger, talire, burtgulas
+                    ))
+                    imported += 1
+
+        return jsonify({"ok": True, "imported": imported, "skipped": skipped, "errors": errors[:10]})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/reporty/karty-alert")
+def api_karty_alert():
+    """Vrátí součet karet za posledních 12 měsíců."""
+    with get_db() as conn:
+        total = conn.execute("""
+            SELECT COALESCE(SUM(karty),0)
+            FROM reporty
+            WHERE datum >= date('now','-12 months')
+        """).fetchone()[0]
+    return jsonify({
+        "karty_12m": round(total, 2),
+        "limit": 1500000,
+        "procent": round(total / 1500000 * 100, 1),
+        "alert": total >= 1500000,
+        "varovani": total >= 1200000,
+    })
+
+
+@app.route("/api/export/reporty")
+def export_reporty():
+    fmt = request.args.get("format", "xlsx")
+    od  = request.args.get("od", "")
+    do_ = request.args.get("do", "")
+    clauses, params = [], []
+    if od:  clauses.append("datum>=?"); params.append(od)
+    if do_: clauses.append("datum<=?"); params.append(do_)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+    with get_db() as conn:
+        rows = conn.execute(f"""
+            SELECT datum,den,trzba_vcpk,karty,hotovost,vydaje,trzba,
+                   pk50_ks,pk100_ks,pk_celkem,pizza_cela,pizza_ctvrt,
+                   burger,talire,burtgulas,smena
+            FROM reporty {where} ORDER BY datum
+        """, params).fetchall()
+
+    headers = ["datum","měsíc","den","TRŽBA vč. PK","karty","hotovost","výdaje","tržba",
+               "pk50 ks","pk100 ks","poukaz Kč","pizza celá","čtvrt","burger","talíře","buřtguláš","KDO"]
+
+    if fmt == "csv":
+        buf = io.StringIO()
+        w   = csv.writer(buf, delimiter=";")
+        w.writerow(headers)
+        for r in rows:
+            d = date.fromisoformat(r[0]) if r[0] else None
+            mesic = d.strftime("%B").upper() if d else ""
+            w.writerow([d.day if d else "", mesic, r[1], r[2], r[3], r[4], r[5], r[6],
+                        r[7], r[8], r[9], r[10], r[11], r[12], r[13], r[14], r[15]])
+        buf.seek(0)
+        return send_file(io.BytesIO(buf.getvalue().encode("utf-8-sig")),
+                         mimetype="text/csv", download_name="reporty.csv", as_attachment=True)
+    else:
+        wb_out = openpyxl.Workbook()
+        ws_out = wb_out.active; ws_out.title = str(date.today().year)
+        _xlsx_header(ws_out, headers)
+        mesice_cs = ["","LEDEN","ÚNOR","BŘEZEN","DUBEN","KVĚTEN","ČERVEN",
+                     "ČERVENEC","SRPEN","ZÁŘÍ","ŘÍJEN","LISTOPAD","PROSINEC"]
+        for r in rows:
+            d = date.fromisoformat(r[0]) if r[0] else None
+            mesic = mesice_cs[d.month] if d else ""
+            den_cislo = d.day if d else ""
+            ws_out.append([den_cislo, mesic, r[1], r[2], r[3], r[4], r[5], r[6],
+                           r[7], r[8], r[9], r[10], r[11], r[12], r[13], r[14], r[15]])
+        buf = io.BytesIO(); wb_out.save(buf); buf.seek(0)
+        return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                         download_name="reporty.xlsx", as_attachment=True)
+
 
 # ── API: nahrání souboru ──────────────────────────────────────────────────────
 @app.route("/api/nahrat-text", methods=["POST"])
@@ -1186,11 +1723,11 @@ def export_faktury():
         return send_file(io.BytesIO(buf.getvalue().encode("utf-8-sig")),
                          mimetype="text/csv", download_name="faktury.csv", as_attachment=True)
     else:
-        wb = openpyxl.Workbook()
-        ws = wb.active; ws.title = "Faktury"
-        _xlsx_header(ws, headers)
-        for r in rows: ws.append(list(r))
-        buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+        wb_out = openpyxl.Workbook()
+        ws_out = wb_out.active; ws_out.title = "Faktury"
+        _xlsx_header(ws_out, headers)
+        for r in rows: ws_out.append(list(r))
+        buf = io.BytesIO(); wb_out.save(buf); buf.seek(0)
         return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                          download_name="faktury.xlsx", as_attachment=True)
 
@@ -1232,11 +1769,11 @@ def export_polozky():
         return send_file(io.BytesIO(buf.getvalue().encode("utf-8-sig")),
                          mimetype="text/csv", download_name="polozky.csv", as_attachment=True)
     else:
-        wb = openpyxl.Workbook()
-        ws = wb.active; ws.title = "Položky"
-        _xlsx_header(ws, headers)
-        for r in rows: ws.append(list(r))
-        buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+        wb_out = openpyxl.Workbook()
+        ws_out = wb_out.active; ws_out.title = "Položky"
+        _xlsx_header(ws_out, headers)
+        for r in rows: ws_out.append(list(r))
+        buf = io.BytesIO(); wb_out.save(buf); buf.seek(0)
         return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                          download_name="polozky.xlsx", as_attachment=True)
 
@@ -1262,11 +1799,11 @@ def export_vyplaty():
         buf.seek(0)
         return send_file(io.BytesIO(buf.getvalue().encode("utf-8-sig")), mimetype="text/csv", download_name="vyplaty.csv", as_attachment=True)
     else:
-        wb = openpyxl.Workbook()
-        ws = wb.active; ws.title = "Výplaty"
-        _xlsx_header(ws, headers)
-        for r in rows: ws.append(list(r))
-        buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+        wb_out = openpyxl.Workbook()
+        ws_out = wb_out.active; ws_out.title = "Výplaty"
+        _xlsx_header(ws_out, headers)
+        for r in rows: ws_out.append(list(r))
+        buf = io.BytesIO(); wb_out.save(buf); buf.seek(0)
         return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", download_name="vyplaty.xlsx", as_attachment=True)
 
 def _xlsx_header(ws, headers):
@@ -1288,3 +1825,4 @@ if __name__ == "__main__":
     print("  Otevři prohlížeč na: http://localhost:5000")
     print("=" * 55)
     app.run(host="0.0.0.0", port=5000, debug=False)
+# placeholder - already complete
