@@ -297,13 +297,17 @@ def parse_makro_pdf(filepath):
                     u = m.group(1).strip()
                     if u and u.lower() not in ("praha", "pruhonice", "chudenicka", ""):
                         result["zpusob_uhrady"] = u
-            if "Celková" in line and "částka" in line:
-                nums = re.findall(r"[\d ]+,\d{2}", line)
-                if nums: result["celkem_s_dph"] = _parse_money(nums[-1])
-            # "Celková částka 2 172,08" formát
-            m_celk = re.search(r"Celkováčástka\s+([\d\s]+[,\.][\d]{2})", despace(line))
-            if m_celk and result["celkem_s_dph"] == 0:
-                result["celkem_s_dph"] = _parse_money(m_celk.group(1))
+
+            # ── OPRAVA: Hledání celkové částky ──────────────────────────────
+            # Hledáme řádek "Celková částka  2 172,08"
+            # Použijeme despace verzi a hledáme číslo ve formátu až 6 číslic,čárka,2 číslice
+            # (tím vyloučíme čísla zboží jako 639716,48 která jsou větší)
+            dl_line = despace(line)
+            if "Celkov" in dl_line and ("stka" in dl_line):
+                # Vezmi VŠECHNA čísla ve formátu 1-6 číslic + desetinná část
+                nums = re.findall(r"(\d{1,3}(?:\s\d{3})*[,\.]\d{2})", line)
+                if nums:
+                    result["celkem_s_dph"] = _parse_money(nums[-1])
 
         if result["celkem_s_dph"] == 0 and all_items:
             result["celkem_s_dph"] = round(sum(p["celkem_s_dph"] for p in all_items), 2)
@@ -508,11 +512,10 @@ def parse_makro_image(filepath):
             if not result["firma_zkratka"]:
                 m = re.search(r"IČ\s*:\s*(\d{8})", ls)
                 if m: result["firma_zkratka"] = _ico_na_firmu(m.group(1))
-            # Celková částka (s DPH)
-            m = re.search(r"Celkov[aá]\s+[čc][aá]stka\s+([\d\s]+[,.]\d{2})", ls, re.IGNORECASE)
+            # Celková částka (s DPH) - hledáme číslo max 6 číslic před desetinnou čárkou
+            m = re.search(r"Celkov[aá]\s+[čc][aá]stka\s+([\d\s]{1,10}[,.]\d{2})", ls, re.IGNORECASE)
             if m: result["celkem_s_dph"] = _parse_money(m.group(1))
             # "Strana celkem bez DPH X" -> přepočítej na s DPH (orientačně, pro kontrolu)
-            # "Strana celkem bez DPH" - různé OCR varianty
             m2 = re.search(r"[Ss]trana.{0,10}celkem.{0,10}bez.{0,5}DPH.{0,5}([\d\s]+[,.]\d{2})", ls, re.IGNORECASE)
             if m2 and not result.get("ocr_strana_celkem_bez_dph"):
                 result["ocr_strana_celkem_bez_dph"] = _parse_money(m2.group(1))
@@ -578,14 +581,10 @@ def _parse_ocr_items(lines):
             continue
 
         # Hledej řádek položky - musí začínat MM číslem (6-14 číslic)
-        # Tesseract občas přečte 9->S, 0->O, 1->|, přidá pomlčku před název
-        ls_clean = re.sub(r"^[Ss|lIG]+(?=\d)", "", ls)   # S/s/|/l/I/G na začátku před číslicí
-        ls_clean = re.sub(r"^[|l]\s+", "", ls_clean)      # | nebo l na začátku s mezerou
+        ls_clean = re.sub(r"^[Ss|lIG]+(?=\d)", "", ls)
+        ls_clean = re.sub(r"^[|l]\s+", "", ls_clean)
         m = re.match(r"^(\d{6,14})\s+[\*\-—–|]*\s*(.+)", ls_clean)
         if not m: continue
-
-        # Odstraň | z názvu (OCR artefakt)
-        # zpracujeme dále
 
         rest_after_mm = m.group(2).strip().lstrip("*").strip()
 
@@ -595,7 +594,6 @@ def _parse_ocr_items(lines):
         cisla_str = ""
 
         for jed in jednotky:
-            # Hledej jednotku obklopenou mezerami
             pat = r"^(.+?)\s+" + jed + r"\s+(.+)$"
             mj = re.match(pat, rest_after_mm, re.IGNORECASE)
             if mj:
@@ -605,7 +603,6 @@ def _parse_ocr_items(lines):
                 break
 
         if not jednotka:
-            # Zkus najít jednotku kdekoliv v řádku
             mj = re.search(r"\s(PC|KG|BG|KS|BX|CA|SW|BT)\s", rest_after_mm, re.IGNORECASE)
             if mj:
                 jednotka = mj.group(1).upper()
@@ -616,7 +613,6 @@ def _parse_ocr_items(lines):
             cisla_str = rest_after_mm
 
         # Extrahuj čísla - ignoruj kódy akcí (5+ číslic celé číslo)
-        # Oprav OCR záměnu: "4, 684" nebo "4 ,684" -> "4,684"
         cisla_str = re.sub(r"(\d+)[,\.](\s+)(\d+)", r"\1.\3", cisla_str)
         cisla_raw = re.findall(r"\d+[,.]\d+|\d+", cisla_str)
         cf = []
@@ -639,8 +635,7 @@ def _parse_ocr_items(lines):
                 break
         if idx_dph is None: idx_dph = len(cf)
 
-        # Detekce tisícového čísla: "1 258,07" → cf[idx_dph-2]=1, cf[idx_dph-1]=258.07
-        # Podmínka: předposledního >= 100 A ante-předposledního je celé číslo 1-9
+        # Detekce tisícového čísla
         if (idx_dph >= 2 and
                 cf[idx_dph-1] >= 100 and
                 cf[idx_dph-2] == int(cf[idx_dph-2]) and
@@ -891,7 +886,7 @@ def _parse_makro_text(text):
         if m and not result["datum_vystaveni"]: result["datum_vystaveni"] = _makro_date(m.group(1).replace(".", "-") if "." in m.group(1) else m.group(1))
         m = re.search(r"Datum\s+splatnosti\s*:\s*(\d{2}[-\.]\d{2}[-\.]\d{4})", ls, re.IGNORECASE)
         if m and not result["datum_splatnosti"]: result["datum_splatnosti"] = _makro_date(m.group(1).replace(".", "-") if "." in m.group(1) else m.group(1))
-        m = re.search(r"Celková\s+částka\s+([\d\s]+[,\.]\d{2})", ls, re.IGNORECASE)
+        m = re.search(r"Celková\s+částka\s+([\d\s]{1,10}[,\.]\d{2})", ls, re.IGNORECASE)
         if m: result["celkem_s_dph"] = _parse_money(m.group(1))
 
         # Sleva
@@ -1046,15 +1041,12 @@ def api_faktura_ulozit():
 
 def _get_or_create_zbozi(conn, nazev):
     """Vrátí zbozi_id pro daný název (přes alias nebo canonical). Vytvoří nové pokud neexistuje."""
-    # Zkus alias
     row = conn.execute("SELECT zbozi_id FROM zbozi_aliasy WHERE alias=?", (nazev,)).fetchone()
     if row:
         return row[0]
-    # Zkus canonical
     row = conn.execute("SELECT id FROM zbozi WHERE nazev_canonical=?", (nazev,)).fetchone()
     if row:
         return row[0]
-    # Vytvoř nové
     cur = conn.execute("INSERT INTO zbozi (nazev_canonical) VALUES (?)", (nazev,))
     return cur.lastrowid
 
@@ -1128,16 +1120,13 @@ def api_zbozi_alias():
         return jsonify({"error": "Chybí zbozi_id nebo alias"}), 400
 
     with get_db() as conn:
-        # Přidej alias
         try:
             conn.execute("INSERT INTO zbozi_aliasy (zbozi_id, alias) VALUES (?,?)", (zbozi_id, alias_text))
         except sqlite3.IntegrityError:
             conn.execute("UPDATE zbozi_aliasy SET zbozi_id=? WHERE alias=?", (zbozi_id, alias_text))
 
-        # Přepiš zbozi_id na všech položkách s tímto názvem
         conn.execute("UPDATE polozky SET zbozi_id=? WHERE nazev=?", (zbozi_id, alias_text))
 
-        # Pokud máme konkrétní polozka_id
         if polozka_id:
             conn.execute("UPDATE polozky SET zbozi_id=? WHERE id=?", (zbozi_id, polozka_id))
 
@@ -1167,7 +1156,6 @@ def api_statistiky():
     f_params = (firma,) if firma else ()
 
     with get_db() as conn:
-        # Výdaje po měsících
         mesice = conn.execute(f"""
             SELECT strftime('%Y-%m', datum_vystaveni) m, ROUND(SUM(celkem_s_dph),2) castka
             FROM faktury
@@ -1175,7 +1163,6 @@ def api_statistiky():
             GROUP BY m ORDER BY m
         """, (od, do_) + f_params).fetchall()
 
-        # Top dodavatelé
         dodavatele = conn.execute(f"""
             SELECT dodavatel, ROUND(SUM(celkem_s_dph),2) castka, COUNT(*) pocet
             FROM faktury
@@ -1183,7 +1170,6 @@ def api_statistiky():
             GROUP BY dodavatel ORDER BY castka DESC LIMIT 10
         """, (od, do_) + f_params).fetchall()
 
-        # Top zboží
         zbozi_top = conn.execute(f"""
             SELECT COALESCE(z.nazev_canonical, p.nazev) zbozi, ROUND(SUM(p.celkem_s_dph),2) castka,
                    ROUND(SUM(p.mnozstvi),2) mnozstvi, p.jednotka
@@ -1194,7 +1180,6 @@ def api_statistiky():
             GROUP BY COALESCE(z.id, p.nazev) ORDER BY castka DESC LIMIT 20
         """, (od, do_) + f_params).fetchall()
 
-        # Vývoj ceny vybraného zboží
         zbozi_id = request.args.get("zbozi_id")
         cena_vyvoj = []
         if zbozi_id:
