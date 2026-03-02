@@ -676,34 +676,57 @@ def parse_report_image_claude(filepath):
 
         client = anthropic.Anthropic(api_key=api_key)
 
-        prompt = """Přečti tento ručně psaný denní report z restaurace a extrahuj VŠECHNA čísla a údaje.
-Odpověz POUZE platným JSON objektem, žádný jiný text.
+        today = date.today().strftime("%-d.%-m")
+        prompt = f"""Jsi expert na čtení ručně psaných restauračních reportů. Přečti tento denní report VELMI PEČLIVĚ.
+Odpověz POUZE platným JSON objektem, žádný jiný text, žádné backticky.
 
 Formát odpovědi:
-{
-  "datum": "DD.M" nebo "D.M" nebo null,
+{{
+  "datum": "D.M" nebo null,
   "den": "název dne česky" nebo null,
   "smena": "jména oddělená čárkou" nebo null,
   "karty": číslo nebo 0,
   "kov": číslo nebo 0,
   "papir": číslo nebo 0,
   "vydaje": číslo nebo 0,
-  "trzba": číslo nebo 0,
-  "pk50_ks": počet kusů PK50 nebo 0,
-  "pk100_ks": počet kusů PK100 nebo 0,
-  "pizza_cela": číslo nebo 0,
-  "pizza_ctvrt": číslo nebo 0,
-  "burger": číslo nebo 0,
-  "talire": číslo nebo 0,
-  "burtgulas": číslo nebo 0
-}
+  "pk50_ks": celé číslo nebo 0,
+  "pk100_ks": celé číslo nebo 0,
+  "pizza_cela": celé číslo nebo 0,
+  "pizza_ctvrt": celé číslo nebo 0,
+  "burger": celé číslo nebo 0,
+  "talire": celé číslo nebo 0,
+  "burtgulas": celé číslo nebo 0
+}}
 
-Pravidla:
-- Čísla bez mezer a čárek (např. 7599 ne 7.599)
-- PK: hledej formát jako "1x100" = pk100_ks:1, "2x50" = pk50_ks:2, "1×100=1100" atd.
-- Vydaje = součet všech výdajů na lístku
-- Pokud pole není vidět nebo je prázdné, použij 0
-- datum: pouze den a měsíc jako string např "19/2" nebo "19.2"
+PRAVIDLA PRO ČÍSLA:
+- Tečka nebo čárka uvnitř čísla = ODDĚLOVAČ TISÍCŮ (6.696 = 6696, 5.100 = 5100, 12.327 = 12327)
+- NIKDY neinterpretuj tečku jako desetinnou čárku u celých částek v Kč
+- Čísla zapisuj jako celá čísla bez teček a čárek
+
+PRAVIDLA PRO JMÉNA (normalizuj vždy na kanonický tvar):
+- Ráďa, Rada, Radek → "Radek"
+- Věrka, Verka, Věra, Verca → "Věrka"  
+- Renča, Renata, Renca → "Renča"
+- Vendy, Wendy → "Vendy"
+- Vali → "Vali"
+- IGNORUJ jména která nepatří do seznamu výše (překlepy, nečitelná jména)
+
+PRAVIDLA PRO DATUM:
+- Hledej datum ve formátu "D.M" nebo "D.M." nebo "D/M" nahoře na lístku
+- Pokud datum není čitelné nebo chybí, vrať dnešní datum: "{today}"
+
+PRAVIDLA PRO VÝDAJE:
+- Vydaje = součet VŠECH výdajů na lístku
+- Příklad: "Rada odvod 509" nebo "odvod 509,-" = vydaje: 509
+
+PRAVIDLA PRO PK (poukázky):
+- "5x100" nebo "5×100" = pk100_ks: 5
+- "2x50" nebo "2×50" = pk50_ks: 2
+- "1×100=100" = pk100_ks: 1
+
+PRAVIDLA PRO JÍDLO:
+- Počítej přesně číslo za "x" nebo "ks" nebo číslici před položkou
+- Pizza čtvrt = ČTVRT nebo 1/4
 """
 
         message = client.messages.create(
@@ -712,7 +735,14 @@ Pravidla:
             messages=[{
                 "role": "user",
                 "content": [
-                    {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": img_data}},
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": img_data
+                        }
+                    },
                     {"type": "text", "text": prompt}
                 ]
             }]
