@@ -26,7 +26,6 @@ except ImportError:
 try:
     import pytesseract
     from PIL import Image
-    # Nastav cestu k Tesseract pro Windows
     import os as _os
     _tess_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
     if _os.path.exists(_tess_path):
@@ -48,11 +47,10 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
 
-# ── Výchozí konfigurace ───────────────────────────────────────────────────────
 DEFAULT_CONFIG = {
     "firmy": ["FP", "MR", "CFF"],
     "app_nazev": "Správa faktur",
-    "ico_map": {}   # IČO -> zkratka firmy, např. {"19436521": "FP"}
+    "ico_map": {}
 }
 
 def load_config():
@@ -74,7 +72,6 @@ def get_db():
     return conn
 
 def init_db():
-    """Vytvoří databázové tabulky pokud neexistují."""
     with get_db() as conn:
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS faktury (
@@ -85,10 +82,10 @@ def init_db():
             datum_vystaveni TEXT,
             datum_splatnosti TEXT,
             zpusob_uhrady   TEXT,
-            stav            TEXT    DEFAULT 'ceka',   -- ceka / zaplaceno / po_splatnosti
+            stav            TEXT    DEFAULT 'ceka',
             celkem_s_dph    REAL    DEFAULT 0,
             soubor_cesta    TEXT,
-            zdroj           TEXT    DEFAULT 'rucni',  -- makro / rucni
+            zdroj           TEXT    DEFAULT 'rucni',
             created_at      TEXT    DEFAULT (datetime('now','localtime'))
         );
 
@@ -114,6 +111,16 @@ def init_db():
             zbozi_id  INTEGER NOT NULL REFERENCES zbozi(id) ON DELETE CASCADE,
             alias     TEXT    NOT NULL UNIQUE
         );
+
+        CREATE TABLE IF NOT EXISTS vyplaty (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            jmeno       TEXT    NOT NULL,
+            datum       TEXT    NOT NULL,
+            castka      REAL    NOT NULL DEFAULT 0,
+            poznamka    TEXT,
+            firma_zkratka TEXT  DEFAULT '',
+            created_at  TEXT    DEFAULT (datetime('now','localtime'))
+        );
         """)
     print("✓ Databáze inicializována")
 
@@ -122,7 +129,6 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
 
 def update_stav_po_splatnosti():
-    """Automaticky přepne faktury 'ceka' na 'po_splatnosti' pokud datum splatnosti uplynul."""
     today = date.today().isoformat()
     with get_db() as conn:
         conn.execute("""
@@ -133,18 +139,12 @@ def update_stav_po_splatnosti():
         """, (today,))
 
 def recalc_faktura_total(conn, faktura_id):
-    """Přepočítá celkovou sumu faktury z položek."""
     row = conn.execute("SELECT SUM(celkem_s_dph) FROM polozky WHERE faktura_id=?", (faktura_id,)).fetchone()
     total = row[0] or 0
     conn.execute("UPDATE faktury SET celkem_s_dph=? WHERE id=?", (total, faktura_id))
 
 # ── MAKRO parser ───────────────────────────────────────────────────────────────
 def parse_makro_pdf(filepath):
-    """
-    Extrahuje data z PDF faktury MAKRO pomocí pdfplumber.
-    Faktury MAKRO mají 'spaced' text (mezery mezi každým znakem).
-    Parser používá x/y souřadnice slov pro správné oddělení sloupců a čísel.
-    """
     if not PDF_SUPPORT:
         return None, "pdfplumber není nainstalován"
 
@@ -166,7 +166,6 @@ def parse_makro_pdf(filepath):
         full_text_lines = []
 
         with pdfplumber.open(filepath) as pdf:
-            # Zkontroluj první stránku - odmítni "Súpis tovaru" (interní doklad MAKRO)
             first_text = pdf.pages[0].extract_text() or ""
             first_despaced = _re.sub(r"(?<=\S) (?=\S)", "", first_text)
             if "Súpistovaru" in first_despaced and "FAKTURA" not in first_despaced:
@@ -176,7 +175,6 @@ def parse_makro_pdf(filepath):
                 full_text_lines += (page.extract_text() or "").splitlines()
                 words = page.extract_words(x_tolerance=1, y_tolerance=2)
 
-                # Seskup slova do řádků
                 rows = defaultdict(list)
                 for w in words:
                     y = round(w["top"] / 2) * 2
@@ -185,34 +183,37 @@ def parse_makro_pdf(filepath):
                 for y, ws in sorted(rows.items()):
                     ws = sorted(ws, key=lambda w: w["x0"])
 
-                    # MM číslo: jednoznakové číslice v oblasti x < 95
                     left_digits = "".join(
                         w["text"] for w in ws
                         if w["x0"] < 95 and len(w["text"]) == 1 and w["text"].isdigit()
                     )
 
-                    # Jednotka: spaced znaky v oblasti x 238–265
                     unit_chars = "".join(
                         w["text"] for w in ws
                         if 238 <= w["x0"] <= 265 and len(w["text"]) == 1
-                        and w["text"].upper() in "PCGKBSL"
+                        and w["text"].upper() in "PCGKBSLX"
                     ).upper()
                     if   unit_chars.startswith("PC"): jed = "PC"
                     elif unit_chars.startswith("KG"): jed = "KG"
                     elif unit_chars.startswith("BG"): jed = "BG"
+                    elif unit_chars.startswith("BX"): jed = "BX"
                     elif unit_chars.startswith("KS"): jed = "KS"
+                    elif unit_chars.startswith("CA"): jed = "CA"
+                    elif unit_chars.startswith("SW"): jed = "SW"
                     elif unit_chars.startswith("L"):  jed = "L"
                     else:                              jed = ""
 
-                    # Sleva
                     all_text_j = "".join(w["text"] for w in ws).lower()
                     is_sleva = "urcenopro" in all_text_j or "kupvice" in all_text_j or "kupvíce" in all_text_j
                     if is_sleva and all_items:
                         right_text = "".join(w["text"] for w in sorted(
                             [w for w in ws if w["x0"] > 265], key=lambda w: w["x0"]
                         ))
+                        # Hledej záporná čísla (sleva je záporná)
                         neg = re.findall(r"-?(\d+,\d{2})", right_text)
                         if neg:
+                            sleva = _parse_money(neg[0])  # první záporné číslo = sleva bez DPH, ale použij poslední = s DPH
+                            # Vezmi poslední číslo jako sleva s DPH
                             sleva = _parse_money(neg[-1])
                             all_items[-1]["celkem_s_dph"] = round(max(0, all_items[-1]["celkem_s_dph"] - sleva), 2)
                             mn = all_items[-1]["mnozstvi"]
@@ -223,18 +224,15 @@ def parse_makro_pdf(filepath):
                     if len(left_digits) < 6 or not jed:
                         continue
 
-                    # Název: spaced znaky x 90–237, mezera mezi slovy = gap ~3.6px
                     nazev_ws = [w for w in ws if 90 <= w["x0"] <= 237]
                     nazev = _rekonstruuj_nazev(nazev_ws)
 
-                    # Číselné hodnoty z pravé části x > 265
                     right_ws = sorted([w for w in ws if w["x0"] > 265], key=lambda w: w["x0"])
                     cf = _makro_reconstruct_numbers(right_ws)
 
                     if len(cf) < 2:
                         continue
 
-                    # DPH sazba = poslední celé číslo <= 25
                     if cf and cf[-1] == int(cf[-1]) and cf[-1] <= 25:
                         idx_dph = len(cf) - 1
                     else:
@@ -262,7 +260,6 @@ def parse_makro_pdf(filepath):
 
         result["polozky"] = all_items
 
-        # Parsování hlavičky
         def despace(s):
             return re.sub(r"(?<=\S) (?=\S)", "", s)
 
@@ -270,18 +267,14 @@ def parse_makro_pdf(filepath):
         for line in full_text_lines:
             dl = despace(line)
             if not result["cislo_faktury"]:
-                # Typ B: "Faktura č. / VS : 0415000258"
                 m = re.search(r"Faktura.*?VS.*?:?\s*(\d{7,12})", dl, re.IGNORECASE)
                 if m: result["cislo_faktury"] = m.group(1)
             if not result["cislo_faktury"]:
-                # Typ A: "Súpis tovaru 0418907791" - hotovostní nákup bez VS
                 m = re.search(r"Súpistovaru\s*(\d{7,12})", dl, re.IGNORECASE)
                 if m: result["cislo_faktury"] = m.group(1)
             if not result["cislo_faktury"]:
-                # Technické ID jako záloha: (189-020343 7/0/0189/007791)
                 m = re.search(r"TechnickéID.*?/(\d{7,12})\)", dl, re.IGNORECASE)
                 if m: result["cislo_faktury"] = m.group(1)
-            # IČO odběratele
             if not ico_odberatele:
                 m = re.search(r"IČ\s*:\s*(\d{8})", dl)
                 if m: ico_odberatele = m.group(1)
@@ -298,13 +291,9 @@ def parse_makro_pdf(filepath):
                     if u and u.lower() not in ("praha", "pruhonice", "chudenicka", ""):
                         result["zpusob_uhrady"] = u
 
-            # ── OPRAVA: Hledání celkové částky ──────────────────────────────
-            # Hledáme řádek "Celková částka  2 172,08"
-            # Použijeme despace verzi a hledáme číslo ve formátu až 6 číslic,čárka,2 číslice
-            # (tím vyloučíme čísla zboží jako 639716,48 která jsou větší)
+            # Hledání celkové částky - pouze čísla do 6 číslic před desetinnou čárkou
             dl_line = despace(line)
-            if "Celkov" in dl_line and ("stka" in dl_line):
-                # Vezmi VŠECHNA čísla ve formátu 1-6 číslic + desetinná část
+            if "Celkov" in dl_line and "stka" in dl_line:
                 nums = re.findall(r"(\d{1,3}(?:\s\d{3})*[,\.]\d{2})", line)
                 if nums:
                     result["celkem_s_dph"] = _parse_money(nums[-1])
@@ -312,15 +301,11 @@ def parse_makro_pdf(filepath):
         if result["celkem_s_dph"] == 0 and all_items:
             result["celkem_s_dph"] = round(sum(p["celkem_s_dph"] for p in all_items), 2)
 
-        # MAKRO faktury jsou vždy placeny hotovostí na místě
         result["zpusob_uhrady"] = "Hotovost"
         result["stav"] = "zaplaceno"
-
-        # Auto-rozpoznání firmy podle IČO odběratele
         result["ico_odberatele"] = ico_odberatele
         result["firma_zkratka"] = _ico_na_firmu(ico_odberatele)
 
-        # Přidej mezery do názvů položek
         for p in result["polozky"]:
             p["nazev"] = _format_nazev(p["nazev"])
 
@@ -331,7 +316,6 @@ def parse_makro_pdf(filepath):
 
 
 def _makro_reconstruct_numbers(ws_sorted):
-    """Ze spaced znaků rekonstruuje čísla. Skupiny oddělené mezerou > 8px jsou různá čísla."""
     if not ws_sorted:
         return []
     groups = []
@@ -347,10 +331,8 @@ def _makro_reconstruct_numbers(ws_sorted):
     numbers = []
     for g in groups:
         token = "".join(w["text"] for w in g).replace(",", ".")
-        # Přeskoč kódy akcí (5+ číslic bez desetinné tečky, např. 38392, 90224, 62892)
         if re.match(r"^\d{5,}$", token):
             continue
-        # Přeskoč písmena (P, X, S) a kombinace jako "PX"
         if re.match(r"^[A-Za-z]+$", token):
             continue
         try:
@@ -361,30 +343,24 @@ def _makro_reconstruct_numbers(ws_sorted):
 
 
 def _rekonstruuj_nazev(nazev_ws):
-    """
-    Rekonstruuje název z jednotlivých znaků pomocí x-souřadnic.
-    Mezera mezi slovy v MAKRO PDF = gap ~3.6px mezi koncem znaku a začátkem dalšího.
-    """
     if not nazev_ws:
         return ""
     result = ""
     for i, w in enumerate(nazev_ws):
         if i > 0:
             gap = w["x0"] - nazev_ws[i-1]["x1"]
-            if gap > 2.5:   # mezera mezi slovy
+            if gap > 2.5:
                 result += " "
         result += w["text"]
     return result.lstrip("*").strip()
 
 
 def _format_nazev(nazev):
-    """Fallback pro text parsovaný bez souřadnic (Ctrl+V text)."""
     result = re.sub(r"  +", " ", nazev).strip()
     return result
 
 
 def _ico_na_firmu(ico):
-    """Vrátí zkratku firmy podle IČO odběratele. Doplň IČO svých firem v config.json."""
     try:
         import json, os
         cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
@@ -397,7 +373,6 @@ def _ico_na_firmu(ico):
 
 
 def _makro_date(s):
-    """Převede DD-MM-YYYY → YYYY-MM-DD."""
     s = s.replace("-", ".")
     try:
         return datetime.strptime(s, "%d.%m.%Y").strftime("%Y-%m-%d")
@@ -406,22 +381,17 @@ def _makro_date(s):
 
 
 def _parse_makro_items(lines):
-    """Záložní funkce – parse_makro_pdf nyní používá word extraction."""
     return []
 
 
-
 def _ocr_best_orientation(img):
-    """Zkusí 4 rotace a vrátí text s nejvíce rozpoznanými slovy (nejvyšší důvěryhodnost)."""
     best_text = ""
     best_score = 0
     for angle in [0, 90, 180, 270]:
         rotated = img.rotate(angle, expand=True) if angle else img
         for lang in ["ces+eng", "ces", "eng"]:
             try:
-                text = pytesseract.image_to_string(rotated, lang=lang,
-                    config="--psm 6 --oem 3")
-                # Skóre = počet výskytů klíčových MAKRO slov
+                text = pytesseract.image_to_string(rotated, lang=lang, config="--psm 6 --oem 3")
                 score = sum(text.count(kw) for kw in [
                     "MAKRO", "Faktura", "Datum", "DPH", "Kč", "PC", "KG", "BG",
                     "splatnosti", "vystavení", "Food Plus", "Odběratel"
@@ -436,16 +406,12 @@ def _ocr_best_orientation(img):
 
 
 def parse_makro_image(filepath):
-    """OCR obrázku faktury / účtenky pomocí Tesseract s automatickou rotací."""
     if not OCR_SUPPORT:
         return None, "pytesseract/Pillow není nainstalován"
     try:
         img = Image.open(filepath)
-
-        # Preprocessing: převed na šedotón a zvětši pro lepší OCR
         img = img.convert("L")
         w, h = img.size
-        # Pokud je obrázek na šířku (fotka otočená), zkus automatickou rotaci
         needs_rotation_check = (w > h * 1.2) or (h > w * 1.2)
         if w < 1200:
             scale = 1200 / w
@@ -456,19 +422,12 @@ def parse_makro_image(filepath):
         else:
             for lang in ["ces+eng", "ces", "eng"]:
                 try:
-                    text = pytesseract.image_to_string(img, lang=lang,
-                        config="--psm 6 --oem 3")
+                    text = pytesseract.image_to_string(img, lang=lang, config="--psm 6 --oem 3")
                     break
                 except Exception:
                     continue
 
         lines = text.splitlines()
-        # DEBUG: vypiš OCR text do konzole
-        print("="*60)
-        print("OCR TEXT:")
-        for l in lines:
-            if l.strip(): print(repr(l))
-        print("="*60)
         result = {
             "cislo_faktury":   "",
             "datum_vystaveni": "",
@@ -481,12 +440,9 @@ def parse_makro_image(filepath):
             "polozky":         []
         }
 
-        # Parsuj hlavičku z OCR textu
         for line in lines:
             ls = line.strip()
             if not result["cislo_faktury"]:
-                # Normalizuj OCR text: odstraň mezery v číslici VS
-                # Tesseract čte ":" jako ";" nebo vynechá
                 m = re.search(r"Faktura.*?[Vv][Ss]\s*[;:,.]?\s*([\d\s]{7,15})", ls, re.IGNORECASE)
                 if m:
                     vs = re.sub(r"\s+", "", m.group(1))[:12]
@@ -494,7 +450,6 @@ def parse_makro_image(filepath):
             m = re.search(r"(\d{2})[.\-](\d{2})[.\-](\d{4})", ls)
             if m:
                 den, mes, rok = m.group(1), m.group(2), m.group(3)
-                # Oprav typické OCR záměny v měsíci (8→0, musí být 01-12)
                 if int(mes) > 12:
                     mes = mes.replace("8", "0")
                 try:
@@ -508,32 +463,23 @@ def parse_makro_image(filepath):
             if not result["zpusob_uhrady"] or result["zpusob_uhrady"] == "Hotovost":
                 if "Platba kartou" in ls or "platba kartou" in ls:
                     result["zpusob_uhrady"] = "Platba kartou"
-            # IČO odběratele pro auto-firmu
             if not result["firma_zkratka"]:
                 m = re.search(r"IČ\s*:\s*(\d{8})", ls)
                 if m: result["firma_zkratka"] = _ico_na_firmu(m.group(1))
-            # Celková částka (s DPH) - hledáme číslo max 6 číslic před desetinnou čárkou
             m = re.search(r"Celkov[aá]\s+[čc][aá]stka\s+([\d\s]{1,10}[,.]\d{2})", ls, re.IGNORECASE)
             if m: result["celkem_s_dph"] = _parse_money(m.group(1))
-            # "Strana celkem bez DPH X" -> přepočítej na s DPH (orientačně, pro kontrolu)
             m2 = re.search(r"[Ss]trana.{0,10}celkem.{0,10}bez.{0,5}DPH.{0,5}([\d\s]+[,.]\d{2})", ls, re.IGNORECASE)
             if m2 and not result.get("ocr_strana_celkem_bez_dph"):
                 result["ocr_strana_celkem_bez_dph"] = _parse_money(m2.group(1))
-            # Alternativa: "celkem bez DPH X" na konci řádku
             m3 = re.search(r"celkem\s+bez\s+DPH\s+([\d\s]+[,.]\d{2})", ls, re.IGNORECASE)
             if m3 and not result.get("ocr_strana_celkem_bez_dph"):
                 result["ocr_strana_celkem_bez_dph"] = _parse_money(m3.group(1))
 
-        # Parsuj položky z OCR textu
         result["polozky"] = _parse_ocr_items(lines)
-
-        # Spočítej součet položek
         suma_polozek = round(sum(p["celkem_s_dph"] for p in result["polozky"]), 2)
-
         if result["celkem_s_dph"] == 0:
             result["celkem_s_dph"] = suma_polozek
 
-        # Vždy přidej ocr_kontrola pro zobrazení stavu v UI
         ocr_bez = result.get("ocr_strana_celkem_bez_dph", 0)
         podezrele = [i for i, p in enumerate(result["polozky"])
                      if p["celkem_s_dph"] == 0 or p["mnozstvi"] > 500]
@@ -550,16 +496,10 @@ def parse_makro_image(filepath):
 
 
 def _parse_ocr_items(lines):
-    """
-    Parsuje položky z OCR textu MAKRO faktury (z fotky).
-    Formát řádku: MM_číslo NÁZEV JEDNOTKA cena_j počet_bal celkem_bal počet_MU celkem_bez celkem_s_DPH DPH
-    """
     items = []
     sleva_kw = ["urceno pro konecnou", "určeno pro konečnou", "kup vice", "kup více"]
-    # Rozšíř sadu jednotek o typické OCR záměny
     jednotky = {"PC", "KG", "BG", "KS", "BX", "CA", "SW", "BT",
                 "B6", "86", "PG", "6G", "BQ", "BC", "2B", "CA"}
-    # Mapa OCR záměn -> správná jednotka
     jednotka_map = {"B6": "BG", "86": "BG", "PG": "PC", "6G": "BG",
                     "BQ": "BG", "BC": "BX", "2B": "BG"}
 
@@ -568,10 +508,8 @@ def _parse_ocr_items(lines):
         if not ls: continue
         ll = ls.lower()
 
-        # Sleva - řádek bez MM čísla, obsahuje záporné číslo
         is_sleva = any(kw in ll for kw in sleva_kw)
         if is_sleva and items:
-            # Najdi zápornou hodnotu celkem s DPH (předposlední nebo poslední číslo)
             nums = re.findall(r"-\s*(\d[\d\s]*[,.]\d{2})", ls)
             if nums:
                 sleva = _parse_money(nums[-1])
@@ -580,7 +518,6 @@ def _parse_ocr_items(lines):
                 if mn: items[-1]["cena_za_jednotku_s_dph"] = round(items[-1]["celkem_s_dph"] / mn, 4)
             continue
 
-        # Hledej řádek položky - musí začínat MM číslem (6-14 číslic)
         ls_clean = re.sub(r"^[Ss|lIG]+(?=\d)", "", ls)
         ls_clean = re.sub(r"^[|l]\s+", "", ls_clean)
         m = re.match(r"^(\d{6,14})\s+[\*\-—–|]*\s*(.+)", ls_clean)
@@ -588,7 +525,6 @@ def _parse_ocr_items(lines):
 
         rest_after_mm = m.group(2).strip().lstrip("*").strip()
 
-        # Najdi jednotku (PC/KG/BG atd.) - je za názvem
         jednotka = ""
         nazev = rest_after_mm
         cisla_str = ""
@@ -612,7 +548,6 @@ def _parse_ocr_items(lines):
         if not cisla_str:
             cisla_str = rest_after_mm
 
-        # Extrahuj čísla - ignoruj kódy akcí (5+ číslic celé číslo)
         cisla_str = re.sub(r"(\d+)[,\.](\s+)(\d+)", r"\1.\3", cisla_str)
         cisla_raw = re.findall(r"\d+[,.]\d+|\d+", cisla_str)
         cf = []
@@ -620,14 +555,13 @@ def _parse_ocr_items(lines):
             try:
                 val = float(c.replace(",", "."))
                 if val == int(val) and val >= 10000:
-                    continue  # kód akce
+                    continue
                 cf.append(val)
             except:
                 pass
 
         if len(cf) < 2: continue
 
-        # Najdi DPH sazbu (6, 10, 15, 23) od konce
         idx_dph = None
         for i in range(len(cf)-1, -1, -1):
             if cf[i] in (6.0, 10.0, 15.0, 23.0):
@@ -635,7 +569,6 @@ def _parse_ocr_items(lines):
                 break
         if idx_dph is None: idx_dph = len(cf)
 
-        # Detekce tisícového čísla
         if (idx_dph >= 2 and
                 cf[idx_dph-1] >= 100 and
                 cf[idx_dph-2] == int(cf[idx_dph-2]) and
@@ -663,14 +596,12 @@ def _parse_ocr_items(lines):
 
 
 def _cz_date(s):
-    """Převede DD.MM.YYYY → YYYY-MM-DD pro uložení do DB."""
     try:
         return datetime.strptime(s, "%d.%m.%Y").strftime("%Y-%m-%d")
     except Exception:
         return s
 
 def _parse_money(s):
-    """Převede '1 234,56' nebo '1234.56' → float."""
     s = str(s).replace(" ", "").replace(".", "").replace(",", ".")
     try:
         return float(s)
@@ -678,7 +609,7 @@ def _parse_money(s):
         return 0.0
 
 def _map_unit(u):
-    mapping = {"PC": "ks", "KS": "ks", "KG": "kg", "BG": "bal", "L": "l", "BG": "bal"}
+    mapping = {"PC": "ks", "KS": "ks", "KG": "kg", "BG": "bal", "BX": "bal", "CA": "bal", "SW": "bal", "L": "l"}
     return mapping.get(u.upper(), u.lower())
 
 
@@ -691,7 +622,6 @@ def index():
     update_stav_po_splatnosti()
     return render_template("index.html", config=load_config())
 
-# ── API: konfigurace ──────────────────────────────────────────────────────────
 @app.route("/api/config", methods=["GET", "POST"])
 def api_config():
     if request.method == "GET":
@@ -707,13 +637,11 @@ def api_config():
     save_config(cfg)
     return jsonify({"ok": True})
 
-# ── API: dashboard ────────────────────────────────────────────────────────────
 @app.route("/api/dashboard")
 def api_dashboard():
     update_stav_po_splatnosti()
     firma = request.args.get("firma", "")
     with get_db() as conn:
-        # Tento měsíc
         mesic = date.today().strftime("%Y-%m")
         where_firma = "AND firma_zkratka=?" if firma else ""
         params_base = (firma,) if firma else ()
@@ -725,14 +653,12 @@ def api_dashboard():
         """, (mesic + "%",) + params_base).fetchone()
         pocet_mesic, vydaje_mesic = row[0], row[1]
 
-        # Po splatnosti
         row2 = conn.execute(f"""
             SELECT COUNT(*), COALESCE(SUM(celkem_s_dph),0)
             FROM faktury WHERE stav='po_splatnosti' {where_firma}
         """, params_base).fetchone()
         pocet_po_spl, castka_po_spl = row2[0], row2[1]
 
-        # Graf – posledních 12 měsíců
         graf = conn.execute(f"""
             SELECT strftime('%Y-%m', datum_vystaveni) as m, COALESCE(SUM(celkem_s_dph),0)
             FROM faktury
@@ -740,7 +666,6 @@ def api_dashboard():
             GROUP BY m ORDER BY m
         """, params_base).fetchall()
 
-        # Poslední faktury
         posledni = conn.execute(f"""
             SELECT id, dodavatel, cislo_faktury, firma_zkratka, datum_vystaveni,
                    datum_splatnosti, celkem_s_dph, stav
@@ -757,7 +682,6 @@ def api_dashboard():
         "posledni_faktury": [dict(r) for r in posledni]
     })
 
-# ── API: faktury ──────────────────────────────────────────────────────────────
 @app.route("/api/faktury")
 def api_faktury():
     firma   = request.args.get("firma", "")
@@ -844,20 +768,72 @@ def api_faktura_update(fid):
         conn.execute(f"UPDATE faktury SET {','.join(set_parts)} WHERE id=?", vals)
     return jsonify({"ok": True})
 
-# ── API: nahrání souboru (MAKRO) ─────────────────────────────────────────────
+# ── API: výplaty ──────────────────────────────────────────────────────────────
+@app.route("/api/vyplaty", methods=["GET"])
+def api_vyplaty():
+    firma = request.args.get("firma", "")
+    od    = request.args.get("od", "")
+    do_   = request.args.get("do", "")
+    clauses, params = [], []
+    if firma: clauses.append("firma_zkratka=?"); params.append(firma)
+    if od:    clauses.append("datum>=?"); params.append(od)
+    if do_:   clauses.append("datum<=?"); params.append(do_)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    with get_db() as conn:
+        rows = conn.execute(f"""
+            SELECT * FROM vyplaty {where} ORDER BY datum DESC, created_at DESC
+        """, params).fetchall()
+        total = conn.execute(f"SELECT COALESCE(SUM(castka),0) FROM vyplaty {where}", params).fetchone()[0]
+    return jsonify({"vyplaty": [dict(r) for r in rows], "celkem": round(total, 2)})
+
+@app.route("/api/vyplaty", methods=["POST"])
+def api_vyplata_ulozit():
+    data = request.json
+    if not data.get("jmeno") or not data.get("datum") or not data.get("castka"):
+        return jsonify({"error": "Chybí povinná pole"}), 400
+    with get_db() as conn:
+        cur = conn.execute("""
+            INSERT INTO vyplaty (jmeno, datum, castka, poznamka, firma_zkratka)
+            VALUES (?,?,?,?,?)
+        """, (
+            data["jmeno"],
+            data["datum"],
+            float(data["castka"]),
+            data.get("poznamka", ""),
+            data.get("firma_zkratka", "")
+        ))
+    return jsonify({"ok": True, "id": cur.lastrowid})
+
+@app.route("/api/vyplaty/<int:vid>", methods=["DELETE"])
+def api_vyplata_delete(vid):
+    with get_db() as conn:
+        conn.execute("DELETE FROM vyplaty WHERE id=?", (vid,))
+    return jsonify({"ok": True})
+
+@app.route("/api/vyplaty/<int:vid>", methods=["PUT"])
+def api_vyplata_update(vid):
+    data = request.json
+    fields = ["jmeno", "datum", "castka", "poznamka", "firma_zkratka"]
+    set_parts = [f"{f}=?" for f in fields if f in data]
+    vals = [data[f] for f in fields if f in data]
+    if not set_parts:
+        return jsonify({"ok": True})
+    vals.append(vid)
+    with get_db() as conn:
+        conn.execute(f"UPDATE vyplaty SET {','.join(set_parts)} WHERE id=?", vals)
+    return jsonify({"ok": True})
+
+# ── API: nahrání souboru ──────────────────────────────────────────────────────
 @app.route("/api/nahrat-text", methods=["POST"])
 def api_nahrat_text():
-    """Parsuje text vložený přes Ctrl+V – hledá strukturu MAKRO faktury."""
     text = request.json.get("text", "")
     if not text.strip():
         return jsonify({"error": "Prázdný text"}), 400
-
     data = _parse_makro_text(text)
     return jsonify(data)
 
 
 def _parse_makro_text(text):
-    """Parsuje text faktury MAKRO vložený přes schránku."""
     lines = text.splitlines()
     result = {
         "cislo_faktury":   "",
@@ -875,11 +851,9 @@ def _parse_makro_text(text):
 
     for line in lines:
         ls = line.strip()
-        if not ls:
-            continue
+        if not ls: continue
         ll = ls.lower()
 
-        # Hlavička
         m = re.search(r"Faktura\s*[čc\.]\s*/\s*VS\s*:\s*(\S+)", ls, re.IGNORECASE)
         if m and not result["cislo_faktury"]: result["cislo_faktury"] = m.group(1)
         m = re.search(r"Datum\s+vystavení\s*:\s*(\d{2}[-\.]\d{2}[-\.]\d{4})", ls, re.IGNORECASE)
@@ -889,7 +863,6 @@ def _parse_makro_text(text):
         m = re.search(r"Celková\s+částka\s+([\d\s]{1,10}[,\.]\d{2})", ls, re.IGNORECASE)
         if m: result["celkem_s_dph"] = _parse_money(m.group(1))
 
-        # Sleva
         is_sleva = any(kw in ll for kw in sleva_kw)
         if is_sleva and items:
             neg = re.findall(r"-\s*(\d[\d\s]*[,\.]\d{2})", ls)
@@ -900,8 +873,7 @@ def _parse_makro_text(text):
                 if mn: items[-1]["cena_za_jednotku_s_dph"] = round(items[-1]["celkem_s_dph"] / mn, 4)
             continue
 
-        # Položka - začíná MM číslem
-        mm = re.match(r"^(\d{6,14})\s+\*?(.+?)\s+(PC|KG|BG|KS)\s+(.+)$", ls, re.IGNORECASE)
+        mm = re.match(r"^(\d{6,14})\s+\*?(.+?)\s+(PC|KG|BG|KS|BX|CA|SW)\s+(.+)$", ls, re.IGNORECASE)
         if not mm: continue
 
         nazev    = mm.group(2).strip().rstrip("*")
@@ -966,7 +938,6 @@ def api_nahrat():
 
     data["soubor_cesta"] = fname
 
-    # Kontrola duplicit - stejné číslo faktury + dodavatel
     if data.get("cislo_faktury"):
         with get_db() as conn:
             row = conn.execute("""
@@ -984,7 +955,6 @@ def api_nahrat():
 
     return jsonify(data)
 
-# ── API: uložení faktury (MAKRO nebo ruční) ───────────────────────────────────
 @app.route("/api/faktury", methods=["POST"])
 def api_faktura_ulozit():
     data = request.json
@@ -1016,18 +986,14 @@ def api_faktura_ulozit():
 
         for p in polozky:
             nazev = p.get("nazev","").strip()
-            if not nazev:
-                continue
+            if not nazev: continue
             mnozstvi = float(p.get("mnozstvi", 1) or 1)
             celkem   = float(p.get("celkem_s_dph", 0) or 0)
             cena_j   = float(p.get("cena_za_jednotku_s_dph", 0) or 0)
             if cena_j == 0 and mnozstvi:
                 cena_j = celkem / mnozstvi
             jed = p.get("jednotka","ks")
-
-            # Slučování zboží – přesná shoda názvu
             zbozi_id = _get_or_create_zbozi(conn, nazev)
-
             conn.execute("""
                 INSERT INTO polozky (faktura_id, nazev, mnozstvi, jednotka,
                     cena_za_jednotku_s_dph, celkem_s_dph, zbozi_id)
@@ -1040,17 +1006,13 @@ def api_faktura_ulozit():
 
 
 def _get_or_create_zbozi(conn, nazev):
-    """Vrátí zbozi_id pro daný název (přes alias nebo canonical). Vytvoří nové pokud neexistuje."""
     row = conn.execute("SELECT zbozi_id FROM zbozi_aliasy WHERE alias=?", (nazev,)).fetchone()
-    if row:
-        return row[0]
+    if row: return row[0]
     row = conn.execute("SELECT id FROM zbozi WHERE nazev_canonical=?", (nazev,)).fetchone()
-    if row:
-        return row[0]
+    if row: return row[0]
     cur = conn.execute("INSERT INTO zbozi (nazev_canonical) VALUES (?)", (nazev,))
     return cur.lastrowid
 
-# ── API: položky / zboží ──────────────────────────────────────────────────────
 @app.route("/api/polozky")
 def api_polozky():
     firma = request.args.get("firma", "")
@@ -1110,26 +1072,20 @@ def api_zbozi_list():
 
 @app.route("/api/zbozi/alias", methods=["POST"])
 def api_zbozi_alias():
-    """Přiřadí položku (název nebo polozka_id) ke zboží."""
     data = request.json
     zbozi_id   = data.get("zbozi_id")
     alias_text = data.get("alias", "").strip()
     polozka_id = data.get("polozka_id")
-
     if not zbozi_id or not alias_text:
         return jsonify({"error": "Chybí zbozi_id nebo alias"}), 400
-
     with get_db() as conn:
         try:
             conn.execute("INSERT INTO zbozi_aliasy (zbozi_id, alias) VALUES (?,?)", (zbozi_id, alias_text))
         except sqlite3.IntegrityError:
             conn.execute("UPDATE zbozi_aliasy SET zbozi_id=? WHERE alias=?", (zbozi_id, alias_text))
-
         conn.execute("UPDATE polozky SET zbozi_id=? WHERE nazev=?", (zbozi_id, alias_text))
-
         if polozka_id:
             conn.execute("UPDATE polozky SET zbozi_id=? WHERE id=?", (zbozi_id, polozka_id))
-
     return jsonify({"ok": True})
 
 @app.route("/api/zbozi", methods=["POST"])
@@ -1145,7 +1101,6 @@ def api_zbozi_create():
             row = conn.execute("SELECT id FROM zbozi WHERE nazev_canonical=?", (nazev,)).fetchone()
             return jsonify({"ok": True, "id": row["id"]})
 
-# ── API: statistiky ───────────────────────────────────────────────────────────
 @app.route("/api/statistiky")
 def api_statistiky():
     firma = request.args.get("firma", "")
@@ -1197,7 +1152,6 @@ def api_statistiky():
         "cena_vyvoj": [dict(r) for r in cena_vyvoj]
     })
 
-# ── API: export ───────────────────────────────────────────────────────────────
 @app.route("/api/export/faktury")
 def export_faktury():
     fmt   = request.args.get("format", "xlsx")
@@ -1227,22 +1181,16 @@ def export_faktury():
         buf = io.StringIO()
         w   = csv.writer(buf, delimiter=";")
         w.writerow(headers)
-        for r in rows:
-            w.writerow(list(r))
+        for r in rows: w.writerow(list(r))
         buf.seek(0)
         return send_file(io.BytesIO(buf.getvalue().encode("utf-8-sig")),
-                         mimetype="text/csv",
-                         download_name="faktury.csv",
-                         as_attachment=True)
+                         mimetype="text/csv", download_name="faktury.csv", as_attachment=True)
     else:
         wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Faktury"
+        ws = wb.active; ws.title = "Faktury"
         _xlsx_header(ws, headers)
-        for r in rows:
-            ws.append(list(r))
-        buf = io.BytesIO()
-        wb.save(buf); buf.seek(0)
+        for r in rows: ws.append(list(r))
+        buf = io.BytesIO(); wb.save(buf); buf.seek(0)
         return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                          download_name="faktury.xlsx", as_attachment=True)
 
@@ -1292,6 +1240,35 @@ def export_polozky():
         return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                          download_name="polozky.xlsx", as_attachment=True)
 
+@app.route("/api/export/vyplaty")
+def export_vyplaty():
+    fmt   = request.args.get("format", "xlsx")
+    firma = request.args.get("firma", "")
+    od    = request.args.get("od", "")
+    do_   = request.args.get("do", "")
+    clauses, params = [], []
+    if firma: clauses.append("firma_zkratka=?"); params.append(firma)
+    if od:    clauses.append("datum>=?"); params.append(od)
+    if do_:   clauses.append("datum<=?"); params.append(do_)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    with get_db() as conn:
+        rows = conn.execute(f"SELECT firma_zkratka, jmeno, datum, castka, poznamka FROM vyplaty {where} ORDER BY datum DESC", params).fetchall()
+    headers = ["Firma", "Jméno", "Datum", "Částka", "Poznámka"]
+    if fmt == "csv":
+        buf = io.StringIO()
+        w = csv.writer(buf, delimiter=";")
+        w.writerow(headers)
+        for r in rows: w.writerow(list(r))
+        buf.seek(0)
+        return send_file(io.BytesIO(buf.getvalue().encode("utf-8-sig")), mimetype="text/csv", download_name="vyplaty.csv", as_attachment=True)
+    else:
+        wb = openpyxl.Workbook()
+        ws = wb.active; ws.title = "Výplaty"
+        _xlsx_header(ws, headers)
+        for r in rows: ws.append(list(r))
+        buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+        return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", download_name="vyplaty.xlsx", as_attachment=True)
+
 def _xlsx_header(ws, headers):
     green = "2D6A4F"
     ws.append(headers)
@@ -1300,12 +1277,10 @@ def _xlsx_header(ws, headers):
         cell.fill = PatternFill("solid", fgColor=green)
         cell.alignment = Alignment(horizontal="center")
 
-# ── Statické soubory faktur ───────────────────────────────────────────────────
 @app.route("/uploads/<path:filename>")
 def uploaded_file(filename):
     return send_from_directory(UPLOAD_DIR, filename)
 
-# ─────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     init_db()
     print("=" * 55)
