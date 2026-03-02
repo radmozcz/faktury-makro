@@ -1,7 +1,4 @@
-flask>=2.3.0
-openpyxl>=3.1.0
-# Volitelné – pro OCR a parsování PDF faktur MAKRO:
-pdfplumber>=0.10.0
-pytesseract>=0.3.10
-Pillow>=10.0.0
-gunicorn
+flask
+openpyxl
+pdfplumber
+anthropic
