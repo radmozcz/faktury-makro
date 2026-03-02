@@ -9,7 +9,9 @@
 const App = {
   config: { firmy: [], app_nazev: "Správa faktur" },
   currentPage: "dashboard",
-  chartInstances: {},   // ukládáme Chart.js instance aby šly zničit
+  chartInstances: {},
+  polozkyData: [],          // cache pro sortování
+  polozkySort: { col: "celkem_utraceno", asc: false },
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -51,7 +53,6 @@ function setupNav() {
     a.addEventListener("click", e => {
       e.preventDefault();
       navigateTo(a.dataset.page);
-      // Zavři sidebar na mobilu
       document.getElementById("sidebar").classList.remove("open");
     });
   });
@@ -68,6 +69,7 @@ function navigateTo(page) {
     nahrat:     renderNahrat,
     rucni:      renderRucni,
     polozky:    renderPolozky,
+    vyplaty:    renderVyplaty,
     statistiky: renderStatistiky,
     nastaveni:  renderNastaveni,
   };
@@ -88,7 +90,6 @@ function setupThemeSwitch() {
     const t = sw.checked ? "dark" : "light";
     document.documentElement.setAttribute("data-theme", t);
     localStorage.setItem("theme", t);
-    // Překresli grafy pokud existují
     Object.values(App.chartInstances).forEach(c => { if (c) c.destroy(); });
     App.chartInstances = {};
     navigateTo(App.currentPage);
@@ -163,8 +164,7 @@ function stavBadge(s) {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  Grafy (nativní canvas – bez Chart.js závislosti)
-//  Použijeme jednoduchou interní implementaci
+//  Grafy
 // ═══════════════════════════════════════════════════════════════
 function drawBarChart(canvasId, labels, values, color) {
   const canvas = document.getElementById(canvasId);
@@ -190,7 +190,6 @@ function drawBarChart(canvasId, labels, values, color) {
   const maxVal = Math.max(...values, 1);
   const bw = (W - pad.left - pad.right) / values.length;
 
-  // grid lines
   ctx.strokeStyle = gridColor;
   ctx.lineWidth = 1;
   const steps = 5;
@@ -204,7 +203,6 @@ function drawBarChart(canvasId, labels, values, color) {
     ctx.fillText(v >= 1000 ? Math.round(v/1000)+"k" : Math.round(v), pad.left - 6, y + 4);
   }
 
-  // bars
   values.forEach((v, i) => {
     const barH = ((v / maxVal) * (H - pad.top - pad.bottom));
     const x = pad.left + i * bw + bw * .1;
@@ -217,7 +215,6 @@ function drawBarChart(canvasId, labels, values, color) {
     ctx.roundRect(x, y, bw * .8, barH, [4, 4, 0, 0]);
     ctx.fill();
 
-    // label
     ctx.fillStyle = txtColor;
     ctx.font = "10px DM Sans";
     ctx.textAlign = "center";
@@ -248,7 +245,6 @@ function drawLineChart(canvasId, labels, datasets) {
   const getX = i => pad.left + (i / (n-1 || 1)) * (W - pad.left - pad.right);
   const getY = v => pad.top + (1 - (v - minVal) / range) * (H - pad.top - pad.bottom);
 
-  // grid
   ctx.strokeStyle = gridColor;
   ctx.lineWidth = 1;
   for (let i = 0; i <= 4; i++) {
@@ -259,7 +255,6 @@ function drawLineChart(canvasId, labels, datasets) {
     ctx.fillText(v.toFixed(1), pad.left - 6, y + 4);
   }
 
-  // lines
   const colors = ["#2D6A4F", "#E9C46A", "#C44D58", "#52B788"];
   datasets.forEach((ds, di) => {
     if (!ds.values.length) return;
@@ -271,7 +266,6 @@ function drawLineChart(canvasId, labels, datasets) {
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     });
     ctx.stroke();
-    // dots
     ctx.fillStyle = colors[di % colors.length];
     ds.values.forEach((v, i) => {
       ctx.beginPath();
@@ -280,7 +274,6 @@ function drawLineChart(canvasId, labels, datasets) {
     });
   });
 
-  // x labels
   ctx.fillStyle = txtColor; ctx.font = "10px DM Sans"; ctx.textAlign = "center";
   labels.forEach((lbl, i) => {
     ctx.fillText(lbl, getX(i), H - pad.bottom + 16);
@@ -341,18 +334,15 @@ async function renderDashboard() {
       </div>
     </div>`;
 
-  // Klik na řádek faktury → detail
   document.querySelectorAll(".faktura-row").forEach(r => {
     r.addEventListener("click", () => openFakturaDetail(r.dataset.id));
   });
 
-  // Graf
   const labels = data.graf.map(g => g.mesic);
   const values = data.graf.map(g => g.castka);
   requestAnimationFrame(() => drawBarChart("barChart", labels, values, "#2D6A4F"));
 }
 
-// Při změně globálního filtru firmy → znovu vykresli dashboard
 document.getElementById("globalFirmaFilter").addEventListener("change", () => {
   fillFirmaSelects();
   if (App.currentPage === "dashboard") renderDashboard();
@@ -391,10 +381,8 @@ async function renderFaktury() {
       <div class="table-wrap" id="fakturyTable"><div class="loading-center"><span class="spinner"></span></div></div>
     </div>`;
 
-  // Načti a zobraz
   loadFaktury();
 
-  // Filtry – debounce
   ["fFirma","fStav","fOd","fDo"].forEach(id => {
     document.getElementById(id)?.addEventListener("change", loadFaktury);
   });
@@ -559,14 +547,12 @@ function renderNahrat() {
         </select>
       </div>
 
-      <!-- Záložky -->
       <div style="display:flex;gap:.5rem;margin-bottom:1rem;border-bottom:2px solid var(--border);padding-bottom:0">
         <button id="tabPdf" class="tab-btn tab-active" onclick="switchTab('pdf')">📄 PDF soubor</button>
         <button id="tabText" class="tab-btn" onclick="switchTab('text')">📋 Vložit text</button>
         <button id="tabHromadne" class="tab-btn" onclick="switchTab('hromadne')">📦 Hromadné nahrání</button>
       </div>
 
-      <!-- Tab: PDF -->
       <div id="tabPanelPdf">
         <div class="dropzone" id="dropzone">
           <div class="dropzone-icon">📂</div>
@@ -579,7 +565,6 @@ function renderNahrat() {
         <div id="uploadStatus" style="margin-top:1rem;color:var(--txt2);font-size:.9rem"></div>
       </div>
 
-      <!-- Tab: Vložit text -->
       <div id="tabPanelText" style="display:none">
         <p style="color:var(--txt2);font-size:.9rem;margin-bottom:.7rem">
           Zkopírujte text faktury z PDF prohlížeče nebo e-mailu a vložte ho sem (Ctrl+V):
@@ -590,7 +575,6 @@ function renderNahrat() {
         <div id="textStatus" style="margin-top:.5rem;color:var(--txt2);font-size:.9rem"></div>
       </div>
 
-      <!-- Tab: Hromadné -->
       <div id="tabPanelHromadne" style="display:none">
         <div class="dropzone" id="dropzoneHromadne">
           <div class="dropzone-icon">📦</div>
@@ -603,7 +587,6 @@ function renderNahrat() {
         <div id="hromadneStatus" style="margin-top:1rem"></div>
       </div>
 
-      <!-- Formulář výsledku (sdílený pro PDF i Text) -->
       <div id="parsedForm" style="display:none; margin-top:1.5rem;">
         <h3 style="font-family:var(--font-head);margin-bottom:1rem">Zkontrolujte a případně opravte</h3>
         <div class="grid-2" style="gap:1rem">
@@ -689,7 +672,6 @@ async function hromadneNahrat(files) {
       const data = await r.json();
 
       if (data.error && !data.soubor_cesta) {
-        // Súpis tovaru = přeskočit tiše (šedě), ostatní chyby červeně
         if (data.error.includes("Súpis tovaru")) {
           row.innerHTML = `<span style="color:var(--txt2)">⏭ ${file.name} – přeskočeno (Súpis tovaru)</span>`;
         } else {
@@ -698,7 +680,6 @@ async function hromadneNahrat(files) {
         continue;
       }
 
-      // Auto-uložení
       const payload = {
         firma_zkratka: firma,
         dodavatel:     data.dodavatel || 'MAKRO Cash & Carry ČR s.r.o.',
@@ -736,12 +717,10 @@ function setupDropzone() {
     if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]);
   });
 
-  // Vložení obrázku ze schránky (Ctrl+V)
   document.addEventListener("paste", handlePaste);
 }
 
 function handlePaste(e) {
-  // Funguje jen pokud je aktivní záložka PDF nebo jsme na stránce Nahrát
   const panel = document.getElementById("tabPanelPdf");
   if (!panel || panel.style.display === "none") return;
 
@@ -783,7 +762,6 @@ async function uploadFile(file) {
     `✅ Soubor úspěšně zpracován`;
 
   uploadedFilePath = data.soubor_cesta || "";
-  // Pokud je formulář už viditelný, jde o druhou stranu faktury
   const formVisible = document.getElementById("parsedForm") &&
     document.getElementById("parsedForm").style.display !== "none";
   naplnFormular(data, formVisible);
@@ -793,7 +771,6 @@ function naplnFormular(data, appendMode = false) {
   const formVisible = document.getElementById("parsedForm").style.display !== "none";
 
   if (appendMode && formVisible) {
-    // Druhá stránka – přidej jen položky, nezměň hlavičku
     const newItems = data.polozky || [];
     if (newItems.length === 0) {
       toast("Na druhé stránce nebyly nalezeny žádné položky.", true);
@@ -802,7 +779,6 @@ function naplnFormular(data, appendMode = false) {
     newItems.forEach(p => appendPolozkaRow(p));
     updateTotal();
 
-    // Informační zpráva
     const info = document.createElement("div");
     info.style.cssText = "background:#d1fae5;border:1px solid #6ee7b7;border-radius:6px;padding:.5rem 1rem;margin-bottom:.5rem;font-size:.9rem;color:#065f46";
     info.textContent = `✅ Přidáno ${newItems.length} položek z druhé strany faktury`;
@@ -811,14 +787,12 @@ function naplnFormular(data, appendMode = false) {
     return;
   }
 
-  // První stránka – vyplň celý formulář
   document.getElementById("parsedForm").style.display = "block";
   document.getElementById("pDodavatel").value = data.dodavatel || "MAKRO Cash & Carry ČR s.r.o.";
   document.getElementById("pCislo").value     = data.cislo_faktury || "";
   document.getElementById("pDatVys").value    = data.datum_vystaveni || "";
   document.getElementById("pDatSpl").value    = data.datum_splatnosti || "";
 
-  // Auto-výběr firmy podle IČO
   if (data.firma_zkratka) {
     const sel = document.getElementById("nahratFirma");
     for (const opt of sel.options) {
@@ -826,7 +800,6 @@ function naplnFormular(data, appendMode = false) {
     }
   }
 
-  // Varování o duplicitě
   const dupEl = document.getElementById("duplicitaWarning");
   if (dupEl) dupEl.remove();
   if (data.duplicita) {
@@ -837,13 +810,11 @@ function naplnFormular(data, appendMode = false) {
     document.getElementById("parsedForm").insertAdjacentElement("afterbegin", warn);
   }
 
-  // Stav a způsob úhrady jsou pro MAKRO vždy fixní
   const tbody = document.getElementById("polozkyBody");
   tbody.innerHTML = "";
   (data.polozky || []).forEach(p => appendPolozkaRow(p, data.ocr_kontrola));
   updateTotal();
 
-  // Zobraz kontrolu OCR částky
   const kontrolaEl = document.getElementById("ocrKontrola");
   if (kontrolaEl) kontrolaEl.remove();
   if (data.ocr_kontrola) {
@@ -863,7 +834,6 @@ function zobrazOcrKontrolu(k) {
   div.style.cssText = "border-radius:8px;padding:.8rem 1rem;margin-bottom:1rem;font-size:.9rem;";
 
   if (maCelkem) {
-    // Máme částku z faktury - porovnáme
     const ocekavano = ocr_bez * 1.20;
     const rozdil = Math.abs(suma - ocekavano);
     const ok = rozdil < ocekavano * 0.05;
@@ -876,11 +846,9 @@ function zobrazOcrKontrolu(k) {
         ${pocetPodezrelych > 0 ? `<br><small>🔴 ${pocetPodezrelych} položka/položky označeny červeně – zkontroluj je</small>` : ""}`;
     }
   } else if (pocetPodezrelych > 0) {
-    // Nemáme celkem ale máme podezřelé položky
     div.style.cssText += "background:#fef3c7;border:1px solid #fbbf24;color:#92400e";
     div.innerHTML = `⚠️ <strong>${pocetPodezrelych} podezřelá položka</strong> označena červeně – zkontroluj ji před uložením`;
   } else {
-    // Vše vypadá OK ale nemáme kontrolní částku
     div.style.cssText += "background:#f0fdf4;border:1px solid #86efac;color:#166534";
     div.innerHTML = `✅ <strong>Načteno bez zjevných chyb</strong> – zkontroluj a ulož`;
   }
@@ -890,7 +858,6 @@ function zobrazOcrKontrolu(k) {
 
 function appendPolozkaRow(p = {}, kontrola = null) {
   const tr = document.createElement("tr");
-  // Podezřelá položka: nulová cena nebo nesmyslné množství
   const podezrela = (p.celkem_s_dph === 0 || p.celkem_s_dph == null ||
                      p.mnozstvi > 500 || p.mnozstvi <= 0);
   if (podezrela) {
@@ -917,7 +884,6 @@ function updateTotal() {
   const el = document.getElementById("totalSum");
   if (el) el.textContent = "Celkem s DPH: " + czMoney(t);
 
-  // Aktualizuj kontrolní box pokud existuje
   const k = document.getElementById("ocrKontrola");
   if (k && k.dataset.ocrBezDph) {
     const ocr_bez = parseFloat(k.dataset.ocrBezDph);
@@ -1065,7 +1031,6 @@ async function ulozitRucni() {
   const dodavatel = document.getElementById("rDodavatel").value.trim();
   if (!dodavatel) { toast("Vyplňte dodavatele", true); return; }
 
-  // Nahrání přílohy
   let soubor_cesta = "";
   const soubFile = document.getElementById("rSoubor").files[0];
   if (soubFile) {
@@ -1112,7 +1077,7 @@ async function ulozitRucni() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  ZBOŽÍ / POLOŽKY
+//  ZBOŽÍ / POLOŽKY – se sortováním
 // ═══════════════════════════════════════════════════════════════
 async function renderPolozky() {
   document.getElementById("mainContent").innerHTML = `
@@ -1150,21 +1115,58 @@ async function loadPolozky() {
   });
   let rows;
   try { rows = await api(`/api/polozky?${params}`); } catch { return; }
+  App.polozkyData = rows;
+  renderPolozkyTable();
+}
 
+function sortPolozky(col) {
+  if (App.polozkySort.col === col) {
+    App.polozkySort.asc = !App.polozkySort.asc;
+  } else {
+    App.polozkySort.col = col;
+    App.polozkySort.asc = false;
+  }
+  renderPolozkyTable();
+}
+
+function renderPolozkyTable() {
   const el = document.getElementById("polozkyList");
   if (!el) return;
+
+  const { col, asc } = App.polozkySort;
+  const sorted = [...App.polozkyData].sort((a, b) => {
+    let va = a[col], vb = b[col];
+    if (typeof va === "string") va = va.toLowerCase();
+    if (typeof vb === "string") vb = vb.toLowerCase();
+    if (va < vb) return asc ? -1 : 1;
+    if (va > vb) return asc ? 1 : -1;
+    return 0;
+  });
+
+  const arrow = (c) => col === c ? (asc ? " ▲" : " ▼") : " ⇅";
+  const th = (c, label) =>
+    `<th style="cursor:pointer;user-select:none" onclick="sortPolozky('${c}')">${label}${arrow(c)}</th>`;
+
   el.innerHTML = `
     <table>
-      <thead><tr><th>Zboží</th><th>Jedn.</th><th>Celk. množství</th><th>Celkem s DPH</th><th>Průměrná cena/jedn.</th><th>Nákupů</th><th>Dodavatelé</th></tr></thead>
+      <thead><tr>
+        ${th("zbozi_nazev","Zboží")}
+        ${th("jednotka","Jedn.")}
+        ${th("celkove_mnozstvi","Celk. množství")}
+        ${th("celkem_utraceno","Celkem s DPH")}
+        ${th("prumerna_cena","Průměrná cena/jedn.")}
+        ${th("pocet_nakupu","Nákupů")}
+        <th>Dodavatelé</th>
+      </tr></thead>
       <tbody>
-        ${rows.map(r => `
+        ${sorted.map(r => `
           <tr class="zbozi-row" data-id="${r.zbozi_id||""}" data-nazev="${escHtml(r.zbozi_nazev)}">
             <td><strong>${escHtml(r.zbozi_nazev)}</strong></td>
             <td>${r.jednotka}</td>
             <td>${Number(r.celkove_mnozstvi).toLocaleString("cs-CZ")}</td>
             <td><strong>${czMoney(r.celkem_utraceno)}</strong></td>
             <td>${czMoney(r.prumerna_cena)}</td>
-            <td>${r.pocet_nakupu}</td>
+            <td style="text-align:center"><span class="badge badge-zaplaceno">${r.pocet_nakupu}</span></td>
             <td style="font-size:.82rem;color:var(--txt2)">${escHtml(r.dodavatele||"")}</td>
           </tr>`).join("") ||
           "<tr><td colspan='7' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné položky</td></tr>"}
@@ -1181,12 +1183,6 @@ async function loadPolozky() {
 async function openZboziDetail(zbozi_id, nazev) {
   let data;
   try { data = await api(`/api/polozky/detail/${zbozi_id}`); } catch { return; }
-
-  // Načti všechna zboží pro dropdown slučování
-  const vsechnaZbozi = await api("/api/zbozi").catch(() => []);
-  const zboziOpts = vsechnaZbozi.map(z =>
-    `<option value="${z.id}" ${z.id == zbozi_id ? "selected" : ""}>${escHtml(z.nazev_canonical)}</option>`
-  ).join("");
 
   const body = `
     <h4 style="margin-bottom:.5rem">${escHtml(data.zbozi.nazev_canonical)}</h4>
@@ -1243,10 +1239,176 @@ function exportPolozky(fmt) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  VÝPLATY
+// ═══════════════════════════════════════════════════════════════
+async function renderVyplaty() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Výplaty</h1>
+      <div class="btn-group">
+        <button class="btn btn-primary btn-sm" onclick="openNovVyplata()">+ Nová výplata</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportVyplaty('xlsx')">⬇ Excel</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportVyplaty('csv')">⬇ CSV</button>
+      </div>
+    </div>
+    <div class="filters">
+      <label>Firma:</label>
+      <select id="vFirma" class="firma-select">
+        <option value="">Všechny</option>
+        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+      </select>
+      <label>Od:</label><input type="date" id="vOd">
+      <label>Do:</label><input type="date" id="vDo">
+    </div>
+    <div class="card">
+      <div class="table-wrap" id="vyplatyList"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>`;
+
+  loadVyplaty();
+  ["vFirma","vOd","vDo"].forEach(id => {
+    document.getElementById(id)?.addEventListener("change", loadVyplaty);
+  });
+}
+
+async function loadVyplaty() {
+  const params = new URLSearchParams({
+    firma: document.getElementById("vFirma")?.value||"",
+    od:    document.getElementById("vOd")?.value||"",
+    do:    document.getElementById("vDo")?.value||"",
+  });
+  let data;
+  try { data = await api(`/api/vyplaty?${params}`); } catch { return; }
+
+  const el = document.getElementById("vyplatyList");
+  if (!el) return;
+
+  el.innerHTML = `
+    <table>
+      <thead><tr><th>Firma</th><th>Jméno</th><th>Datum</th><th>Částka</th><th>Poznámka</th><th></th></tr></thead>
+      <tbody>
+        ${data.vyplaty.map(v => `
+          <tr>
+            <td><span class="badge badge-zaplaceno" style="background:var(--green-pale)">${escHtml(v.firma_zkratka||"—")}</span></td>
+            <td><strong>${escHtml(v.jmeno)}</strong></td>
+            <td>${czDate(v.datum)}</td>
+            <td><strong>${czMoney(v.castka)}</strong></td>
+            <td style="color:var(--txt2);font-size:.88rem">${escHtml(v.poznamka||"")}</td>
+            <td>
+              <button class="btn btn-secondary btn-sm" onclick="editVyplata(${v.id},'${escHtml(v.jmeno)}','${v.datum}',${v.castka},'${escHtml(v.poznamka||"")}','${escHtml(v.firma_zkratka||"")}')">✏️</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteVyplata(${v.id})">🗑</button>
+            </td>
+          </tr>`).join("") ||
+          "<tr><td colspan='6' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné výplaty</td></tr>"}
+      </tbody>
+      ${data.vyplaty.length ? `
+      <tfoot>
+        <tr class="table-footer">
+          <td colspan="3">Celkem (${data.vyplaty.length} výplat)</td>
+          <td colspan="3"><strong>${czMoney(data.celkem)}</strong></td>
+        </tr>
+      </tfoot>` : ""}
+    </table>`;
+}
+
+function vyplataFormHtml(v = {}) {
+  return `
+    <div class="grid-2" style="gap:1rem">
+      <div class="form-group"><label class="form-label">Firma</label>
+        <select id="vFirmaF" class="form-control">
+          <option value="">—</option>
+          ${App.config.firmy.map(f=>`<option value="${f}" ${v.firma_zkratka===f?"selected":""}>${f}</option>`).join("")}
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Jméno *</label>
+        <input id="vJmeno" class="form-control" value="${escHtml(v.jmeno||"")}" placeholder="Jméno zaměstnance">
+      </div>
+      <div class="form-group"><label class="form-label">Datum *</label>
+        <input type="date" id="vDatum" class="form-control" value="${v.datum||new Date().toISOString().split('T')[0]}">
+      </div>
+      <div class="form-group"><label class="form-label">Částka (Kč) *</label>
+        <input type="number" step="0.01" id="vCastka" class="form-control" value="${v.castka||""}">
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">Poznámka</label>
+      <input id="vPoznamka" class="form-control" value="${escHtml(v.poznamka||"")}" placeholder="Volitelná poznámka">
+    </div>`;
+}
+
+function openNovVyplata() {
+  openModal("Nová výplata", `
+    ${vyplataFormHtml()}
+    <div class="btn-group" style="margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitVyplatu()">💾 Uložit</button>
+    </div>`);
+}
+
+function editVyplata(id, jmeno, datum, castka, poznamka, firma_zkratka) {
+  openModal("Upravit výplatu", `
+    ${vyplataFormHtml({jmeno, datum, castka, poznamka, firma_zkratka})}
+    <div class="btn-group" style="margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitVyplatuEdit(${id})">💾 Uložit změny</button>
+    </div>`);
+}
+
+async function ulozitVyplatu() {
+  const jmeno  = document.getElementById("vJmeno").value.trim();
+  const datum  = document.getElementById("vDatum").value;
+  const castka = parseFloat(document.getElementById("vCastka").value);
+  if (!jmeno || !datum || isNaN(castka)) { toast("Vyplňte jméno, datum a částku", true); return; }
+
+  await api("/api/vyplaty", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({
+      jmeno, datum, castka,
+      poznamka: document.getElementById("vPoznamka").value,
+      firma_zkratka: document.getElementById("vFirmaF").value,
+    })
+  });
+  toast("Výplata uložena ✓");
+  closeModal();
+  loadVyplaty();
+}
+
+async function ulozitVyplatuEdit(id) {
+  const jmeno  = document.getElementById("vJmeno").value.trim();
+  const datum  = document.getElementById("vDatum").value;
+  const castka = parseFloat(document.getElementById("vCastka").value);
+  if (!jmeno || !datum || isNaN(castka)) { toast("Vyplňte jméno, datum a částku", true); return; }
+
+  await api(`/api/vyplaty/${id}`, {
+    method:"PUT", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({
+      jmeno, datum, castka,
+      poznamka: document.getElementById("vPoznamka").value,
+      firma_zkratka: document.getElementById("vFirmaF").value,
+    })
+  });
+  toast("Výplata upravena ✓");
+  closeModal();
+  loadVyplaty();
+}
+
+async function deleteVyplata(id) {
+  if (!confirm("Opravdu smazat tuto výplatu?")) return;
+  await api(`/api/vyplaty/${id}`, { method: "DELETE" });
+  toast("Výplata smazána");
+  loadVyplaty();
+}
+
+function exportVyplaty(fmt) {
+  const params = new URLSearchParams({
+    format: fmt,
+    firma: document.getElementById("vFirma")?.value||"",
+    od:    document.getElementById("vOd")?.value||"",
+    do:    document.getElementById("vDo")?.value||"",
+  });
+  window.location.href = `/api/export/vyplaty?${params}`;
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  STATISTIKY
 // ═══════════════════════════════════════════════════════════════
 async function renderStatistiky() {
-  // Výchozí rozsah: posledních 12 měsíců
   const od = new Date(); od.setFullYear(od.getFullYear()-1);
   const odStr = od.toISOString().split("T")[0];
   const doStr = new Date().toISOString().split("T")[0];
@@ -1331,7 +1493,6 @@ async function renderNastaveni() {
   const icoMap = cfg.ico_map || {};
   const firmy  = cfg.firmy || [];
 
-  // Vytvoř řádky IČO mapování pro každou firmu
   const icoRows = firmy.map(f => `
     <tr>
       <td style="padding:.4rem .5rem;font-weight:600">${escHtml(f)}</td>
@@ -1373,7 +1534,6 @@ async function saveConfig() {
   const firmy = document.getElementById("cfgFirmy").value.split(",").map(s=>s.trim()).filter(Boolean);
   if (!firmy.length) { toast("Zadejte alespoň jednu firmu", true); return; }
 
-  // Sbírej IČO mapování
   const ico_map = {};
   document.querySelectorAll(".ico-input").forEach(inp => {
     const ico = inp.value.trim().replace(/\s/g,"");
