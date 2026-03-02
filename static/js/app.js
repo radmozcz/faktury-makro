@@ -70,6 +70,7 @@ function navigateTo(page) {
     rucni:      renderRucni,
     polozky:    renderPolozky,
     vyplaty:    renderVyplaty,
+    reporty:    renderReporty,
     statistiky: renderStatistiky,
     nastaveni:  renderNastaveni,
   };
@@ -1556,4 +1557,478 @@ function escHtml(s) {
   return String(s||"")
     .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
     .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  REPORTY – Denní výkazy
+// ═══════════════════════════════════════════════════════════════
+
+const KARTY_LIMIT = 1500000;
+
+async function renderReporty() {
+  // Načti DPH alert
+  let alert_data = { karty_12m: 0, procent: 0, alert: false, varovani: false };
+  try { alert_data = await api("/api/reporty/karty-alert"); } catch {}
+
+  const alertHtml = alert_data.alert
+    ? `<div style="background:#fee2e2;border:2px solid #ef4444;border-radius:8px;padding:.8rem 1.2rem;margin-bottom:1rem;color:#991b1b;font-weight:600">
+        🚨 POZOR! Karty za posledních 12 měsíců: <strong>${czMoney(alert_data.karty_12m)}</strong> 
+        – překročen limit 1 500 000 Kč!
+       </div>`
+    : alert_data.varovani
+    ? `<div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:8px;padding:.8rem 1.2rem;margin-bottom:1rem;color:#92400e;font-weight:600">
+        ⚠️ Karty za posledních 12 měsíců: <strong>${czMoney(alert_data.karty_12m)}</strong>
+        (${alert_data.procent}% z limitu 1,5M Kč) – blíží se limit!
+       </div>`
+    : `<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:.6rem 1.2rem;margin-bottom:1rem;color:#166534;font-size:.9rem">
+        💳 Karty (12 měs.): <strong>${czMoney(alert_data.karty_12m)}</strong>
+        &nbsp;|&nbsp; ${alert_data.procent}% z limitu 1,5M Kč
+        <div style="background:#dcfce7;border-radius:4px;height:6px;margin-top:.4rem">
+          <div style="background:#16a34a;height:6px;border-radius:4px;width:${Math.min(alert_data.procent,100)}%"></div>
+        </div>
+       </div>`;
+
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Denní reporty</h1>
+      <div class="btn-group">
+        <button class="btn btn-primary btn-sm" onclick="openNovyReport()">+ Nový report</button>
+        <button class="btn btn-secondary btn-sm" onclick="openImportXlsx()">📥 Import xlsx</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportReporty('xlsx')">⬇ Excel</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportReporty('csv')">⬇ CSV</button>
+      </div>
+    </div>
+    ${alertHtml}
+    <div class="filters">
+      <label>Od:</label><input type="date" id="rOd">
+      <label>Do:</label><input type="date" id="rDo">
+      <button class="btn btn-primary btn-sm" onclick="loadReporty()">Zobrazit</button>
+    </div>
+    <div class="card">
+      <div class="table-wrap" id="reportyList"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>`;
+
+  loadReporty();
+}
+
+async function loadReporty() {
+  const params = new URLSearchParams({
+    od: document.getElementById("rOd")?.value || "",
+    do: document.getElementById("rDo")?.value || "",
+  });
+  let rows;
+  try { rows = await api(`/api/reporty?${params}`); } catch { return; }
+
+  const el = document.getElementById("reportyList");
+  if (!el) return;
+
+  if (!rows.length) {
+    el.innerHTML = `<div style="text-align:center;color:var(--txt2);padding:3rem">
+      Žádné reporty. <button class="btn btn-primary btn-sm" onclick="openNovyReport()">+ Přidat první</button>
+    </div>`;
+    return;
+  }
+
+  // Součty
+  const sumy = rows.reduce((s, r) => {
+    s.trzba_vcpk += r.trzba_vcpk || 0;
+    s.karty      += r.karty || 0;
+    s.hotovost   += r.hotovost || 0;
+    s.vydaje     += r.vydaje || 0;
+    s.pk_celkem  += r.pk_celkem || 0;
+    s.pizza_cela += r.pizza_cela || 0;
+    s.pizza_ctvrt+= r.pizza_ctvrt || 0;
+    s.burger     += r.burger || 0;
+    s.talire     += r.talire || 0;
+    s.burtgulas  += r.burtgulas || 0;
+    return s;
+  }, {trzba_vcpk:0,karty:0,hotovost:0,vydaje:0,pk_celkem:0,pizza_cela:0,pizza_ctvrt:0,burger:0,talire:0,burtgulas:0});
+
+  el.innerHTML = `
+    <div style="overflow-x:auto">
+    <table style="min-width:900px">
+      <thead><tr>
+        <th>Datum</th><th>Den</th>
+        <th>Tržba vč.PK</th><th>Karty</th><th>Hotovost</th><th>Výdaje</th>
+        <th>PK Kč</th>
+        <th>🍕 Celá</th><th>🍕/4</th><th>🍔</th><th>🍲 Guláš</th><th>🍽 Talíře</th>
+        <th>Směna</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr>
+            <td><strong>${czDate(r.datum)}</strong></td>
+            <td style="color:var(--txt2)">${escHtml(r.den||"")}</td>
+            <td><strong>${czMoney(r.trzba_vcpk)}</strong></td>
+            <td>${czMoney(r.karty)}</td>
+            <td>${czMoney(r.hotovost)}</td>
+            <td>${r.vydaje ? czMoney(r.vydaje) : "—"}</td>
+            <td>${r.pk_celkem ? czMoney(r.pk_celkem) : "—"}</td>
+            <td style="text-align:center">${r.pizza_cela || "—"}</td>
+            <td style="text-align:center">${r.pizza_ctvrt || "—"}</td>
+            <td style="text-align:center">${r.burger || "—"}</td>
+            <td style="text-align:center">${r.burtgulas || "—"}</td>
+            <td style="text-align:center">${r.talire || "—"}</td>
+            <td style="font-size:.82rem;color:var(--txt2)">${escHtml(r.smena||"")}</td>
+            <td>
+              <button class="btn btn-secondary btn-sm" onclick="editReport(${r.id})" title="Upravit">✏️</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteReport(${r.id})" title="Smazat">🗑</button>
+            </td>
+          </tr>`).join("")}
+      </tbody>
+      <tfoot>
+        <tr class="table-footer">
+          <td colspan="2">Celkem (${rows.length} dní)</td>
+          <td><strong>${czMoney(sumy.trzba_vcpk)}</strong></td>
+          <td><strong>${czMoney(sumy.karty)}</strong></td>
+          <td><strong>${czMoney(sumy.hotovost)}</strong></td>
+          <td><strong>${czMoney(sumy.vydaje)}</strong></td>
+          <td><strong>${czMoney(sumy.pk_celkem)}</strong></td>
+          <td style="text-align:center"><strong>${sumy.pizza_cela}</strong></td>
+          <td style="text-align:center"><strong>${sumy.pizza_ctvrt}</strong></td>
+          <td style="text-align:center"><strong>${sumy.burger}</strong></td>
+          <td style="text-align:center"><strong>${sumy.burtgulas}</strong></td>
+          <td style="text-align:center"><strong>${sumy.talire}</strong></td>
+          <td colspan="2"></td>
+        </tr>
+      </tfoot>
+    </table>
+    </div>`;
+}
+
+// ── Formulář reportu ────────────────────────────────────────────
+function reportFormHtml(r = {}) {
+  return `
+    <!-- Tabs: Fotka | Text | Ruční -->
+    <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:2px solid var(--border);padding-bottom:0">
+      <button id="rtabFoto"  class="tab-btn tab-active" onclick="switchRTab('foto')">📷 Fotka</button>
+      <button id="rtabText"  class="tab-btn" onclick="switchRTab('text')">📋 Vložit text</button>
+      <button id="rtabRucni" class="tab-btn" onclick="switchRTab('rucni')">✏️ Ruční</button>
+    </div>
+
+    <!-- Panel: Fotka -->
+    <div id="rtabPanelFoto">
+      <div class="dropzone" id="reportDropzone" style="padding:1rem">
+        <div class="dropzone-icon" style="font-size:2rem">📷</div>
+        <div class="dropzone-text">
+          <strong>Přetáhněte fotku lístku</strong> nebo klikněte<br>
+          <small>Claude přečte rukopis automaticky</small>
+        </div>
+        <input type="file" id="reportFileInput" accept="image/*">
+      </div>
+      <div id="reportFotoStatus" style="margin-top:.5rem;font-size:.9rem;color:var(--txt2)"></div>
+    </div>
+
+    <!-- Panel: Text (Ctrl+C/V) -->
+    <div id="rtabPanelText" style="display:none">
+      <p style="color:var(--txt2);font-size:.88rem;margin-bottom:.5rem">
+        Zkopírujte text ze zprávy (WhatsApp, SMS) a vložte sem (Ctrl+V):
+      </p>
+      <textarea id="reportTextInput" class="form-control" rows="6"
+        placeholder="Např: Datum: 1.3, Den: neděle, Směna: Vali/Renata&#10;Karty: 5500, KOV: 211, Papír: 3800&#10;Tržba: 9664, Pizza celá: 6x, čtvrt: 4x..."></textarea>
+      <button class="btn btn-primary btn-sm" style="margin-top:.5rem" onclick="zpracovatReportText()">
+        🔍 Zpracovat
+      </button>
+      <div id="reportTextStatus" style="margin-top:.4rem;font-size:.9rem;color:var(--txt2)"></div>
+    </div>
+
+    <!-- Panel: Ruční -->
+    <div id="rtabPanelRucni" style="display:none">
+      <p style="color:var(--txt2);font-size:.88rem">Vyplňte hodnoty ručně nebo opravte načtené.</p>
+    </div>
+
+    <!-- Formulář (sdílený, vždy viditelný pod taby) -->
+    <div id="reportFormFields" style="margin-top:1rem">
+      <div class="grid-2" style="gap:.8rem">
+        <div class="form-group">
+          <label class="form-label">Datum *</label>
+          <input type="date" id="rfDatum" class="form-control" value="${r.datum||''}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Den</label>
+          <input id="rfDen" class="form-control" value="${escHtml(r.den||'')}" placeholder="Pondělí...">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Směna (jména)</label>
+          <input id="rfSmena" class="form-control" value="${escHtml(r.smena||'')}" placeholder="Radek, Věrka">
+        </div>
+        <div class="form-group" style="grid-column:span 1"></div>
+      </div>
+      <hr style="margin:.8rem 0;border-color:var(--border)">
+      <div class="grid-2" style="gap:.8rem">
+        <div class="form-group">
+          <label class="form-label">💳 Karty</label>
+          <input type="number" id="rfKarty" class="form-control" value="${r.karty||0}" oninput="rfRecalc()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🔩 KOV (cash registr)</label>
+          <input type="number" id="rfKov" class="form-control" value="${r.kov||0}" oninput="rfRecalc()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">💵 Papír</label>
+          <input type="number" id="rfPapir" class="form-control" value="${r.papir||0}" oninput="rfRecalc()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">📦 Výdaje</label>
+          <input type="number" id="rfVydaje" class="form-control" value="${r.vydaje||0}" oninput="rfRecalc()">
+        </div>
+      </div>
+      <div class="grid-2" style="gap:.8rem;margin-top:.5rem">
+        <div class="form-group">
+          <label class="form-label">🎟 PK 50 Kč (kusů)</label>
+          <input type="number" id="rfPk50" class="form-control" value="${r.pk50_ks||0}" oninput="rfRecalc()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🎟 PK 100 Kč (kusů)</label>
+          <input type="number" id="rfPk100" class="form-control" value="${r.pk100_ks||0}" oninput="rfRecalc()">
+        </div>
+      </div>
+      <!-- Výpočty -->
+      <div id="rfVypocty" style="background:var(--green-pale);border-radius:8px;padding:.6rem 1rem;margin:.8rem 0;font-size:.9rem">
+        <span id="rfHotovostDisp">Hotovost: 0 Kč</span> &nbsp;|&nbsp;
+        <span id="rfTrzbaDisp">Tržba: 0 Kč</span> &nbsp;|&nbsp;
+        <span id="rfPkDisp">PK: 0 Kč</span> &nbsp;|&nbsp;
+        <strong id="rfTrzbaVcPkDisp">Tržba vč. PK: 0 Kč</strong>
+      </div>
+      <hr style="margin:.8rem 0;border-color:var(--border)">
+      <div class="grid-2" style="gap:.8rem">
+        <div class="form-group">
+          <label class="form-label">🍕 Pizza celá</label>
+          <input type="number" id="rfPizzaCela" class="form-control" value="${r.pizza_cela||0}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🍕 Pizza čtvrt</label>
+          <input type="number" id="rfPizzaCtvrt" class="form-control" value="${r.pizza_ctvrt||0}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🍔 Burger</label>
+          <input type="number" id="rfBurger" class="form-control" value="${r.burger||0}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🍲 Buřtguláš</label>
+          <input type="number" id="rfBurtgulas" class="form-control" value="${r.burtgulas||0}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🍽 Počet talířů</label>
+          <input type="number" id="rfTalire" class="form-control" value="${r.talire||0}">
+        </div>
+      </div>
+    </div>
+
+    <div class="btn-group" style="margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitReport()">💾 Uložit report</button>
+    </div>`;
+}
+
+function switchRTab(tab) {
+  ["foto","text","rucni"].forEach(t => {
+    const panel = document.getElementById("rtabPanel" + t.charAt(0).toUpperCase() + t.slice(1));
+    const btn   = document.getElementById("rtab" + t.charAt(0).toUpperCase() + t.slice(1));
+    if (panel) panel.style.display = t === tab ? "" : "none";
+    if (btn)   btn.classList.toggle("tab-active", t === tab);
+  });
+}
+
+function rfRecalc() {
+  const karty   = parseFloat(document.getElementById("rfKarty")?.value  || 0);
+  const kov     = parseFloat(document.getElementById("rfKov")?.value    || 0);
+  const papir   = parseFloat(document.getElementById("rfPapir")?.value  || 0);
+  const vydaje  = parseFloat(document.getElementById("rfVydaje")?.value || 0);
+  const pk50    = parseInt(document.getElementById("rfPk50")?.value     || 0);
+  const pk100   = parseInt(document.getElementById("rfPk100")?.value    || 0);
+  const hotovost  = kov + papir;
+  const trzba     = karty + hotovost + vydaje;
+  const pkKc      = pk50 * 50 + pk100 * 100;
+  const trzbaVcPk = trzba + pkKc;
+  const el = (id) => document.getElementById(id);
+  if (el("rfHotovostDisp"))  el("rfHotovostDisp").textContent  = "Hotovost: " + czMoney(hotovost);
+  if (el("rfTrzbaDisp"))     el("rfTrzbaDisp").textContent     = "Tržba: " + czMoney(trzba);
+  if (el("rfPkDisp"))        el("rfPkDisp").textContent        = "PK: " + czMoney(pkKc);
+  if (el("rfTrzbaVcPkDisp")) el("rfTrzbaVcPkDisp").textContent = "Tržba vč. PK: " + czMoney(trzbaVcPk);
+}
+
+function naplnReportFormular(data) {
+  const fields = {
+    rfDatum: data.datum || "", rfDen: data.den || "", rfSmena: data.smena || "",
+    rfKarty: data.karty || 0, rfKov: data.kov || 0, rfPapir: data.papir || 0,
+    rfVydaje: data.vydaje || 0, rfPk50: data.pk50_ks || 0, rfPk100: data.pk100_ks || 0,
+    rfPizzaCela: data.pizza_cela || 0, rfPizzaCtvrt: data.pizza_ctvrt || 0,
+    rfBurger: data.burger || 0, rfTalire: data.talire || 0, rfBurtgulas: data.burtgulas || 0,
+  };
+  Object.entries(fields).forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val;
+  });
+  rfRecalc();
+}
+
+function openNovyReport() {
+  openModal("Nový denní report", reportFormHtml());
+  setupReportDropzone();
+  rfRecalc();
+}
+
+async function editReport(id) {
+  let rows;
+  try { rows = await api("/api/reporty"); } catch { return; }
+  const r = rows.find(x => x.id === id);
+  if (!r) { toast("Report nenalezen", true); return; }
+  openModal("Upravit report – " + czDate(r.datum), reportFormHtml(r));
+  setupReportDropzone();
+  rfRecalc();
+}
+
+async function deleteReport(id) {
+  if (!confirm("Opravdu smazat tento report?")) return;
+  await api(`/api/reporty/${id}`, { method: "DELETE" });
+  toast("Report smazán");
+  loadReporty();
+}
+
+function setupReportDropzone() {
+  const dz  = document.getElementById("reportDropzone");
+  const inp = document.getElementById("reportFileInput");
+  if (!dz) return;
+  dz.addEventListener("click", () => inp.click());
+  inp.addEventListener("change", () => { if (inp.files[0]) uploadReportFoto(inp.files[0]); });
+  dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag-over"); });
+  dz.addEventListener("dragleave", () => dz.classList.remove("drag-over"));
+  dz.addEventListener("drop", e => {
+    e.preventDefault(); dz.classList.remove("drag-over");
+    if (e.dataTransfer.files[0]) uploadReportFoto(e.dataTransfer.files[0]);
+  });
+}
+
+async function uploadReportFoto(file) {
+  const statusEl = document.getElementById("reportFotoStatus");
+  statusEl.innerHTML = `<span class="spinner"></span> Čtu lístek přes AI...`;
+  const fd = new FormData();
+  fd.append("soubor", file);
+  try {
+    const r = await fetch("/api/reporty/nahrat-foto", { method: "POST", body: fd });
+    const data = await r.json();
+    if (data.error) {
+      statusEl.textContent = "❌ " + data.error;
+      return;
+    }
+    statusEl.textContent = "✅ Lístek přečten – zkontrolujte a uložte";
+    naplnReportFormular(data);
+    // Přepni na ruční tab pro kontrolu
+    switchRTab("rucni");
+  } catch (e) {
+    statusEl.textContent = "❌ Chyba: " + e.message;
+  }
+}
+
+async function zpracovatReportText() {
+  const text = document.getElementById("reportTextInput")?.value.trim();
+  if (!text) return;
+  const statusEl = document.getElementById("reportTextStatus");
+  statusEl.innerHTML = `<span class="spinner"></span> Zpracovávám...`;
+  try {
+    const r = await fetch("/api/reporty/nahrat-text", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({text})
+    });
+    const data = await r.json();
+    if (data.error) { statusEl.textContent = "❌ " + data.error; return; }
+    statusEl.textContent = "✅ Zpracováno";
+    naplnReportFormular(data);
+    switchRTab("rucni");
+  } catch(e) {
+    statusEl.textContent = "❌ " + e.message;
+  }
+}
+
+async function ulozitReport() {
+  const datum = document.getElementById("rfDatum")?.value;
+  if (!datum) { toast("Vyplňte datum", true); return; }
+  const payload = {
+    datum,
+    den:         document.getElementById("rfDen")?.value || "",
+    smena:       document.getElementById("rfSmena")?.value || "",
+    karty:       parseFloat(document.getElementById("rfKarty")?.value || 0),
+    kov:         parseFloat(document.getElementById("rfKov")?.value || 0),
+    papir:       parseFloat(document.getElementById("rfPapir")?.value || 0),
+    vydaje:      parseFloat(document.getElementById("rfVydaje")?.value || 0),
+    pk50_ks:     parseInt(document.getElementById("rfPk50")?.value || 0),
+    pk100_ks:    parseInt(document.getElementById("rfPk100")?.value || 0),
+    pizza_cela:  parseInt(document.getElementById("rfPizzaCela")?.value || 0),
+    pizza_ctvrt: parseInt(document.getElementById("rfPizzaCtvrt")?.value || 0),
+    burger:      parseInt(document.getElementById("rfBurger")?.value || 0),
+    talire:      parseInt(document.getElementById("rfTalire")?.value || 0),
+    burtgulas:   parseInt(document.getElementById("rfBurtgulas")?.value || 0),
+  };
+  await api("/api/reporty", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(payload)
+  });
+  toast("Report uložen ✓");
+  closeModal();
+  renderReporty();
+}
+
+// ── Import xlsx ─────────────────────────────────────────────────
+function openImportXlsx() {
+  openModal("Import historických dat (xlsx)", `
+    <p style="color:var(--txt2);font-size:.9rem;margin-bottom:1rem">
+      Nahrajte soubor <strong>CLAUDE_vykaz_2025_2026.xlsx</strong> nebo libovolný soubor
+      ve stejném formátu. Data budou importována do databáze.<br>
+      <small>Záznamy, které již existují (stejné datum), budou přeskočeny.</small>
+    </p>
+    <div class="dropzone" id="importDropzone" style="padding:1rem">
+      <div class="dropzone-icon">📥</div>
+      <div class="dropzone-text"><strong>Přetáhněte xlsx soubor</strong> nebo klikněte</div>
+      <input type="file" id="importFileInput" accept=".xlsx,.xls">
+    </div>
+    <div id="importStatus" style="margin-top:1rem;font-size:.9rem"></div>
+  `);
+
+  const dz  = document.getElementById("importDropzone");
+  const inp = document.getElementById("importFileInput");
+  dz.addEventListener("click", () => inp.click());
+  inp.addEventListener("change", () => { if (inp.files[0]) doImportXlsx(inp.files[0]); });
+  dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag-over"); });
+  dz.addEventListener("dragleave", () => dz.classList.remove("drag-over"));
+  dz.addEventListener("drop", e => {
+    e.preventDefault(); dz.classList.remove("drag-over");
+    if (e.dataTransfer.files[0]) doImportXlsx(e.dataTransfer.files[0]);
+  });
+}
+
+async function doImportXlsx(file) {
+  const statusEl = document.getElementById("importStatus");
+  statusEl.innerHTML = `<span class="spinner"></span> Importuji data...`;
+  const fd = new FormData();
+  fd.append("soubor", file);
+  try {
+    const r = await fetch("/api/reporty/import-xlsx", { method: "POST", body: fd });
+    const data = await r.json();
+    if (data.error) {
+      statusEl.innerHTML = `❌ Chyba: ${escHtml(data.error)}`;
+      return;
+    }
+    statusEl.innerHTML = `
+      <div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:6px;padding:.7rem 1rem;color:#065f46">
+        ✅ Import dokončen!<br>
+        <strong>${data.imported}</strong> záznamů importováno,
+        <strong>${data.skipped}</strong> přeskočeno (prázdné nebo existující)
+        ${data.errors?.length ? `<br><small style="color:#991b1b">⚠ ${data.errors.join("; ")}</small>` : ""}
+      </div>`;
+    setTimeout(() => { closeModal(); renderReporty(); }, 2000);
+  } catch(e) {
+    statusEl.innerHTML = `❌ ${e.message}`;
+  }
+}
+
+function exportReporty(fmt) {
+  const params = new URLSearchParams({
+    format: fmt,
+    od: document.getElementById("rOd")?.value || "",
+    do: document.getElementById("rDo")?.value || "",
+  });
+  window.location.href = `/api/export/reporty?${params}`;
 }
