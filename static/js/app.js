@@ -1150,23 +1150,23 @@ function renderPolozkyTable() {
   el.innerHTML = `
     <table>
       <thead><tr>
-        ${th("zbozi_nazev","Zboží")}
-        ${th("jednotka","Jedn.")}
-        ${th("celkove_mnozstvi","Celk. množství")}
-        ${th("celkem_utraceno","Celkem s DPH")}
+        ${th("zbozi_nazev","Název")}
+        ${th("pocet_nakupu","Počet nákupů")}
+        ${th("celkove_mnozstvi","Celkem ks/kg")}
+        ${th("jednotka","Jednotka")}
         ${th("prumerna_cena","Průměrná cena/jedn.")}
-        ${th("pocet_nakupu","Nákupů")}
+        ${th("celkem_utraceno","Celkem s DPH")}
         <th>Dodavatelé</th>
       </tr></thead>
       <tbody>
         ${sorted.map(r => `
           <tr class="zbozi-row" data-id="${r.zbozi_id||""}" data-nazev="${escHtml(r.zbozi_nazev)}">
             <td><strong>${escHtml(r.zbozi_nazev)}</strong></td>
-            <td>${r.jednotka}</td>
-            <td>${Number(r.celkove_mnozstvi).toLocaleString("cs-CZ")}</td>
-            <td><strong>${czMoney(r.celkem_utraceno)}</strong></td>
-            <td>${czMoney(r.prumerna_cena)}</td>
             <td style="text-align:center"><span class="badge badge-zaplaceno">${r.pocet_nakupu}</span></td>
+            <td>${Number(r.celkove_mnozstvi).toLocaleString("cs-CZ")}</td>
+            <td>${r.jednotka}</td>
+            <td>${czMoney(r.prumerna_cena)}</td>
+            <td><strong>${czMoney(r.celkem_utraceno)}</strong></td>
             <td style="font-size:.82rem;color:var(--txt2)">${escHtml(r.dodavatele||"")}</td>
           </tr>`).join("") ||
           "<tr><td colspan='7' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné položky</td></tr>"}
