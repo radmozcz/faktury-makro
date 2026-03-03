@@ -22,7 +22,6 @@ from werkzeug.utils import secure_filename
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
 
-# ── Pokus o načtení OCR knihoven (nepovinné) ──────────────────────────────────
 try:
     import pdfplumber
     PDF_SUPPORT = True
@@ -42,7 +41,6 @@ except ImportError:
     OCR_SUPPORT = False
     print("⚠  pytesseract/Pillow není nainstalován – OCR obrázků nebude fungovat")
 
-# ── Konfigurace ──────────────────────────────────────────────────────────────
 BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
 DB_PATH     = os.path.join(BASE_DIR, "faktury.db")
 UPLOAD_DIR  = os.path.join(BASE_DIR, "uploads")
@@ -52,7 +50,7 @@ ALLOWED_EXT = {"pdf", "png", "jpg", "jpeg", "tiff", "bmp"}
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB
+app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 
 DEFAULT_CONFIG = {
     "firmy": ["FP", "MR", "CFF"],
@@ -70,16 +68,25 @@ def save_config(cfg):
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
-# ── Databáze ──────────────────────────────────────────────────────────────────
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 _USE_PG = bool(DATABASE_URL)
+
+
+def _first_val(row):
+    """Vrátí první hodnotu z řádku – funguje pro dict (PG) i tuple/Row (SQLite)."""
+    if row is None:
+        return 0
+    if isinstance(row, dict):
+        v = list(row.values())[0]
+    else:
+        v = row[0]
+    return v if v is not None else 0
+
 
 class _PgCursor:
     def __init__(self, cur, is_insert=False):
         self._cur = cur
         self._lastrowid = None
-        # ── OPRAVA: přečteme RETURNING id hned při vytvoření kurzoru,
-        #    ještě před commit() – jinak by byl kurzor po commitu zavřený
         if is_insert:
             try:
                 r = self._cur.fetchone()
@@ -95,7 +102,6 @@ class _PgCursor:
 
     @property
     def lastrowid(self):
-        # ── OPRAVA: vracíme předem uloženou hodnotu, ne čteme znovu z kurzoru
         return self._lastrowid
 
     @property
@@ -119,9 +125,9 @@ class _PgConn:
         sql = sql.replace("datetime('now','localtime')", "NOW()")
         sql = sql.replace("date('now','-12 months')", "CURRENT_DATE - INTERVAL '12 months'")
         sql = sql.replace("date('now')", "CURRENT_DATE")
-        sql = _re.sub(r"strftime\('%Y',\s*([^,)]+)\)", r"TO_CHAR(\1, 'YYYY')", sql)
-        sql = _re.sub(r"strftime\('%m',\s*([^,)]+)\)", r"TO_CHAR(\1, 'MM')", sql)
-        sql = _re.sub(r"strftime\('%Y-%m',\s*([^,)]+)\)", r"TO_CHAR(\1, 'YYYY-MM')", sql)
+        sql = _re.sub(r"strftime\('%Y',\s*([^,)]+)\)", r"TO_CHAR(\1::date, 'YYYY')", sql)
+        sql = _re.sub(r"strftime\('%m',\s*([^,)]+)\)", r"TO_CHAR(\1::date, 'MM')", sql)
+        sql = _re.sub(r"strftime\('%Y-%m',\s*([^,)]+)\)", r"TO_CHAR(\1::date, 'YYYY-MM')", sql)
         return sql
     def execute(self, sql, params=()):
         if sql.strip().upper().startswith("PRAGMA"):
@@ -138,7 +144,6 @@ class _PgConn:
         if is_insert and "RETURNING" not in sql_pg.upper():
             sql_pg = sql_pg.rstrip().rstrip(";") + " RETURNING id"
         cur.execute(sql_pg, params if params else None)
-        # ── OPRAVA: předáváme is_insert aby _PgCursor věděl kdy číst lastrowid
         return _PgCursor(cur, is_insert=is_insert)
     def executescript(self, sql):
         sql = self._adapt(sql)
@@ -274,9 +279,10 @@ def update_stav_po_splatnosti():
         """, (today,))
 
 def recalc_faktura_total(conn, faktura_id):
-    row = conn.execute("SELECT SUM(celkem_s_dph) FROM polozky WHERE faktura_id=?", (faktura_id,)).fetchone()
-    total = row[0] or 0
+    row = conn.execute("SELECT COALESCE(SUM(celkem_s_dph),0) as total FROM polozky WHERE faktura_id=?", (faktura_id,)).fetchone()
+    total = _first_val(row)
     conn.execute("UPDATE faktury SET celkem_s_dph=? WHERE id=?", (total, faktura_id))
+
 
 # ── MAKRO parser ───────────────────────────────────────────────────────────────
 def parse_makro_pdf(filepath):
@@ -763,7 +769,6 @@ def _map_unit(u):
     return mapping.get(u.upper(), u.lower())
 
 
-# ── REPORTY – Claude Vision parser ────────────────────────────────────────────
 JMENA_MAP = {
     "rada": "Radek", "radek": "Radek", "ráďa": "Radek", "radi": "Radek",
     "verka": "Věrka", "vera": "Věrka", "věra": "Věrka", "věrka": "Věrka",
@@ -773,7 +778,6 @@ JMENA_MAP = {
 }
 
 def normalize_jmena(text):
-    """Převede různé tvary jmen na kanonické."""
     if not text:
         return ""
     parts = re.split(r"[,/\s]+", text.strip())
@@ -788,7 +792,6 @@ def normalize_jmena(text):
 
 
 def parse_report_image_claude(filepath):
-    """Použije Claude Vision API pro přečtení ručně psaného reportu."""
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         return None, "ANTHROPIC_API_KEY není nastaven"
@@ -832,30 +835,16 @@ PRAVIDLA PRO ČÍSLA:
 - NIKDY neinterpretuj tečku jako desetinnou čárku u celých částek v Kč
 - Čísla zapisuj jako celá čísla bez teček a čárek
 
-PRAVIDLA PRO JMÉNA (normalizuj vždy na kanonický tvar):
+PRAVIDLA PRO JMÉNA:
 - Ráďa, Rada, Radek → "Radek"
-- Věrka, Verka, Věra, Verca → "Věrka"  
-- Renča, Renata, Renca → "Renča"
+- Věrka, Verka, Věra → "Věrka"
+- Renča, Renata → "Renča"
 - Vendy, Wendy → "Vendy"
 - Vali → "Vali"
-- IGNORUJ jména která nepatří do seznamu výše (překlepy, nečitelná jména)
 
 PRAVIDLA PRO DATUM:
-- Hledej datum ve formátu "D.M" nebo "D.M." nebo "D/M" nahoře na lístku
-- Pokud datum není čitelné nebo chybí, vrať dnešní datum: "{today}"
-
-PRAVIDLA PRO VÝDAJE:
-- Vydaje = součet VŠECH výdajů na lístku
-- Příklad: "Rada odvod 509" nebo "odvod 509,-" = vydaje: 509
-
-PRAVIDLA PRO PK (poukázky):
-- "5x100" nebo "5×100" = pk100_ks: 5
-- "2x50" nebo "2×50" = pk50_ks: 2
-- "1×100=100" = pk100_ks: 1
-
-PRAVIDLA PRO JÍDLO:
-- Počítej přesně číslo za "x" nebo "ks" nebo číslici před položkou
-- Pizza čtvrt = ČTVRT nebo 1/4
+- Hledej datum ve formátu "D.M" nahoře na lístku
+- Pokud chybí, vrať dnešní datum: "{today}"
 """
 
         message = client.messages.create(
@@ -889,7 +878,6 @@ PRAVIDLA PRO JÍDLO:
 
 
 def parse_report_text(text):
-    """Parsuje vložený text reportu (Ctrl+C/V ze zprávy)."""
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         return None, "ANTHROPIC_API_KEY není nastaven"
@@ -940,7 +928,6 @@ Formát odpovědi:
 
 
 def datum_to_iso(datum_str, year=None):
-    """Převede '19/2' nebo '19.2' na '2026-02-19'."""
     if not datum_str:
         return None
     datum_str = str(datum_str).strip()
@@ -958,7 +945,6 @@ def datum_to_iso(datum_str, year=None):
 
 
 def build_report_from_parsed(parsed, year=None):
-    """Sestaví kompletní report dict z parsovaných dat."""
     datum_iso = datum_to_iso(parsed.get("datum"), year)
 
     karty   = float(parsed.get("karty", 0) or 0)
@@ -1034,21 +1020,24 @@ def api_dashboard():
         where_firma = "AND firma_zkratka=?" if firma else ""
         params_base = (firma,) if firma else ()
 
+        # ── OPRAVA: pojmenované sloupce místo indexů [0],[1]
         row = conn.execute(f"""
-            SELECT COUNT(*), COALESCE(SUM(celkem_s_dph),0)
+            SELECT COUNT(*) as pocet, COALESCE(SUM(celkem_s_dph),0) as vydaje
             FROM faktury
             WHERE datum_vystaveni LIKE ? {where_firma}
         """, (mesic + "%",) + params_base).fetchone()
-        pocet_mesic, vydaje_mesic = row[0], row[1]
+        pocet_mesic  = row["pocet"]  if isinstance(row, dict) else row[0]
+        vydaje_mesic = row["vydaje"] if isinstance(row, dict) else row[1]
 
         row2 = conn.execute(f"""
-            SELECT COUNT(*), COALESCE(SUM(celkem_s_dph),0)
+            SELECT COUNT(*) as pocet, COALESCE(SUM(celkem_s_dph),0) as castka
             FROM faktury WHERE stav='po_splatnosti' {where_firma}
         """, params_base).fetchone()
-        pocet_po_spl, castka_po_spl = row2[0], row2[1]
+        pocet_po_spl  = row2["pocet"]  if isinstance(row2, dict) else row2[0]
+        castka_po_spl = row2["castka"] if isinstance(row2, dict) else row2[1]
 
         graf = conn.execute(f"""
-            SELECT strftime('%Y-%m', datum_vystaveni) as m, COALESCE(SUM(celkem_s_dph),0)
+            SELECT strftime('%Y-%m', datum_vystaveni) as m, COALESCE(SUM(celkem_s_dph),0) as castka
             FROM faktury
             WHERE datum_vystaveni >= date('now','-12 months') {where_firma}
             GROUP BY m ORDER BY m
@@ -1061,18 +1050,24 @@ def api_dashboard():
             ORDER BY created_at DESC LIMIT 5
         """, params_base).fetchall()
 
-        karty_12m = conn.execute("""
-            SELECT COALESCE(SUM(karty),0)
+        karty_row = conn.execute("""
+            SELECT COALESCE(SUM(karty),0) as karty
             FROM reporty
             WHERE datum >= date('now','-12 months')
-        """).fetchone()[0]
+        """).fetchone()
+        karty_12m = karty_row["karty"] if isinstance(karty_row, dict) else karty_row[0]
+
+    def graf_row(r):
+        if isinstance(r, dict):
+            return {"mesic": r["m"], "castka": round(r["castka"], 2)}
+        return {"mesic": r[0], "castka": round(r[1], 2)}
 
     return jsonify({
         "vydaje_mesic": round(vydaje_mesic, 2),
         "pocet_mesic": pocet_mesic,
         "pocet_po_splatnosti": pocet_po_spl,
         "castka_po_splatnosti": round(castka_po_spl, 2),
-        "graf": [{"mesic": r[0], "castka": round(r[1], 2)} for r in graf],
+        "graf": [graf_row(r) for r in graf],
         "posledni_faktury": [dict(r) for r in posledni],
         "karty_12m": round(karty_12m, 2),
         "karty_limit": 1500000,
@@ -1109,7 +1104,8 @@ def api_faktury():
             FROM faktury {where}
             ORDER BY datum_vystaveni DESC, created_at DESC
         """, params).fetchall()
-        total = conn.execute(f"SELECT COALESCE(SUM(celkem_s_dph),0) FROM faktury {where}", params).fetchone()[0]
+        total_row = conn.execute(f"SELECT COALESCE(SUM(celkem_s_dph),0) as total FROM faktury {where}", params).fetchone()
+        total = _first_val(total_row)
 
     return jsonify({
         "faktury": [dict(r) for r in rows],
@@ -1188,7 +1184,11 @@ def api_vyplaty():
             rows = conn.execute(f"""
                 SELECT * FROM vyplaty {where} ORDER BY datum DESC, created_at DESC
             """, params).fetchall()
-            total = conn.execute(f"SELECT COALESCE(SUM(castka),0) FROM vyplaty {where}", params).fetchone()[0]
+            # ── OPRAVA: pojmenovaný sloupec – funguje v PG i SQLite
+            total_row = conn.execute(
+                f"SELECT COALESCE(SUM(castka),0) as total FROM vyplaty {where}", params
+            ).fetchone()
+            total = _first_val(total_row)
         return jsonify({"vyplaty": [dict(r) for r in rows], "celkem": round(total, 2)})
     except Exception as e:
         import traceback
@@ -1237,10 +1237,10 @@ def api_vyplata_update(vid):
         conn.execute(f"UPDATE vyplaty SET {','.join(set_parts)} WHERE id=?", vals)
     return jsonify({"ok": True})
 
+
 # ── API: REPORTY ──────────────────────────────────────────────────────────────
 @app.route("/api/reporty/nahrat-foto", methods=["POST"])
 def api_report_nahrat_foto():
-    """Nahraje fotku lístku, přečte přes Claude Vision, vrátí parsed data."""
     if "soubor" not in request.files:
         return jsonify({"error": "Žádný soubor"}), 400
     f = request.files["soubor"]
@@ -1263,7 +1263,6 @@ def api_report_nahrat_foto():
 
 @app.route("/api/reporty/nahrat-text", methods=["POST"])
 def api_report_nahrat_text():
-    """Přijme vložený text reportu (Ctrl+C/V), parsuje přes Claude."""
     text = request.json.get("text", "").strip()
     if not text:
         return jsonify({"error": "Prázdný text"}), 400
@@ -1295,7 +1294,6 @@ def api_reporty_list():
 
 @app.route("/api/reporty", methods=["POST"])
 def api_report_ulozit():
-    """Uloží report (nový nebo aktualizuje existující podle data)."""
     data = request.json
     if not data.get("datum"):
         return jsonify({"error": "Chybí datum"}), 400
@@ -1360,7 +1358,6 @@ def api_report_delete(rid):
 
 @app.route("/api/reporty/smaz-budouci", methods=["POST"])
 def api_reporty_smaz_budouci():
-    """Smaže záznamy s datem v budoucnosti."""
     dnes = date.today().isoformat()
     with get_db() as conn:
         cur = conn.execute("DELETE FROM reporty WHERE datum > ?", (dnes,))
@@ -1370,7 +1367,6 @@ def api_reporty_smaz_budouci():
 
 @app.route("/api/reporty/import-xlsx", methods=["POST"])
 def api_report_import_xlsx():
-    """Importuje historická data z xlsx souboru (formát CLAUDE_vykaz)."""
     if "soubor" not in request.files:
         return jsonify({"error": "Žádný soubor"}), 400
     f = request.files["soubor"]
@@ -1481,13 +1477,13 @@ def api_report_import_xlsx():
 
 @app.route("/api/reporty/karty-alert")
 def api_karty_alert():
-    """Vrátí součet karet za posledních 12 měsíců – celkem i per firma."""
     with get_db() as conn:
-        total = conn.execute("""
-            SELECT COALESCE(SUM(karty),0)
+        total_row = conn.execute("""
+            SELECT COALESCE(SUM(karty),0) as total
             FROM reporty
             WHERE datum >= date('now','-12 months')
-        """).fetchone()[0]
+        """).fetchone()
+        total = _first_val(total_row)
         per_firma = conn.execute("""
             SELECT firma_zkratka, COALESCE(SUM(karty),0) as karty_12m
             FROM reporty
@@ -1596,15 +1592,22 @@ def export_reporty():
     headers = ["datum","měsíc","den","TRŽBA vč. PK","karty","hotovost","výdaje","tržba",
                "pk50 ks","pk100 ks","poukaz Kč","pizza celá","čtvrt","burger","talíře","buřtguláš","KDO"]
 
+    def r_val(r, key, idx):
+        return r[key] if isinstance(r, dict) else r[idx]
+
     if fmt == "csv":
         buf = io.StringIO()
         w   = csv.writer(buf, delimiter=";")
         w.writerow(headers)
         for r in rows:
-            d = date.fromisoformat(r[0]) if r[0] else None
+            d = date.fromisoformat(r_val(r,"datum",0)) if r_val(r,"datum",0) else None
             mesic = d.strftime("%B").upper() if d else ""
-            w.writerow([d.day if d else "", mesic, r[1], r[2], r[3], r[4], r[5], r[6],
-                        r[7], r[8], r[9], r[10], r[11], r[12], r[13], r[14], r[15]])
+            w.writerow([d.day if d else "", mesic, r_val(r,"den",1), r_val(r,"trzba_vcpk",2),
+                        r_val(r,"karty",3), r_val(r,"hotovost",4), r_val(r,"vydaje",5),
+                        r_val(r,"trzba",6), r_val(r,"pk50_ks",7), r_val(r,"pk100_ks",8),
+                        r_val(r,"pk_celkem",9), r_val(r,"pizza_cela",10), r_val(r,"pizza_ctvrt",11),
+                        r_val(r,"burger",12), r_val(r,"talire",13), r_val(r,"burtgulas",14),
+                        r_val(r,"smena",15)])
         buf.seek(0)
         return send_file(io.BytesIO(buf.getvalue().encode("utf-8-sig")),
                          mimetype="text/csv", download_name="reporty.csv", as_attachment=True)
@@ -1615,11 +1618,14 @@ def export_reporty():
         mesice_cs = ["","LEDEN","ÚNOR","BŘEZEN","DUBEN","KVĚTEN","ČERVEN",
                      "ČERVENEC","SRPEN","ZÁŘÍ","ŘÍJEN","LISTOPAD","PROSINEC"]
         for r in rows:
-            d = date.fromisoformat(r[0]) if r[0] else None
+            d = date.fromisoformat(r_val(r,"datum",0)) if r_val(r,"datum",0) else None
             mesic = mesice_cs[d.month] if d else ""
-            den_cislo = d.day if d else ""
-            ws_out.append([den_cislo, mesic, r[1], r[2], r[3], r[4], r[5], r[6],
-                           r[7], r[8], r[9], r[10], r[11], r[12], r[13], r[14], r[15]])
+            ws_out.append([d.day if d else "", mesic, r_val(r,"den",1), r_val(r,"trzba_vcpk",2),
+                           r_val(r,"karty",3), r_val(r,"hotovost",4), r_val(r,"vydaje",5),
+                           r_val(r,"trzba",6), r_val(r,"pk50_ks",7), r_val(r,"pk100_ks",8),
+                           r_val(r,"pk_celkem",9), r_val(r,"pizza_cela",10), r_val(r,"pizza_ctvrt",11),
+                           r_val(r,"burger",12), r_val(r,"talire",13), r_val(r,"burtgulas",14),
+                           r_val(r,"smena",15)])
         buf = io.BytesIO(); wb_out.save(buf); buf.seek(0)
         return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                          download_name="reporty.xlsx", as_attachment=True)
@@ -2084,7 +2090,6 @@ def uploaded_file(filename):
     return send_from_directory(UPLOAD_DIR, filename)
 
 
-# Inicializace DB při každém startu (gunicorn i přímé spuštění)
 init_db()
 migrate_db()
 
