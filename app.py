@@ -159,11 +159,12 @@ def migrate_db():
     with get_db() as conn:
         existing = [row[1] for row in conn.execute("PRAGMA table_info(reporty)").fetchall()]
         migrations = [
-            ("burtgulas", "INTEGER DEFAULT 0"),
-            ("hotdog",    "INTEGER DEFAULT 0"),
-            ("snidane",   "INTEGER DEFAULT 0"),
-            ("nakupy",    "INTEGER DEFAULT 0"),
-            ("foto_cesta","TEXT"),
+            ("burtgulas",     "INTEGER DEFAULT 0"),
+            ("hotdog",        "INTEGER DEFAULT 0"),
+            ("snidane",       "INTEGER DEFAULT 0"),
+            ("nakupy",        "INTEGER DEFAULT 0"),
+            ("foto_cesta",    "TEXT"),
+            ("firma_zkratka", "TEXT DEFAULT ''"),
         ]
         for col, typ in migrations:
             if col not in existing:
@@ -1319,13 +1320,14 @@ def api_report_ulozit():
     pk_celkem  = pk50_ks * 50 + pk100_ks * 100
     trzba_vcpk = trzba + pk_celkem
 
+    firma = data.get("firma_zkratka", "")
     with get_db() as conn:
         existing = conn.execute("SELECT id FROM reporty WHERE datum=?", (data["datum"],)).fetchone()
         if existing:
             conn.execute("""
                 UPDATE reporty SET den=?,smena=?,karty=?,kov=?,papir=?,hotovost=?,
                 vydaje=?,trzba=?,trzba_vcpk=?,pk50_ks=?,pk100_ks=?,pk_celkem=?,
-                pizza_cela=?,pizza_ctvrt=?,burger=?,talire=?,burtgulas=?,poznamka=?
+                pizza_cela=?,pizza_ctvrt=?,burger=?,talire=?,burtgulas=?,poznamka=?,firma_zkratka=?
                 WHERE datum=?
             """, (
                 data.get("den",""), data.get("smena",""),
@@ -1334,7 +1336,7 @@ def api_report_ulozit():
                 int(data.get("pizza_cela",0) or 0), int(data.get("pizza_ctvrt",0) or 0),
                 int(data.get("burger",0) or 0), int(data.get("talire",0) or 0),
                 int(data.get("burtgulas",0) or 0),
-                data.get("poznamka",""),
+                data.get("poznamka",""), firma,
                 data["datum"]
             ))
             rid = existing["id"]
@@ -1342,8 +1344,8 @@ def api_report_ulozit():
             cur = conn.execute("""
                 INSERT INTO reporty (datum,den,smena,karty,kov,papir,hotovost,vydaje,
                 trzba,trzba_vcpk,pk50_ks,pk100_ks,pk_celkem,
-                pizza_cela,pizza_ctvrt,burger,talire,burtgulas,poznamka)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                pizza_cela,pizza_ctvrt,burger,talire,burtgulas,poznamka,firma_zkratka)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 data["datum"], data.get("den",""), data.get("smena",""),
                 karty, kov, papir, hotovost, vydaje, trzba, trzba_vcpk,
@@ -1351,7 +1353,7 @@ def api_report_ulozit():
                 int(data.get("pizza_cela",0) or 0), int(data.get("pizza_ctvrt",0) or 0),
                 int(data.get("burger",0) or 0), int(data.get("talire",0) or 0),
                 int(data.get("burtgulas",0) or 0),
-                data.get("poznamka","")
+                data.get("poznamka",""), firma
             ))
             rid = cur.lastrowid
 
@@ -1490,20 +1492,102 @@ def api_report_import_xlsx():
 
 @app.route("/api/reporty/karty-alert")
 def api_karty_alert():
-    """Vrátí součet karet za posledních 12 měsíců."""
+    """Vrátí součet karet za posledních 12 měsíců – celkem i per firma."""
     with get_db() as conn:
         total = conn.execute("""
             SELECT COALESCE(SUM(karty),0)
             FROM reporty
             WHERE datum >= date('now','-12 months')
         """).fetchone()[0]
+        per_firma = conn.execute("""
+            SELECT firma_zkratka, COALESCE(SUM(karty),0) as karty_12m
+            FROM reporty
+            WHERE datum >= date('now','-12 months')
+            GROUP BY firma_zkratka
+            ORDER BY karty_12m DESC
+        """).fetchall()
+    LIMIT = 1500000
+    firmy_alert = []
+    for r in per_firma:
+        firma = r["firma_zkratka"] or "—"
+        k = round(r["karty_12m"], 2)
+        firmy_alert.append({
+            "firma": firma,
+            "karty_12m": k,
+            "procent": round(k / LIMIT * 100, 1),
+            "alert": k >= LIMIT,
+            "varovani": k >= 1200000,
+        })
     return jsonify({
         "karty_12m": round(total, 2),
-        "limit": 1500000,
-        "procent": round(total / 1500000 * 100, 1),
-        "alert": total >= 1500000,
+        "limit": LIMIT,
+        "procent": round(total / LIMIT * 100, 1),
+        "alert": total >= LIMIT,
         "varovani": total >= 1200000,
+        "per_firma": firmy_alert,
     })
+
+
+@app.route("/api/statistiky/mesice")
+def api_statistiky_mesice():
+    """Měsíční statistiky – součet a průměr per měsíc, s volitelným filtrem firmy."""
+    firma = request.args.get("firma", "")
+    clauses = ["datum <= ?"]
+    params  = [date.today().isoformat()]
+    if firma:
+        clauses.append("firma_zkratka=?")
+        params.append(firma)
+    where = "WHERE " + " AND ".join(clauses)
+    with get_db() as conn:
+        rows = conn.execute(f"""
+            SELECT
+                strftime('%Y', datum) as rok,
+                strftime('%m', datum) as mesic,
+                COUNT(*) as dni,
+                ROUND(SUM(trzba_vcpk),2)  as trzba_vcpk_sum,
+                ROUND(AVG(trzba_vcpk),2)  as trzba_vcpk_avg,
+                ROUND(SUM(karty),2)       as karty_sum,
+                ROUND(AVG(karty),2)       as karty_avg,
+                ROUND(SUM(hotovost),2)    as hotovost_sum,
+                ROUND(AVG(hotovost),2)    as hotovost_avg,
+                ROUND(SUM(vydaje),2)      as vydaje_sum,
+                ROUND(SUM(pk_celkem),2)   as pk_celkem_sum,
+                SUM(pizza_cela)           as pizza_cela_sum,
+                SUM(pizza_ctvrt)          as pizza_ctvrt_sum,
+                SUM(burger)               as burger_sum,
+                SUM(talire)               as talire_sum,
+                SUM(burtgulas)            as burtgulas_sum,
+                ROUND(AVG(pizza_cela),1)  as pizza_cela_avg,
+                ROUND(AVG(pizza_ctvrt),1) as pizza_ctvrt_avg,
+                ROUND(AVG(burger),1)      as burger_avg,
+                ROUND(AVG(talire),1)      as talire_avg,
+                ROUND(AVG(burtgulas),1)   as burtgulas_avg
+            FROM reporty {where}
+            AND trzba_vcpk > 0
+            GROUP BY rok, mesic
+            ORDER BY rok DESC, mesic DESC
+        """, params).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/statistiky/roky")
+def api_statistiky_roky():
+    """Průměrná denní tržba po měsících v různých letech – pro srovnávací tabulku."""
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT
+                strftime('%Y', datum) as rok,
+                strftime('%m', datum) as mesic,
+                ROUND(AVG(trzba_vcpk),0) as prumer_den,
+                firma_zkratka
+            FROM reporty
+            WHERE datum <= ? AND trzba_vcpk > 0
+            GROUP BY rok, mesic
+            ORDER BY rok, mesic
+        """, (date.today().isoformat(),)).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
 
 
 @app.route("/api/export/reporty")
