@@ -1334,23 +1334,23 @@ function vyplataFormHtml(v = {}) {
   return `
     <div class="grid-2" style="gap:1rem">
       <div class="form-group"><label class="form-label">Firma</label>
-        <select id="vFirmaF" class="form-control">
+        <select id="vfFirma" class="form-control">
           <option value="">—</option>
           ${App.config.firmy.map(f=>`<option value="${f}" ${v.firma_zkratka===f?"selected":""}>${f}</option>`).join("")}
         </select>
       </div>
       <div class="form-group"><label class="form-label">Jméno *</label>
-        <input id="vJmeno" class="form-control" value="${escHtml(v.jmeno||"")}" placeholder="Jméno zaměstnance">
+        <input id="vfJmeno" class="form-control" value="${escHtml(v.jmeno||"")}" placeholder="Jméno zaměstnance">
       </div>
       <div class="form-group"><label class="form-label">Datum *</label>
-        <input type="date" id="vDatum" class="form-control" value="${v.datum||new Date().toISOString().split('T')[0]}">
+        <input type="date" id="vfDatum" class="form-control" value="${v.datum||new Date().toISOString().split('T')[0]}">
       </div>
       <div class="form-group"><label class="form-label">Částka (Kč) *</label>
-        <input type="number" step="0.01" id="vCastka" class="form-control" value="${v.castka||""}">
+        <input type="number" step="0.01" id="vfCastka" class="form-control" value="${v.castka||""}">
       </div>
     </div>
     <div class="form-group"><label class="form-label">Poznámka</label>
-      <input id="vPoznamka" class="form-control" value="${escHtml(v.poznamka||"")}" placeholder="Volitelná poznámka">
+      <input id="vfPoznamka" class="form-control" value="${escHtml(v.poznamka||"")}" placeholder="Volitelná poznámka">
     </div>`;
 }
 
@@ -1371,10 +1371,10 @@ function editVyplata(id, jmeno, datum, castka, poznamka, firma_zkratka) {
 }
 
 async function ulozitVyplatu() {
-  const jmeno  = document.getElementById("vJmeno").value.trim();
-  let datum    = document.getElementById("vDatum").value;
-  const castka = parseFloat(document.getElementById("vCastka").value);
-  if (!jmeno || !datum || isNaN(castka)) { toast("Vyplnte jmeno, datum a castku", true); return; }
+  const jmeno  = document.getElementById("vfJmeno").value.trim();
+  let datum    = document.getElementById("vfDatum").value;
+  const castka = parseFloat(document.getElementById("vfCastka").value);
+  if (!jmeno || !datum || isNaN(castka)) { toast("Vyplňte jméno, datum a částku", true); return; }
   if (/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(datum)) {
     const [d, m, y] = datum.split(".");
     datum = `${y}-${m.padStart(2,"0")}-${d.padStart(2,"0")}`;
@@ -1384,11 +1384,11 @@ async function ulozitVyplatu() {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({
         jmeno, datum, castka,
-        poznamka: document.getElementById("vPoznamka").value,
-        firma_zkratka: document.getElementById("vFirmaF").value,
+        poznamka: document.getElementById("vfPoznamka").value,
+        firma_zkratka: document.getElementById("vfFirma").value,
       })
     });
-    toast("Vyplata ulozena");
+    toast("Výplata uložena ✓");
     closeModal();
     loadVyplaty();
   } catch(e) {
@@ -1397,17 +1397,17 @@ async function ulozitVyplatu() {
 }
 
 async function ulozitVyplatuEdit(id) {
-  const jmeno  = document.getElementById("vJmeno").value.trim();
-  const datum  = document.getElementById("vDatum").value;
-  const castka = parseFloat(document.getElementById("vCastka").value);
+  const jmeno  = document.getElementById("vfJmeno").value.trim();
+  const datum  = document.getElementById("vfDatum").value;
+  const castka = parseFloat(document.getElementById("vfCastka").value);
   if (!jmeno || !datum || isNaN(castka)) { toast("Vyplňte jméno, datum a částku", true); return; }
 
   await api(`/api/vyplaty/${id}`, {
     method:"PUT", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({
       jmeno, datum, castka,
-      poznamka: document.getElementById("vPoznamka").value,
-      firma_zkratka: document.getElementById("vFirmaF").value,
+      poznamka: document.getElementById("vfPoznamka").value,
+      firma_zkratka: document.getElementById("vfFirma").value,
     })
   });
   toast("Výplata upravena ✓");
