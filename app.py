@@ -148,10 +148,19 @@ def get_db():
 
 
 def init_db():
-    with get_db() as conn:
-        conn.executescript("""
-        CREATE TABLE IF NOT EXISTS faktury (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    TABLES = [
+        ("zbozi", """CREATE TABLE IF NOT EXISTS zbozi (
+            id               SERIAL PRIMARY KEY,
+            nazev_canonical  TEXT    NOT NULL UNIQUE,
+            poznamka         TEXT
+        )"""),
+        ("zbozi_aliasy", """CREATE TABLE IF NOT EXISTS zbozi_aliasy (
+            id        SERIAL PRIMARY KEY,
+            zbozi_id  INTEGER NOT NULL REFERENCES zbozi(id) ON DELETE CASCADE,
+            alias     TEXT    NOT NULL UNIQUE
+        )"""),
+        ("faktury", """CREATE TABLE IF NOT EXISTS faktury (
+            id              SERIAL PRIMARY KEY,
             firma_zkratka   TEXT    NOT NULL,
             dodavatel       TEXT    NOT NULL,
             cislo_faktury   TEXT,
@@ -162,10 +171,10 @@ def init_db():
             celkem_s_dph    REAL    DEFAULT 0,
             soubor_cesta    TEXT,
             zdroj           TEXT    DEFAULT 'rucni',
-            created_at      TEXT    DEFAULT (datetime('now','localtime'))
-        );
-        CREATE TABLE IF NOT EXISTS polozky (
-            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at      TEXT    DEFAULT NOW()
+        )"""),
+        ("polozky", """CREATE TABLE IF NOT EXISTS polozky (
+            id                    SERIAL PRIMARY KEY,
             faktura_id            INTEGER NOT NULL REFERENCES faktury(id) ON DELETE CASCADE,
             nazev                 TEXT    NOT NULL,
             mnozstvi              REAL    DEFAULT 1,
@@ -173,130 +182,18 @@ def init_db():
             cena_za_jednotku_s_dph REAL   DEFAULT 0,
             celkem_s_dph          REAL    DEFAULT 0,
             zbozi_id              INTEGER REFERENCES zbozi(id) ON DELETE SET NULL
-        );
-        CREATE TABLE IF NOT EXISTS zbozi (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            nazev_canonical  TEXT    NOT NULL UNIQUE,
-            poznamka         TEXT
-        );
-        CREATE TABLE IF NOT EXISTS zbozi_aliasy (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            zbozi_id  INTEGER NOT NULL REFERENCES zbozi(id) ON DELETE CASCADE,
-            alias     TEXT    NOT NULL UNIQUE
-        );
-        """)
-
-
-def migrate_db():
-    """Přidá chybějící tabulky/sloupce do existující databáze."""
-    with get_db() as conn:
-        conn.executescript("""
-        CREATE TABLE IF NOT EXISTS vyplaty (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        )"""),
+        ("vyplaty", """CREATE TABLE IF NOT EXISTS vyplaty (
+            id          SERIAL PRIMARY KEY,
             jmeno       TEXT    NOT NULL,
             datum       TEXT    NOT NULL,
             castka      REAL    NOT NULL DEFAULT 0,
             poznamka    TEXT,
             firma_zkratka TEXT  DEFAULT '',
-            created_at  TEXT    DEFAULT (datetime('now','localtime'))
-        );
-
-        CREATE TABLE IF NOT EXISTS reporty (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            datum         TEXT    NOT NULL UNIQUE,
-            den           TEXT,
-            smena         TEXT,
-            karty         REAL    DEFAULT 0,
-            kov           REAL    DEFAULT 0,
-            papir         REAL    DEFAULT 0,
-            hotovost      REAL    DEFAULT 0,
-            vydaje        REAL    DEFAULT 0,
-            trzba         REAL    DEFAULT 0,
-            trzba_vcpk    REAL    DEFAULT 0,
-            pk50_ks       INTEGER DEFAULT 0,
-            pk100_ks      INTEGER DEFAULT 0,
-            pk_celkem     REAL    DEFAULT 0,
-            pizza_cela    INTEGER DEFAULT 0,
-            pizza_ctvrt   INTEGER DEFAULT 0,
-            burger        INTEGER DEFAULT 0,
-            talire        INTEGER DEFAULT 0,
-            hotdog        INTEGER DEFAULT 0,
-            snidane       INTEGER DEFAULT 0,
-            nakupy        INTEGER DEFAULT 0,
-            poznamka      TEXT,
-            foto_cesta    TEXT,
-            created_at    TEXT    DEFAULT (datetime('now','localtime'))
-        );
-        """)
-
-    # Přidat chybějící sloupce do existující tabulky reporty
-    with get_db() as conn:
-        existing = [row[1] for row in conn.execute("PRAGMA table_info(reporty)").fetchall()]
-        migrations = [
-            ("burtgulas",     "INTEGER DEFAULT 0"),
-            ("hotdog",        "INTEGER DEFAULT 0"),
-            ("snidane",       "INTEGER DEFAULT 0"),
-            ("nakupy",        "INTEGER DEFAULT 0"),
-            ("foto_cesta",    "TEXT"),
-            ("firma_zkratka", "TEXT DEFAULT ''"),
-        ]
-        for col, typ in migrations:
-            if col not in existing:
-                try:
-                    conn.execute(f"ALTER TABLE reporty ADD COLUMN {col} {typ}")
-                except Exception:
-                    pass
-        conn.executescript("""
-        CREATE TABLE IF NOT EXISTS faktury (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            firma_zkratka   TEXT    NOT NULL,
-            dodavatel       TEXT    NOT NULL,
-            cislo_faktury   TEXT,
-            datum_vystaveni TEXT,
-            datum_splatnosti TEXT,
-            zpusob_uhrady   TEXT,
-            stav            TEXT    DEFAULT 'ceka',
-            celkem_s_dph    REAL    DEFAULT 0,
-            soubor_cesta    TEXT,
-            zdroj           TEXT    DEFAULT 'rucni',
-            created_at      TEXT    DEFAULT (datetime('now','localtime'))
-        );
-
-        CREATE TABLE IF NOT EXISTS polozky (
-            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-            faktura_id            INTEGER NOT NULL REFERENCES faktury(id) ON DELETE CASCADE,
-            nazev                 TEXT    NOT NULL,
-            mnozstvi              REAL    DEFAULT 1,
-            jednotka              TEXT    DEFAULT 'ks',
-            cena_za_jednotku_s_dph REAL   DEFAULT 0,
-            celkem_s_dph          REAL    DEFAULT 0,
-            zbozi_id              INTEGER REFERENCES zbozi(id) ON DELETE SET NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS zbozi (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            nazev_canonical  TEXT    NOT NULL UNIQUE,
-            poznamka         TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS zbozi_aliasy (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            zbozi_id  INTEGER NOT NULL REFERENCES zbozi(id) ON DELETE CASCADE,
-            alias     TEXT    NOT NULL UNIQUE
-        );
-
-        CREATE TABLE IF NOT EXISTS vyplaty (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            jmeno       TEXT    NOT NULL,
-            datum       TEXT    NOT NULL,
-            castka      REAL    NOT NULL DEFAULT 0,
-            poznamka    TEXT,
-            firma_zkratka TEXT  DEFAULT '',
-            created_at  TEXT    DEFAULT (datetime('now','localtime'))
-        );
-
-        CREATE TABLE IF NOT EXISTS reporty (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at  TEXT    DEFAULT NOW()
+        )"""),
+        ("reporty", """CREATE TABLE IF NOT EXISTS reporty (
+            id            SERIAL PRIMARY KEY,
             datum         TEXT    NOT NULL UNIQUE,
             den           TEXT,
             smena         TEXT,
@@ -315,13 +212,42 @@ def migrate_db():
             burger        INTEGER DEFAULT 0,
             talire        INTEGER DEFAULT 0,
             burtgulas     INTEGER DEFAULT 0,
+            hotdog        INTEGER DEFAULT 0,
+            snidane       INTEGER DEFAULT 0,
+            nakupy        INTEGER DEFAULT 0,
+            foto_cesta    TEXT,
+            firma_zkratka TEXT    DEFAULT '',
             poznamka      TEXT,
-            created_at    TEXT    DEFAULT (datetime('now','localtime'))
-        );
-        """)
-    print("✓ Databáze inicializována")
+            created_at    TEXT    DEFAULT NOW()
+        )"""),
+    ]
+    with get_db() as conn:
+        for name, sql in TABLES:
+            if not _USE_PG:
+                sql = sql.replace('SERIAL PRIMARY KEY', 'INTEGER PRIMARY KEY AUTOINCREMENT')
+                sql = sql.replace('DEFAULT NOW()', "DEFAULT (datetime('now','localtime'))")
+            conn.execute(sql)
+    print("init_db OK")
 
-# ── Pomocné funkce ────────────────────────────────────────────────────────────
+
+def migrate_db():
+    with get_db() as conn:
+        if _USE_PG:
+            cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='reporty'")
+            existing = [r["column_name"] for r in cur.fetchall()]
+        else:
+            existing = [row[1] for row in conn.execute("PRAGMA table_info(reporty)").fetchall()]
+        for col, typ in [
+            ("burtgulas","INTEGER DEFAULT 0"),("hotdog","INTEGER DEFAULT 0"),
+            ("snidane","INTEGER DEFAULT 0"),("nakupy","INTEGER DEFAULT 0"),
+            ("foto_cesta","TEXT"),("firma_zkratka","TEXT DEFAULT ''"),
+        ]:
+            if col not in existing:
+                try: conn.execute(f"ALTER TABLE reporty ADD COLUMN {col} {typ}")
+                except Exception: pass
+    print("migrate_db OK")
+
+
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
 
