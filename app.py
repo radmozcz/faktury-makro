@@ -1157,14 +1157,22 @@ def api_faktura_update(fid):
     return jsonify({"ok": True})
 
 # ── API: výplaty ──────────────────────────────────────────────────────────────
+@app.route("/api/vyplaty/zamestnanci", methods=["GET"])
+def api_vyplaty_zamestnanci():
+    with get_db() as conn:
+        rows = conn.execute("SELECT DISTINCT jmeno FROM vyplaty ORDER BY jmeno").fetchall()
+    return jsonify({"jmena": [r["jmeno"] for r in rows]})
+
 @app.route("/api/vyplaty", methods=["GET"])
 def api_vyplaty():
     try:
         firma = request.args.get("firma", "")
+        jmeno = request.args.get("jmeno", "")
         od    = request.args.get("od", "")
         do_   = request.args.get("do", "")
         clauses, params = [], []
         if firma: clauses.append("firma_zkratka=?"); params.append(firma)
+        if jmeno: clauses.append("jmeno=?"); params.append(jmeno)
         if od:    clauses.append("datum>=?"); params.append(od)
         if do_:   clauses.append("datum<=?"); params.append(do_)
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
