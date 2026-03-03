@@ -256,11 +256,9 @@ def parse_makro_pdf(filepath):
                     if len(cf) < 2:
                         continue
 
-                    if cf and cf[-1] == int(cf[-1]) and cf[-1] <= 25:
-                        idx_dph = len(cf) - 1
-                    else:
-                        idx_dph = len(cf)
-
+                    # DPH sazba se nyní nepřidává do cf (zastavíme před ní)
+                    # cf obsahuje: [množství, cena/jedn. bez DPH, cena/jedn. s DPH, celkem s DPH]
+                    idx_dph      = len(cf)
                     idx_celkem_s = idx_dph - 1
                     idx_pocet    = idx_dph - 3
 
@@ -338,6 +336,12 @@ def parse_makro_pdf(filepath):
 
 
 def _makro_reconstruct_numbers(ws_sorted):
+    """
+    Rekonstruuje čísla z pravé části řádku MAKRO faktury.
+    Formát sloupců zprava: [kódy/DPH sazba] | cena celkem s DPH | cena bez DPH | cena/jedn. | množství
+    Jakmile narazíme na DPH sazbu (6, 10, 15, 21, 23) – vše za ní ignorujeme (jsou to interní kódy).
+    Také ignorujeme 5+ místná celá čísla (EAN/PLU kódy).
+    """
     if not ws_sorted:
         return []
     groups = []
@@ -350,15 +354,24 @@ def _makro_reconstruct_numbers(ws_sorted):
         else:
             current.append(curr)
     groups.append(current)
+
+    DPH_SAZBY = {6.0, 10.0, 15.0, 21.0, 23.0}
+
     numbers = []
     for g in groups:
         token = "".join(w["text"] for w in g).replace(",", ".")
+        # Přeskočit EAN/PLU kódy (5+ číslic bez desetinné tečky)
         if re.match(r"^\d{5,}$", token):
             continue
+        # Přeskočit písmena
         if re.match(r"^[A-Za-z]+$", token):
             continue
         try:
-            numbers.append(float(token))
+            val = float(token)
+            # Jakmile narazíme na DPH sazbu, přestaneme číst (vše za ní jsou kódy)
+            if val in DPH_SAZBY and val == int(val):
+                break
+            numbers.append(val)
         except Exception:
             pass
     return numbers
