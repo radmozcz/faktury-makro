@@ -2056,6 +2056,7 @@ function openImportXlsx() {
 
   const dz  = document.getElementById("importDropzone");
   const inp = document.getElementById("importFileInput");
+  inp.style.display = "none"; // skrýt input, klik řídí jen dropzone
   dz.addEventListener("click", () => inp.click());
   inp.addEventListener("change", () => { if (inp.files[0]) doImportXlsx(inp.files[0]); });
   dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag-over"); });
