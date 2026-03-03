@@ -1163,7 +1163,7 @@ function renderPolozkyTable() {
         ${sorted.map(r => `
           <tr class="zbozi-row" data-id="${r.zbozi_id||""}" data-nazev="${escHtml(r.zbozi_nazev)}">
             <td><strong>${escHtml(r.zbozi_nazev)}</strong></td>
-            <td style="text-align:center"><span class="badge badge-zaplaceno">${r.pocet_nakupu}</span></td>
+            <td style="text-align:center">${r.pocet_nakupu}</td>
             <td>${Number(r.celkove_mnozstvi).toLocaleString("cs-CZ")}</td>
             <td>${r.jednotka}</td>
             <td>${czMoney(r.prumerna_cena)}</td>
@@ -1353,21 +1353,28 @@ function editVyplata(id, jmeno, datum, castka, poznamka, firma_zkratka) {
 
 async function ulozitVyplatu() {
   const jmeno  = document.getElementById("vJmeno").value.trim();
-  const datum  = document.getElementById("vDatum").value;
+  let datum    = document.getElementById("vDatum").value;
   const castka = parseFloat(document.getElementById("vCastka").value);
-  if (!jmeno || !datum || isNaN(castka)) { toast("Vyplňte jméno, datum a částku", true); return; }
-
-  await api("/api/vyplaty", {
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({
-      jmeno, datum, castka,
-      poznamka: document.getElementById("vPoznamka").value,
-      firma_zkratka: document.getElementById("vFirmaF").value,
-    })
-  });
-  toast("Výplata uložena ✓");
-  closeModal();
-  loadVyplaty();
+  if (!jmeno || !datum || isNaN(castka)) { toast("Vyplnte jmeno, datum a castku", true); return; }
+  if (/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(datum)) {
+    const [d, m, y] = datum.split(".");
+    datum = `${y}-${m.padStart(2,"0")}-${d.padStart(2,"0")}`;
+  }
+  try {
+    await api("/api/vyplaty", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        jmeno, datum, castka,
+        poznamka: document.getElementById("vPoznamka").value,
+        firma_zkratka: document.getElementById("vFirmaF").value,
+      })
+    });
+    toast("Vyplata ulozena");
+    closeModal();
+    loadVyplaty();
+  } catch(e) {
+    toast("Chyba: " + e.message, true);
+  }
 }
 
 async function ulozitVyplatuEdit(id) {
@@ -1699,6 +1706,7 @@ async function loadReporty() {
 
 // ── Formulář reportu ────────────────────────────────────────────
 function reportFormHtml(r = {}) {
+  const dnes = r.datum || new Date().toISOString().split("T")[0];
   return `
     <!-- Tabs: Fotka | Text | Ruční -->
     <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:2px solid var(--border);padding-bottom:0">
@@ -1743,7 +1751,7 @@ function reportFormHtml(r = {}) {
       <div class="grid-2" style="gap:.8rem">
         <div class="form-group">
           <label class="form-label">Datum *</label>
-          <input type="date" id="rfDatum" class="form-control" value="${r.datum||''}">
+          <input type="date" id="rfDatum" class="form-control" value="${dnes}">
         </div>
         <div class="form-group">
           <label class="form-label">Den</label>
