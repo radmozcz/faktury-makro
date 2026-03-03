@@ -1401,12 +1401,9 @@ def api_report_import_xlsx():
                 if not current_mesic:
                     continue
 
-                # Přeskočit prázdné řádky (karty a hotovost = 0)
+                # Přeskočit řádky bez data (ale ne nulové tržby - ty jsou validní)
                 karty_val    = float(row[4] or 0)
                 hotovost_val = float(row[5] or 0)
-                if karty_val == 0 and hotovost_val == 0:
-                    skipped += 1
-                    continue
 
                 try:
                     datum_iso = date(year, current_mesic, den_cislo).isoformat()
