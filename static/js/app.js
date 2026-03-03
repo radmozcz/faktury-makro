@@ -1452,9 +1452,11 @@ async function renderStatistiky() {
       <label>Do:</label><input type="date" id="sDo" value="${doStr}">
       <button class="btn btn-primary btn-sm" onclick="loadStatistiky()">Zobrazit</button>
     </div>
-    <div id="statContent"><div class="loading-center"><span class="spinner"></span></div></div>`;
+    <div id="statContent"><div class="loading-center"><span class="spinner"></span></div></div>
+    <div id="statReporty" style="margin-top:1.5rem"></div>`;
 
   loadStatistiky();
+  loadMesicniStatistiky();
 }
 
 async function loadStatistiky() {
@@ -1579,6 +1581,61 @@ async function saveConfig() {
 // ═══════════════════════════════════════════════════════════════
 //  Util
 // ═══════════════════════════════════════════════════════════════
+// ── Statistiky reportů ──────────────────────────────────────────
+async function loadMesicniStatistiky() {
+  const firma = document.getElementById("sFirma")?.value || "";
+  let mesice, roky;
+  try {
+    mesice = await api("/api/statistiky/mesice?firma=" + encodeURIComponent(firma));
+    roky   = await api("/api/statistiky/roky");
+  } catch { return; }
+  const el = document.getElementById("statReporty");
+  if (!el) return;
+  const MCZ = ["","Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
+  const rd = {}; const rs = new Set();
+  roky.forEach(r => { rs.add(r.rok); if(!rd[r.mesic]) rd[r.mesic]={}; rd[r.mesic][r.rok]=r.prumer_den; });
+  const ra = [...rs].sort();
+  const srovRows = Object.entries(rd).sort((a,b)=>a[0].localeCompare(b[0])).map(([m,v])=>
+    `<tr><td><strong>${MCZ[parseInt(m)]}</strong></td>${ra.map(r=>`<td style="text-align:right">${v[r]?czMoney(v[r]):"—"}</td>`).join("")}</tr>`).join("");
+  const mRows = mesice.map(m=>
+    `<tr>
+      <td><strong>${m.rok}/${m.mesic}</strong></td>
+      <td style="text-align:right">${m.dni}</td>
+      <td style="text-align:right"><strong>${czMoney(m.trzba_vcpk_sum)}</strong></td>
+      <td style="text-align:right">${czMoney(m.trzba_vcpk_avg)}</td>
+      <td style="text-align:right">${czMoney(m.karty_sum)}</td>
+      <td style="text-align:right">${czMoney(m.karty_avg)}</td>
+      <td style="text-align:right">${czMoney(m.hotovost_sum)}</td>
+      <td style="text-align:right">${czMoney(m.vydaje_sum)}</td>
+      <td style="text-align:center">${m.pizza_cela_sum}/${m.pizza_cela_avg}/d</td>
+      <td style="text-align:center">${m.burger_sum}/${m.burger_avg}/d</td>
+      <td style="text-align:center">${m.burtgulas_sum}/${m.burtgulas_avg}/d</td>
+      <td style="text-align:center">${m.talire_sum}/${m.talire_avg}/d</td>
+    </tr>`).join("");
+  el.innerHTML =
+    `<div class="card" style="margin-bottom:1rem">
+      <div class="card-title">📅 Průměrná denní tržba vč. PK – srovnání let</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Měsíc</th>${ra.map(r=>`<th style="text-align:right">${r}</th>`).join("")}</tr></thead>
+        <tbody>${srovRows}</tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📊 Měsíční statistiky (Σ součet / ø průměr na den)</div>
+      <div class="table-wrap" style="overflow-x:auto"><table style="min-width:900px">
+        <thead><tr>
+          <th>Měsíc</th><th>Dní</th>
+          <th>Tržba Σ</th><th>ø/den</th>
+          <th>Karty Σ</th><th>ø/den</th>
+          <th>Hotovost Σ</th><th>Výdaje Σ</th>
+          <th>🍕 Celá</th><th>🍔 Burger</th><th>🍲 Guláš</th><th>🍽 Talíře</th>
+        </tr></thead>
+        <tbody>${mRows}</tbody>
+      </table></div>
+    </div>`;
+}
+
+
 function escHtml(s) {
   return String(s||"")
     .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
@@ -1608,8 +1665,12 @@ async function renderReporty() {
         (${alert_data.procent}% z limitu 1,5M Kč) – blíží se limit!
        </div>`
     : `<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:.6rem 1.2rem;margin-bottom:1rem;color:#166534;font-size:.9rem">
-        💳 Karty (12 měs.): <strong>${czMoney(alert_data.karty_12m)}</strong>
+        💳 Karty celkem (12 měs.): <strong>${czMoney(alert_data.karty_12m)}</strong>
         &nbsp;|&nbsp; ${alert_data.procent}% z limitu 1,5M Kč
+        ${(alert_data.per_firma||[]).map(f=>`
+          <span style="margin-left:1rem;padding:.2rem .6rem;border-radius:4px;background:${f.alert?"#fee2e2":f.varovani?"#fef3c7":"#dcfce7"};color:${f.alert?"#991b1b":f.varovani?"#92400e":"#166534"}">
+            ${escHtml(f.firma)}: <strong>${czMoney(f.karty_12m)}</strong> (${f.procent}%)
+          </span>`).join("")}
         <div style="background:#dcfce7;border-radius:4px;height:6px;margin-top:.4rem">
           <div style="background:#16a34a;height:6px;border-radius:4px;width:${Math.min(alert_data.procent,100)}%"></div>
         </div>
@@ -1729,7 +1790,7 @@ function renderReportyTable(rows) {
         ${th("trzba_vcpk","Tržba vč.PK")}${th("karty","Karty")}${th("hotovost","Hotovost")}${th("vydaje","Výdaje")}
         ${th("pk_celkem","PK Kč")}
         ${th("pizza_cela","🍕 Celá")}${th("pizza_ctvrt","🍕/4")}${th("burger","🍔")}${th("burtgulas","🍲 Guláš")}${th("talire","🍽 Talíře")}
-        <th>Směna</th><th></th>
+        <th>Firma</th><th>Směna</th><th></th>
       </tr></thead>
       <tbody>
         ${rows.map(r => `
@@ -1746,6 +1807,7 @@ function renderReportyTable(rows) {
             <td style="text-align:center">${r.burger || "—"}</td>
             <td style="text-align:center">${r.burtgulas || "—"}</td>
             <td style="text-align:center">${r.talire || "—"}</td>
+            <td style="font-size:.82rem"><strong>${escHtml(r.firma_zkratka||"")}</strong></td>
             <td style="font-size:.82rem;color:var(--txt2)">${escHtml(r.smena||"")}</td>
             <td>
               <button class="btn btn-secondary btn-sm" onclick="editReport(${r.id})" title="Upravit">✏️</button>
@@ -1777,6 +1839,13 @@ function renderReportyTable(rows) {
 function reportFormHtml(r = {}) {
   const dnes = r.datum || new Date().toISOString().split("T")[0];
   return `
+    <div class="form-group" style="margin-bottom:.8rem">
+      <label class="form-label">Firma</label>
+      <select id="rfFirma" class="form-control">
+        <option value="">— bez firmy —</option>
+        ${App.config.firmy.map(f=>`<option value="${f}" ${(r.firma_zkratka||App._lastReportFirma||"")==f?"selected":""}>${f}</option>`).join("")}
+      </select>
+    </div>
     <!-- Tabs: Fotka | Text | Ruční -->
     <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:2px solid var(--border);padding-bottom:0">
       <button id="rtabFoto"  class="tab-btn tab-active" onclick="switchRTab('foto')">📷 Fotka</button>
@@ -2057,7 +2126,9 @@ async function ulozitReport() {
     burger:      parseInt(document.getElementById("rfBurger")?.value || 0),
     talire:      parseInt(document.getElementById("rfTalire")?.value || 0),
     burtgulas:   parseInt(document.getElementById("rfBurtgulas")?.value || 0),
+    firma_zkratka: document.getElementById("rfFirma")?.value || "",
   };
+  App._lastReportFirma = document.getElementById("rfFirma")?.value || "";
   await api("/api/reporty", {
     method: "POST",
     headers: {"Content-Type":"application/json"},
