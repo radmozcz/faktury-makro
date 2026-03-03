@@ -7,6 +7,8 @@ import os
 import json
 import sqlite3
 import csv
+import psycopg2
+import psycopg2.extras
 import io
 import re
 import base64
@@ -66,13 +68,83 @@ def save_config(cfg):
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 # ── Databáze ──────────────────────────────────────────────────────────────────
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+_USE_PG = bool(DATABASE_URL)
+
+class _PgCursor:
+    def __init__(self, cur): self._cur = cur
+    def __iter__(self): return iter(self._cur)
+    def fetchall(self): return [dict(r) for r in self._cur.fetchall()]
+    def fetchone(self):
+        r = self._cur.fetchone()
+        return dict(r) if r else None
+    @property
+    def lastrowid(self):
+        try:
+            r = self._cur.fetchone()
+            return r["id"] if r else None
+        except: return None
+    @property
+    def rowcount(self): return self._cur.rowcount
+
+class _PgConn:
+    def __init__(self, conn): self._conn = conn
+    def __enter__(self): return self
+    def __exit__(self, exc_type, *_):
+        if exc_type: self._conn.rollback()
+        else: self._conn.commit()
+        self._conn.close()
+    def commit(self): self._conn.commit()
+    def rollback(self): self._conn.rollback()
+    def close(self): self._conn.close()
+
+    @staticmethod
+    def _adapt(sql):
+        import re as _re
+        sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
+        sql = sql.replace("DEFAULT (datetime('now','localtime'))", "DEFAULT NOW()")
+        sql = sql.replace("datetime('now','localtime')", "NOW()")
+        sql = sql.replace("date('now','-12 months')", "CURRENT_DATE - INTERVAL '12 months'")
+        sql = sql.replace("date('now')", "CURRENT_DATE")
+        sql = _re.sub(r"strftime\('%Y',\s*([^)]+)\)", r"TO_CHAR(\1, 'YYYY')", sql)
+        sql = _re.sub(r"strftime\('%m',\s*([^)]+)\)", r"TO_CHAR(\1, 'MM')", sql)
+        sql = _re.sub(r"strftime\('%Y-%m',\s*([^)]+)\)", r"TO_CHAR(\1, 'YYYY-MM')", sql)
+        return sql
+
+    def execute(self, sql, params=()):
+        if sql.strip().upper().startswith("PRAGMA"):
+            class _D:
+                lastrowid=None; rowcount=0
+                def fetchone(self): return None
+                def fetchall(self): return []
+                def __iter__(self): return iter([])
+            return _D()
+        sql = self._adapt(sql)
+        sql_pg = sql.replace("?", "%s")
+        cur = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        is_insert = sql_pg.strip().upper().startswith("INSERT")
+        if is_insert and "RETURNING" not in sql_pg.upper():
+            sql_pg = sql_pg.rstrip().rstrip(";") + " RETURNING id"
+        cur.execute(sql_pg, params if params else None)
+        return _PgCursor(cur)
+
+    def executescript(self, sql):
+        sql = self._adapt(sql)
+        sql = sql.replace("PRAGMA journal_mode=WAL;", "").replace("PRAGMA foreign_keys=ON;", "")
+        cur = self._conn.cursor()
+        cur.execute(sql)
+        self._conn.commit()
+
 def get_db():
+    if _USE_PG:
+        conn = psycopg2.connect(DATABASE_URL)
+        conn.autocommit = False
+        return _PgConn(conn)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
-
 def init_db():
     with get_db() as conn:
         conn.executescript("""
