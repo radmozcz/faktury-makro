@@ -209,15 +209,23 @@ def parse_makro_pdf(filepath):
                 for y, ws in sorted(rows.items()):
                     ws = sorted(ws, key=lambda w: w["x0"])
 
+                    # Číslo zboží může být jako jednotlivé číslice nebo jako jeden token
                     left_digits = "".join(
                         w["text"] for w in ws
                         if w["x0"] < 95 and len(w["text"]) == 1 and w["text"].isdigit()
                     )
+                    # Fallback: celý token nalevo
+                    if len(left_digits) < 6:
+                        left_tokens = "".join(
+                            w["text"] for w in ws if w["x0"] < 95
+                        ).replace("*", "").strip()
+                        if re.match(r"^\d{6,}", left_tokens):
+                            left_digits = left_tokens[:14]
 
                     unit_chars = "".join(
                         w["text"] for w in ws
-                        if 238 <= w["x0"] <= 265 and len(w["text"]) == 1
-                        and w["text"].upper() in "PCGKBSLX"
+                        if 230 <= w["x0"] <= 275 and len(w["text"]) == 1
+                        and w["text"].upper() in "PCGKBSLXAW"
                     ).upper()
                     if   unit_chars.startswith("PC"): jed = "PC"
                     elif unit_chars.startswith("KG"): jed = "KG"
@@ -226,6 +234,7 @@ def parse_makro_pdf(filepath):
                     elif unit_chars.startswith("KS"): jed = "KS"
                     elif unit_chars.startswith("CA"): jed = "CA"
                     elif unit_chars.startswith("SW"): jed = "SW"
+                    elif unit_chars.startswith("WA"): jed = "SW"
                     elif unit_chars.startswith("L"):  jed = "L"
                     else:                              jed = ""
 
@@ -338,8 +347,8 @@ def parse_makro_pdf(filepath):
 def _makro_reconstruct_numbers(ws_sorted):
     """
     Rekonstruuje čísla z pravé části řádku MAKRO faktury.
-    Formát sloupců zprava: [kódy/DPH sazba] | cena celkem s DPH | cena bez DPH | cena/jedn. | množství
-    Jakmile narazíme na DPH sazbu (6, 10, 15, 21, 23) – vše za ní ignorujeme (jsou to interní kódy).
+    Formát zleva doprava: množství | cena/jedn. bez DPH | cena celkem bez DPH | cena celkem s DPH | DPH% | [kódy]
+    Odřízneme vše od DPH sazby doprava (DPH sazba + kódy ignorujeme).
     Také ignorujeme 5+ místná celá čísla (EAN/PLU kódy).
     """
     if not ws_sorted:
@@ -357,24 +366,33 @@ def _makro_reconstruct_numbers(ws_sorted):
 
     DPH_SAZBY = {6.0, 10.0, 15.0, 21.0, 23.0}
 
-    numbers = []
+    # Nejprve parsuj všechna čísla s jejich pozicí
+    parsed = []
     for g in groups:
         token = "".join(w["text"] for w in g).replace(",", ".")
-        # Přeskočit EAN/PLU kódy (5+ číslic bez desetinné tečky)
+        x0 = g[0]["x0"]
         if re.match(r"^\d{5,}$", token):
-            continue
-        # Přeskočit písmena
+            continue  # EAN/PLU kód
         if re.match(r"^[A-Za-z]+$", token):
-            continue
+            continue  # písmena
         try:
             val = float(token)
-            # Jakmile narazíme na DPH sazbu, přestaneme číst (vše za ní jsou kódy)
-            if val in DPH_SAZBY and val == int(val):
-                break
-            numbers.append(val)
+            parsed.append((x0, val))
         except Exception:
             pass
-    return numbers
+
+    # Najdi pozici DPH sazby - je to celé číslo z DPH_SAZBY
+    # DPH sazba je typicky na x > 500 (poslední sloupec před kódy)
+    dph_idx = None
+    for i, (x0, val) in enumerate(parsed):
+        if val in DPH_SAZBY and val == int(val) and x0 > 480:
+            dph_idx = i
+            break
+
+    if dph_idx is not None:
+        parsed = parsed[:dph_idx]
+
+    return [val for _, val in parsed]
 
 
 def _rekonstruuj_nazev(nazev_ws):
@@ -384,9 +402,12 @@ def _rekonstruuj_nazev(nazev_ws):
     for i, w in enumerate(nazev_ws):
         if i > 0:
             gap = w["x0"] - nazev_ws[i-1]["x1"]
-            if gap > 2.5:
+            # Mezera mezi slovy: gap > 3.5 pt
+            # Jednotlivá písmena v tomto PDF jsou hned za sebou (gap ~0-1 pt)
+            if gap > 3.5:
                 result += " "
         result += w["text"]
+    result = re.sub(r" {2,}", " ", result)
     return result.lstrip("*").strip()
 
 
