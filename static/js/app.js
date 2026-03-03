@@ -1258,6 +1258,10 @@ async function renderVyplaty() {
         <option value="">Všechny</option>
         ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
       </select>
+      <label>Zaměstnanec:</label>
+      <select id="vJmeno">
+        <option value="">Všichni</option>
+      </select>
       <label>Od:</label><input type="date" id="vOd">
       <label>Do:</label><input type="date" id="vDo">
     </div>
@@ -1265,15 +1269,30 @@ async function renderVyplaty() {
       <div class="table-wrap" id="vyplatyList"><div class="loading-center"><span class="spinner"></span></div></div>
     </div>`;
 
+  await nacistZamestnance();
   loadVyplaty();
-  ["vFirma","vOd","vDo"].forEach(id => {
+  ["vFirma","vJmeno","vOd","vDo"].forEach(id => {
     document.getElementById(id)?.addEventListener("change", loadVyplaty);
   });
+}
+
+async function nacistZamestnance() {
+  try {
+    const data = await api("/api/vyplaty/zamestnanci");
+    const sel = document.getElementById("vJmeno");
+    if (!sel) return;
+    data.jmena.forEach(j => {
+      const o = document.createElement("option");
+      o.value = j; o.textContent = j;
+      sel.appendChild(o);
+    });
+  } catch {}
 }
 
 async function loadVyplaty() {
   const params = new URLSearchParams({
     firma: document.getElementById("vFirma")?.value||"",
+    jmeno: document.getElementById("vJmeno")?.value||"",
     od:    document.getElementById("vOd")?.value||"",
     do:    document.getElementById("vDo")?.value||"",
   });
