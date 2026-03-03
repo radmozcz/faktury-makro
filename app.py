@@ -73,6 +73,46 @@ def get_db():
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
+def init_db():
+    with get_db() as conn:
+        conn.executescript("""
+        CREATE TABLE IF NOT EXISTS faktury (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            firma_zkratka   TEXT    NOT NULL,
+            dodavatel       TEXT    NOT NULL,
+            cislo_faktury   TEXT,
+            datum_vystaveni TEXT,
+            datum_splatnosti TEXT,
+            zpusob_uhrady   TEXT,
+            stav            TEXT    DEFAULT 'ceka',
+            celkem_s_dph    REAL    DEFAULT 0,
+            soubor_cesta    TEXT,
+            zdroj           TEXT    DEFAULT 'rucni',
+            created_at      TEXT    DEFAULT (datetime('now','localtime'))
+        );
+        CREATE TABLE IF NOT EXISTS polozky (
+            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            faktura_id            INTEGER NOT NULL REFERENCES faktury(id) ON DELETE CASCADE,
+            nazev                 TEXT    NOT NULL,
+            mnozstvi              REAL    DEFAULT 1,
+            jednotka              TEXT    DEFAULT 'ks',
+            cena_za_jednotku_s_dph REAL   DEFAULT 0,
+            celkem_s_dph          REAL    DEFAULT 0,
+            zbozi_id              INTEGER REFERENCES zbozi(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS zbozi (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            nazev_canonical  TEXT    NOT NULL UNIQUE,
+            poznamka         TEXT
+        );
+        CREATE TABLE IF NOT EXISTS zbozi_aliasy (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            zbozi_id  INTEGER NOT NULL REFERENCES zbozi(id) ON DELETE CASCADE,
+            alias     TEXT    NOT NULL UNIQUE
+        );
+        """)
+
+
 def migrate_db():
     """Přidá chybějící tabulky/sloupce do existující databáze."""
     with get_db() as conn:
