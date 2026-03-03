@@ -75,18 +75,29 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 _USE_PG = bool(DATABASE_URL)
 
 class _PgCursor:
-    def __init__(self, cur): self._cur = cur
+    def __init__(self, cur, is_insert=False):
+        self._cur = cur
+        self._lastrowid = None
+        # ── OPRAVA: přečteme RETURNING id hned při vytvoření kurzoru,
+        #    ještě před commit() – jinak by byl kurzor po commitu zavřený
+        if is_insert:
+            try:
+                r = self._cur.fetchone()
+                self._lastrowid = r["id"] if r else None
+            except Exception:
+                self._lastrowid = None
+
     def __iter__(self): return iter(self._cur)
     def fetchall(self): return [dict(r) for r in self._cur.fetchall()]
     def fetchone(self):
         r = self._cur.fetchone()
         return dict(r) if r else None
+
     @property
     def lastrowid(self):
-        try:
-            r = self._cur.fetchone()
-            return r["id"] if r else None
-        except: return None
+        # ── OPRAVA: vracíme předem uloženou hodnotu, ne čteme znovu z kurzoru
+        return self._lastrowid
+
     @property
     def rowcount(self): return self._cur.rowcount
 
@@ -127,7 +138,8 @@ class _PgConn:
         if is_insert and "RETURNING" not in sql_pg.upper():
             sql_pg = sql_pg.rstrip().rstrip(";") + " RETURNING id"
         cur.execute(sql_pg, params if params else None)
-        return _PgCursor(cur)
+        # ── OPRAVA: předáváme is_insert aby _PgCursor věděl kdy číst lastrowid
+        return _PgCursor(cur, is_insert=is_insert)
     def executescript(self, sql):
         sql = self._adapt(sql)
         sql = sql.replace("PRAGMA journal_mode=WAL;", "").replace("PRAGMA foreign_keys=ON;", "")
@@ -306,12 +318,10 @@ def parse_makro_pdf(filepath):
                 for y, ws in sorted(rows.items()):
                     ws = sorted(ws, key=lambda w: w["x0"])
 
-                    # Číslo zboží může být jako jednotlivé číslice nebo jako jeden token
                     left_digits = "".join(
                         w["text"] for w in ws
                         if w["x0"] < 95 and len(w["text"]) == 1 and w["text"].isdigit()
                     )
-                    # Fallback: celý token nalevo
                     if len(left_digits) < 6:
                         left_tokens = "".join(
                             w["text"] for w in ws if w["x0"] < 95
@@ -362,8 +372,6 @@ def parse_makro_pdf(filepath):
                     if len(cf) < 2:
                         continue
 
-                    # DPH sazba se nyní nepřidává do cf (zastavíme před ní)
-                    # cf obsahuje: [množství, cena/jedn. bez DPH, cena/jedn. s DPH, celkem s DPH]
                     idx_dph      = len(cf)
                     idx_celkem_s = idx_dph - 1
                     idx_pocet    = idx_dph - 3
@@ -442,12 +450,6 @@ def parse_makro_pdf(filepath):
 
 
 def _makro_reconstruct_numbers(ws_sorted):
-    """
-    Rekonstruuje čísla z pravé části řádku MAKRO faktury.
-    Formát zleva doprava: množství | cena/jedn. bez DPH | cena celkem bez DPH | cena celkem s DPH | DPH% | [kódy]
-    Odřízneme vše od DPH sazby doprava (DPH sazba + kódy ignorujeme).
-    Také ignorujeme 5+ místná celá čísla (EAN/PLU kódy).
-    """
     if not ws_sorted:
         return []
     groups = []
@@ -463,23 +465,20 @@ def _makro_reconstruct_numbers(ws_sorted):
 
     DPH_SAZBY = {6.0, 10.0, 15.0, 21.0, 23.0}
 
-    # Nejprve parsuj všechna čísla s jejich pozicí
     parsed = []
     for g in groups:
         token = "".join(w["text"] for w in g).replace(",", ".")
         x0 = g[0]["x0"]
         if re.match(r"^\d{5,}$", token):
-            continue  # EAN/PLU kód
+            continue
         if re.match(r"^[A-Za-z]+$", token):
-            continue  # písmena
+            continue
         try:
             val = float(token)
             parsed.append((x0, val))
         except Exception:
             pass
 
-    # Najdi pozici DPH sazby - je to celé číslo z DPH_SAZBY
-    # DPH sazba je typicky na x > 500 (poslední sloupec před kódy)
     dph_idx = None
     for i, (x0, val) in enumerate(parsed):
         if val in DPH_SAZBY and val == int(val) and x0 > 480:
@@ -499,8 +498,6 @@ def _rekonstruuj_nazev(nazev_ws):
     for i, w in enumerate(nazev_ws):
         if i > 0:
             gap = w["x0"] - nazev_ws[i-1]["x1"]
-            # Mezera mezi slovy: gap > 3.5 pt
-            # Jednotlivá písmena v tomto PDF jsou hned za sebou (gap ~0-1 pt)
             if gap > 3.5:
                 result += " "
         result += w["text"]
@@ -770,7 +767,7 @@ def _map_unit(u):
 JMENA_MAP = {
     "rada": "Radek", "radek": "Radek", "ráďa": "Radek", "radi": "Radek",
     "verka": "Věrka", "vera": "Věrka", "věra": "Věrka", "věrka": "Věrka",
-    "renča": "Renča", "renata": "Renča", "renata": "Renča", "renca": "Renča",
+    "renča": "Renča", "renata": "Renča", "renca": "Renča",
     "vendy": "Vendy", "wendy": "Vendy",
     "vali": "Vali",
 }
@@ -881,7 +878,6 @@ PRAVIDLA PRO JÍDLO:
         )
 
         text = message.content[0].text.strip()
-        # Očisti markdown backticky pokud jsou
         text = re.sub(r"^```json\s*", "", text)
         text = re.sub(r"```$", "", text).strip()
 
@@ -948,7 +944,6 @@ def datum_to_iso(datum_str, year=None):
     if not datum_str:
         return None
     datum_str = str(datum_str).strip()
-    # Zkus různé formáty
     for sep in ["/", ".", "-"]:
         parts = datum_str.split(sep)
         if len(parts) == 2:
@@ -978,7 +973,6 @@ def build_report_from_parsed(parsed, year=None):
     pk_celkem = pk50_ks * 50 + pk100_ks * 100
     trzba_vcpk = trzba + pk_celkem
 
-    # Pokud report obsahuje vlastní tržbu, použij ji (pro ruční zadání)
     if parsed.get("trzba") and float(parsed.get("trzba")) > 0:
         trzba = float(parsed["trzba"])
         trzba_vcpk = trzba + pk_celkem
@@ -1067,7 +1061,6 @@ def api_dashboard():
             ORDER BY created_at DESC LIMIT 5
         """, params_base).fetchall()
 
-        # DPH alert – karty za posledních 12 měsíců z reportů
         karty_12m = conn.execute("""
             SELECT COALESCE(SUM(karty),0)
             FROM reporty
@@ -1291,7 +1284,6 @@ def api_reporty_list():
     if od:  clauses.append("datum>=?"); params.append(od)
     if do_: clauses.append("datum<=?"); params.append(do_)
     else:
-        # Nikdy nezobrazovat budoucí záznamy
         clauses.append("datum<=?"); params.append(date.today().isoformat())
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     with get_db() as conn:
@@ -1308,7 +1300,6 @@ def api_report_ulozit():
     if not data.get("datum"):
         return jsonify({"error": "Chybí datum"}), 400
 
-    # Přepočítej odvozené hodnoty
     karty    = float(data.get("karty", 0) or 0)
     kov      = float(data.get("kov", 0) or 0)
     papir    = float(data.get("papir", 0) or 0)
@@ -1393,7 +1384,6 @@ def api_report_import_xlsx():
         skipped  = 0
         errors   = []
 
-        # Dny v týdnu česky → zkratky pro den sloupec
         den_map = {
             "po": "Pondělí", "út": "Úterý", "st": "Středa",
             "čt": "Čtvrtek", "pá": "Pátek", "so": "Sobota", "ne": "Neděle"
@@ -1413,18 +1403,15 @@ def api_report_import_xlsx():
 
             current_mesic = None
             dnes = date.today()
-            konec_import = date(dnes.year, dnes.month, dnes.day)  # max do dneška
+            konec_import = date(dnes.year, dnes.month, dnes.day)
             for row in ws.iter_rows(min_row=2, values_only=True):
                 if not row or row[0] is None:
                     continue
-                # Přeskočit řádky SOUČET, DNÍ, PRŮMĚR
                 if str(row[0]).upper() in ("SOUČET", "DNÍ", "PRŮMĚR", "SOU\u010cET"):
                     continue
-                # Aktualizuj aktuální měsíc
                 if row[1] and str(row[1]).upper() in mesic_map:
                     current_mesic = mesic_map[str(row[1]).upper()]
 
-                # Validace: row[0] musí být číslo (den v měsíci)
                 try:
                     den_cislo = int(row[0])
                 except (TypeError, ValueError):
@@ -1433,7 +1420,6 @@ def api_report_import_xlsx():
                 if not current_mesic:
                     continue
 
-                # Přeskočit budoucí data (po dnešku)
                 try:
                     datum_test = date(year, current_mesic, den_cislo)
                     if datum_test > konec_import:
@@ -1464,7 +1450,6 @@ def api_report_import_xlsx():
                 burtgulas  = int(row[15] or 0)
                 smena      = normalize_jmena(str(row[16] or ""))
 
-                # Odhadni kov/papir z hotovosti (nemáme rozdělení v xlsx)
                 kov   = 0
                 papir = hotovost
 
@@ -1534,7 +1519,6 @@ def api_karty_alert():
 
 @app.route("/api/statistiky/mesice")
 def api_statistiky_mesice():
-    """Měsíční statistiky – součet a průměr per měsíc, s volitelným filtrem firmy."""
     firma = request.args.get("firma", "")
     clauses = ["datum <= ?"]
     params  = [date.today().isoformat()]
@@ -1576,7 +1560,6 @@ def api_statistiky_mesice():
 
 @app.route("/api/statistiky/roky")
 def api_statistiky_roky():
-    """Průměrná denní tržba po měsících v různých letech – pro srovnávací tabulku."""
     with get_db() as conn:
         rows = conn.execute("""
             SELECT
@@ -1590,8 +1573,6 @@ def api_statistiky_roky():
             ORDER BY rok, mesic
         """, (date.today().isoformat(),)).fetchall()
     return jsonify([dict(r) for r in rows])
-
-
 
 
 @app.route("/api/export/reporty")
@@ -1828,9 +1809,9 @@ def api_faktura_ulozit():
 
 def _get_or_create_zbozi(conn, nazev):
     row = conn.execute("SELECT zbozi_id FROM zbozi_aliasy WHERE alias=?", (nazev,)).fetchone()
-    if row: return row[0]
+    if row: return row["zbozi_id"]
     row = conn.execute("SELECT id FROM zbozi WHERE nazev_canonical=?", (nazev,)).fetchone()
-    if row: return row[0]
+    if row: return row["id"]
     cur = conn.execute("INSERT INTO zbozi (nazev_canonical) VALUES (?)", (nazev,))
     return cur.lastrowid
 
@@ -1902,7 +1883,7 @@ def api_zbozi_alias():
     with get_db() as conn:
         try:
             conn.execute("INSERT INTO zbozi_aliasy (zbozi_id, alias) VALUES (?,?)", (zbozi_id, alias_text))
-        except sqlite3.IntegrityError:
+        except Exception:
             conn.execute("UPDATE zbozi_aliasy SET zbozi_id=? WHERE alias=?", (zbozi_id, alias_text))
         conn.execute("UPDATE polozky SET zbozi_id=? WHERE nazev=?", (zbozi_id, alias_text))
         if polozka_id:
@@ -1918,7 +1899,7 @@ def api_zbozi_create():
         try:
             cur = conn.execute("INSERT INTO zbozi (nazev_canonical) VALUES (?)", (nazev,))
             return jsonify({"ok": True, "id": cur.lastrowid})
-        except sqlite3.IntegrityError:
+        except Exception:
             row = conn.execute("SELECT id FROM zbozi WHERE nazev_canonical=?", (nazev,)).fetchone()
             return jsonify({"ok": True, "id": row["id"]})
 
