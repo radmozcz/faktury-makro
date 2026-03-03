@@ -7,8 +7,6 @@ import os
 import json
 import sqlite3
 import csv
-import psycopg2
-import psycopg2.extras
 import io
 import re
 import base64
@@ -68,83 +66,13 @@ def save_config(cfg):
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 # ── Databáze ──────────────────────────────────────────────────────────────────
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
-_USE_PG = bool(DATABASE_URL)
-
-class _PgCursor:
-    def __init__(self, cur): self._cur = cur
-    def __iter__(self): return iter(self._cur)
-    def fetchall(self): return [dict(r) for r in self._cur.fetchall()]
-    def fetchone(self):
-        r = self._cur.fetchone()
-        return dict(r) if r else None
-    @property
-    def lastrowid(self):
-        try:
-            r = self._cur.fetchone()
-            return r["id"] if r else None
-        except: return None
-    @property
-    def rowcount(self): return self._cur.rowcount
-
-class _PgConn:
-    def __init__(self, conn): self._conn = conn
-    def __enter__(self): return self
-    def __exit__(self, exc_type, *_):
-        if exc_type: self._conn.rollback()
-        else: self._conn.commit()
-        self._conn.close()
-    def commit(self): self._conn.commit()
-    def rollback(self): self._conn.rollback()
-    def close(self): self._conn.close()
-
-    @staticmethod
-    def _adapt(sql):
-        import re as _re
-        sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
-        sql = sql.replace("DEFAULT (datetime('now','localtime'))", "DEFAULT NOW()")
-        sql = sql.replace("datetime('now','localtime')", "NOW()")
-        sql = sql.replace("date('now','-12 months')", "CURRENT_DATE - INTERVAL '12 months'")
-        sql = sql.replace("date('now')", "CURRENT_DATE")
-        sql = _re.sub(r"strftime\('%Y',\s*([^)]+)\)", r"TO_CHAR(\1, 'YYYY')", sql)
-        sql = _re.sub(r"strftime\('%m',\s*([^)]+)\)", r"TO_CHAR(\1, 'MM')", sql)
-        sql = _re.sub(r"strftime\('%Y-%m',\s*([^)]+)\)", r"TO_CHAR(\1, 'YYYY-MM')", sql)
-        return sql
-
-    def execute(self, sql, params=()):
-        if sql.strip().upper().startswith("PRAGMA"):
-            class _D:
-                lastrowid=None; rowcount=0
-                def fetchone(self): return None
-                def fetchall(self): return []
-                def __iter__(self): return iter([])
-            return _D()
-        sql = self._adapt(sql)
-        sql_pg = sql.replace("?", "%s")
-        cur = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        is_insert = sql_pg.strip().upper().startswith("INSERT")
-        if is_insert and "RETURNING" not in sql_pg.upper():
-            sql_pg = sql_pg.rstrip().rstrip(";") + " RETURNING id"
-        cur.execute(sql_pg, params if params else None)
-        return _PgCursor(cur)
-
-    def executescript(self, sql):
-        sql = self._adapt(sql)
-        sql = sql.replace("PRAGMA journal_mode=WAL;", "").replace("PRAGMA foreign_keys=ON;", "")
-        cur = self._conn.cursor()
-        cur.execute(sql)
-        self._conn.commit()
-
 def get_db():
-    if _USE_PG:
-        conn = psycopg2.connect(DATABASE_URL)
-        conn.autocommit = False
-        return _PgConn(conn)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
+
 def init_db():
     with get_db() as conn:
         conn.executescript("""
@@ -227,26 +155,20 @@ def migrate_db():
         );
         """)
 
-    # Přidat chybějící sloupce do existující tabulky reporty
-    with get_db() as conn:
-        existing = [row[1] for row in conn.execute("PRAGMA table_info(reporty)").fetchall()]
-        migrations = [
-            ("burtgulas",     "INTEGER DEFAULT 0"),
-            ("hotdog",        "INTEGER DEFAULT 0"),
-            ("snidane",       "INTEGER DEFAULT 0"),
-            ("nakupy",        "INTEGER DEFAULT 0"),
-            ("foto_cesta",    "TEXT"),
-            ("firma_zkratka", "TEXT DEFAULT ''"),
-        ]
-        for col, typ in migrations:
-            if col not in existing:
-                try:
-                    conn.execute(f"ALTER TABLE reporty ADD COLUMN {col} {typ}")
-                except Exception:
-                    pass
-        conn.executescript("""
-        CREATE TABLE IF NOT EXISTS faktury (
-            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    # Vytvořit/aktualizovat tabulky - pořadí: zbozi před polozky (FK)
+    TABLES = [
+        ("zbozi", """CREATE TABLE IF NOT EXISTS zbozi (
+            id               SERIAL PRIMARY KEY,
+            nazev_canonical  TEXT    NOT NULL UNIQUE,
+            poznamka         TEXT
+        )"""),
+        ("zbozi_aliasy", """CREATE TABLE IF NOT EXISTS zbozi_aliasy (
+            id        SERIAL PRIMARY KEY,
+            zbozi_id  INTEGER NOT NULL REFERENCES zbozi(id) ON DELETE CASCADE,
+            alias     TEXT    NOT NULL UNIQUE
+        )"""),
+        ("faktury", """CREATE TABLE IF NOT EXISTS faktury (
+            id              SERIAL PRIMARY KEY,
             firma_zkratka   TEXT    NOT NULL,
             dodavatel       TEXT    NOT NULL,
             cislo_faktury   TEXT,
@@ -257,11 +179,10 @@ def migrate_db():
             celkem_s_dph    REAL    DEFAULT 0,
             soubor_cesta    TEXT,
             zdroj           TEXT    DEFAULT 'rucni',
-            created_at      TEXT    DEFAULT (datetime('now','localtime'))
-        );
-
-        CREATE TABLE IF NOT EXISTS polozky (
-            id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at      TEXT    DEFAULT NOW()
+        )"""),
+        ("polozky", """CREATE TABLE IF NOT EXISTS polozky (
+            id                    SERIAL PRIMARY KEY,
             faktura_id            INTEGER NOT NULL REFERENCES faktury(id) ON DELETE CASCADE,
             nazev                 TEXT    NOT NULL,
             mnozstvi              REAL    DEFAULT 1,
@@ -269,32 +190,18 @@ def migrate_db():
             cena_za_jednotku_s_dph REAL   DEFAULT 0,
             celkem_s_dph          REAL    DEFAULT 0,
             zbozi_id              INTEGER REFERENCES zbozi(id) ON DELETE SET NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS zbozi (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            nazev_canonical  TEXT    NOT NULL UNIQUE,
-            poznamka         TEXT
-        );
-
-        CREATE TABLE IF NOT EXISTS zbozi_aliasy (
-            id        INTEGER PRIMARY KEY AUTOINCREMENT,
-            zbozi_id  INTEGER NOT NULL REFERENCES zbozi(id) ON DELETE CASCADE,
-            alias     TEXT    NOT NULL UNIQUE
-        );
-
-        CREATE TABLE IF NOT EXISTS vyplaty (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        )"""),
+        ("vyplaty", """CREATE TABLE IF NOT EXISTS vyplaty (
+            id          SERIAL PRIMARY KEY,
             jmeno       TEXT    NOT NULL,
             datum       TEXT    NOT NULL,
             castka      REAL    NOT NULL DEFAULT 0,
             poznamka    TEXT,
             firma_zkratka TEXT  DEFAULT '',
-            created_at  TEXT    DEFAULT (datetime('now','localtime'))
-        );
-
-        CREATE TABLE IF NOT EXISTS reporty (
-            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at  TEXT    DEFAULT NOW()
+        )"""),
+        ("reporty", """CREATE TABLE IF NOT EXISTS reporty (
+            id            SERIAL PRIMARY KEY,
             datum         TEXT    NOT NULL UNIQUE,
             den           TEXT,
             smena         TEXT,
@@ -313,10 +220,35 @@ def migrate_db():
             burger        INTEGER DEFAULT 0,
             talire        INTEGER DEFAULT 0,
             burtgulas     INTEGER DEFAULT 0,
+            hotdog        INTEGER DEFAULT 0,
+            snidane       INTEGER DEFAULT 0,
+            nakupy        INTEGER DEFAULT 0,
+            foto_cesta    TEXT,
+            firma_zkratka TEXT    DEFAULT '',
             poznamka      TEXT,
-            created_at    TEXT    DEFAULT (datetime('now','localtime'))
-        );
-        """)
+            created_at    TEXT    DEFAULT NOW()
+        )"""),
+    ]
+    with get_db() as conn:
+        for name, sql in TABLES:
+            if not _USE_PG:
+                sql = sql.replace("SERIAL PRIMARY KEY", "INTEGER PRIMARY KEY AUTOINCREMENT")
+                sql = sql.replace("DEFAULT NOW()", "DEFAULT (datetime('now','localtime'))")
+            conn.execute(sql)
+
+    # Přidat chybějící sloupce (pro starší DB)
+    with get_db() as conn:
+        if _USE_PG:
+            cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='reporty'")
+            existing = [r["column_name"] for r in cur.fetchall()]
+        else:
+            existing = [row[1] for row in conn.execute("PRAGMA table_info(reporty)").fetchall()]
+        for col, typ in [("burtgulas","INTEGER DEFAULT 0"),("hotdog","INTEGER DEFAULT 0"),
+                         ("snidane","INTEGER DEFAULT 0"),("nakupy","INTEGER DEFAULT 0"),
+                         ("foto_cesta","TEXT"),("firma_zkratka","TEXT DEFAULT ''")]:
+            if col not in existing:
+                try: conn.execute(f"ALTER TABLE reporty ADD COLUMN {col} {typ}")
+                except Exception: pass
     print("✓ Databáze inicializována")
 
 # ── Pomocné funkce ────────────────────────────────────────────────────────────
