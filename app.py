@@ -1404,6 +1404,7 @@ def api_report_import_xlsx():
             "ZÁŘÍ": 9, "ŘÍJEN": 10, "LISTOPAD": 11, "PROSINEC": 12
         }
 
+        rows_to_insert = []
         for sheet_name in wb.sheetnames:
             if sheet_name not in ("2025", "2026"):
                 continue
@@ -1467,22 +1468,25 @@ def api_report_import_xlsx():
                 kov   = 0
                 papir = hotovost
 
-                with get_db() as conn:
-                    existing = conn.execute("SELECT id FROM reporty WHERE datum=?", (datum_iso,)).fetchone()
-                    if existing:
-                        skipped += 1
-                        continue
-                    conn.execute("""
-                        INSERT INTO reporty (datum,den,smena,karty,kov,papir,hotovost,vydaje,
-                        trzba,trzba_vcpk,pk50_ks,pk100_ks,pk_celkem,
-                        pizza_cela,pizza_ctvrt,burger,talire,burtgulas)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                    """, (
-                        datum_iso, den_str, smena, karty, kov, papir, hotovost,
-                        vydaje, trzba, trzba_vcpk, pk50_ks, pk100_ks, pk_celkem,
-                        pizza_cela, pizza_ctvrt, burger, talire, burtgulas
-                    ))
-                    imported += 1
+                rows_to_insert.append((
+                    datum_iso, den_str, smena, karty, kov, papir, hotovost,
+                    vydaje, trzba, trzba_vcpk, pk50_ks, pk100_ks, pk_celkem,
+                    pizza_cela, pizza_ctvrt, burger, talire, burtgulas
+                ))
+
+        with get_db() as conn:
+            for params in rows_to_insert:
+                existing = conn.execute("SELECT id FROM reporty WHERE datum=?", (params[0],)).fetchone()
+                if existing:
+                    skipped += 1
+                    continue
+                conn.execute("""
+                    INSERT INTO reporty (datum,den,smena,karty,kov,papir,hotovost,vydaje,
+                    trzba,trzba_vcpk,pk50_ks,pk100_ks,pk_celkem,
+                    pizza_cela,pizza_ctvrt,burger,talire,burtgulas)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, params)
+                imported += 1
 
         return jsonify({"ok": True, "imported": imported, "skipped": skipped, "errors": errors[:10]})
 
