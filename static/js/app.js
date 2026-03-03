@@ -1627,6 +1627,12 @@ async function renderReporty() {
     </div>
     ${alertHtml}
     <div class="filters">
+      <label>Rok:</label>
+      <select id="rRok" onchange="nastavRokFiltr()">
+        <option value="">Vše</option>
+        <option value="2025">2025</option>
+        <option value="2026" selected>2026</option>
+      </select>
       <label>Od:</label><input type="date" id="rOd">
       <label>Do:</label><input type="date" id="rDo">
       <button class="btn btn-primary btn-sm" onclick="loadReporty()">Zobrazit</button>
@@ -1635,6 +1641,20 @@ async function renderReporty() {
       <div class="table-wrap" id="reportyList"><div class="loading-center"><span class="spinner"></span></div></div>
     </div>`;
 
+  nastavRokFiltr(); // nastav výchozí rok 2026 a načti
+}
+
+function nastavRokFiltr() {
+  const rok = document.getElementById("rRok")?.value;
+  const rOd = document.getElementById("rOd");
+  const rDo = document.getElementById("rDo");
+  if (rok) {
+    rOd.value = `${rok}-01-01`;
+    rDo.value = `${rok}-12-31`;
+  } else {
+    rOd.value = "";
+    rDo.value = "";
+  }
   loadReporty();
 }
 
