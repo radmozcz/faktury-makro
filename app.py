@@ -73,7 +73,49 @@ def get_db():
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
-def init_db():
+def migrate_db():
+    """Přidá chybějící tabulky/sloupce do existující databáze."""
+    with get_db() as conn:
+        conn.executescript("""
+        CREATE TABLE IF NOT EXISTS vyplaty (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            jmeno       TEXT    NOT NULL,
+            datum       TEXT    NOT NULL,
+            castka      REAL    NOT NULL DEFAULT 0,
+            poznamka    TEXT,
+            firma_zkratka TEXT  DEFAULT '',
+            created_at  TEXT    DEFAULT (datetime('now','localtime'))
+        );
+
+        CREATE TABLE IF NOT EXISTS reporty (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            datum         TEXT    NOT NULL UNIQUE,
+            den           TEXT,
+            smena         TEXT,
+            karty         REAL    DEFAULT 0,
+            kov           REAL    DEFAULT 0,
+            papir         REAL    DEFAULT 0,
+            hotovost      REAL    DEFAULT 0,
+            vydaje        REAL    DEFAULT 0,
+            trzba         REAL    DEFAULT 0,
+            trzba_vcpk    REAL    DEFAULT 0,
+            pk50_ks       INTEGER DEFAULT 0,
+            pk100_ks      INTEGER DEFAULT 0,
+            pk_celkem     REAL    DEFAULT 0,
+            pizza_cela    INTEGER DEFAULT 0,
+            pizza_ctvrt   INTEGER DEFAULT 0,
+            burger        INTEGER DEFAULT 0,
+            talire        INTEGER DEFAULT 0,
+            hotdog        INTEGER DEFAULT 0,
+            snidane       INTEGER DEFAULT 0,
+            nakupy        INTEGER DEFAULT 0,
+            poznamka      TEXT,
+            foto_cesta    TEXT,
+            created_at    TEXT    DEFAULT (datetime('now','localtime'))
+        );
+        """)
+
+
     with get_db() as conn:
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS faktury (
@@ -710,7 +752,8 @@ def parse_report_image_claude(filepath):
 
         client = anthropic.Anthropic(api_key=api_key)
 
-        today = date.today().strftime("%-d.%-m")
+        _t = date.today()
+        today = f"{_t.day}.{_t.month}"
         prompt = f"""Jsi expert na čtení ručně psaných restauračních reportů. Přečti tento denní report VELMI PEČLIVĚ.
 Odpověz POUZE platným JSON objektem, žádný jiný text, žádné backticky.
 
@@ -1076,38 +1119,48 @@ def api_faktura_update(fid):
 # ── API: výplaty ──────────────────────────────────────────────────────────────
 @app.route("/api/vyplaty", methods=["GET"])
 def api_vyplaty():
-    firma = request.args.get("firma", "")
-    od    = request.args.get("od", "")
-    do_   = request.args.get("do", "")
-    clauses, params = [], []
-    if firma: clauses.append("firma_zkratka=?"); params.append(firma)
-    if od:    clauses.append("datum>=?"); params.append(od)
-    if do_:   clauses.append("datum<=?"); params.append(do_)
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-    with get_db() as conn:
-        rows = conn.execute(f"""
-            SELECT * FROM vyplaty {where} ORDER BY datum DESC, created_at DESC
-        """, params).fetchall()
-        total = conn.execute(f"SELECT COALESCE(SUM(castka),0) FROM vyplaty {where}", params).fetchone()[0]
-    return jsonify({"vyplaty": [dict(r) for r in rows], "celkem": round(total, 2)})
+    try:
+        firma = request.args.get("firma", "")
+        od    = request.args.get("od", "")
+        do_   = request.args.get("do", "")
+        clauses, params = [], []
+        if firma: clauses.append("firma_zkratka=?"); params.append(firma)
+        if od:    clauses.append("datum>=?"); params.append(od)
+        if do_:   clauses.append("datum<=?"); params.append(do_)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        with get_db() as conn:
+            rows = conn.execute(f"""
+                SELECT * FROM vyplaty {where} ORDER BY datum DESC, created_at DESC
+            """, params).fetchall()
+            total = conn.execute(f"SELECT COALESCE(SUM(castka),0) FROM vyplaty {where}", params).fetchone()[0]
+        return jsonify({"vyplaty": [dict(r) for r in rows], "celkem": round(total, 2)})
+    except Exception as e:
+        import traceback
+        app.logger.error(f"api_vyplaty GET error: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/vyplaty", methods=["POST"])
 def api_vyplata_ulozit():
-    data = request.json
-    if not data.get("jmeno") or not data.get("datum") or data.get("castka") is None:
-        return jsonify({"error": "Chybí povinná pole"}), 400
-    with get_db() as conn:
-        cur = conn.execute("""
-            INSERT INTO vyplaty (jmeno, datum, castka, poznamka, firma_zkratka)
-            VALUES (?,?,?,?,?)
-        """, (
-            data["jmeno"],
-            data["datum"],
-            float(data["castka"]),
-            data.get("poznamka", ""),
-            data.get("firma_zkratka", "")
-        ))
-    return jsonify({"ok": True, "id": cur.lastrowid})
+    try:
+        data = request.json
+        if not data.get("jmeno") or not data.get("datum") or data.get("castka") is None:
+            return jsonify({"error": "Chybí povinná pole"}), 400
+        with get_db() as conn:
+            cur = conn.execute("""
+                INSERT INTO vyplaty (jmeno, datum, castka, poznamka, firma_zkratka)
+                VALUES (?,?,?,?,?)
+            """, (
+                data["jmeno"],
+                data["datum"],
+                float(data["castka"]),
+                data.get("poznamka", ""),
+                data.get("firma_zkratka", "")
+            ))
+        return jsonify({"ok": True, "id": cur.lastrowid})
+    except Exception as e:
+        import traceback
+        app.logger.error(f"api_vyplata_ulozit error: {traceback.format_exc()}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/vyplaty/<int:vid>", methods=["DELETE"])
 def api_vyplata_delete(vid):
@@ -1882,11 +1935,14 @@ def _xlsx_header(ws, headers):
 def uploaded_file(filename):
     return send_from_directory(UPLOAD_DIR, filename)
 
+
+# Inicializace DB při každém startu (gunicorn i přímé spuštění)
+init_db()
+migrate_db()
+
 if __name__ == "__main__":
-    init_db()
     print("=" * 55)
     print("  Správa faktur – spouštím server")
     print("  Otevři prohlížeč na: http://localhost:5000")
     print("=" * 55)
     app.run(host="0.0.0.0", port=5000, debug=False)
-# placeholder - already complete
