@@ -6,6 +6,11 @@ Spuštění: python app.py
 import os
 import json
 import sqlite3
+try:
+    import psycopg2
+    import psycopg2.extras
+except ImportError:
+    psycopg2 = None
 import csv
 import io
 import re
