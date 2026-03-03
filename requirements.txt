@@ -1,5 +1,8 @@
 flask
-gunicorn
-openpyxl
-pdfplumber
 anthropic
+openpyxl
+werkzeug
+pdfplumber
+pytesseract
+Pillow
+psycopg2-binary
