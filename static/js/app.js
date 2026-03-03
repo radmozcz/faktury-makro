@@ -1621,6 +1621,7 @@ async function renderReporty() {
       <div class="btn-group">
         <button class="btn btn-primary btn-sm" onclick="openNovyReport()">+ Nový report</button>
         <button class="btn btn-secondary btn-sm" onclick="openImportXlsx()">📥 Import xlsx</button>
+        <button class="btn btn-secondary btn-sm" onclick="smazBudouciReporty()">🗑 Smazat budoucí</button>
         <button class="btn btn-secondary btn-sm" onclick="exportReporty('xlsx')">⬇ Excel</button>
         <button class="btn btn-secondary btn-sm" onclick="exportReporty('csv')">⬇ CSV</button>
       </div>
@@ -1665,9 +1666,38 @@ async function loadReporty() {
   });
   let rows;
   try { rows = await api(`/api/reporty?${params}`); } catch { return; }
+  App._reportyData = rows;
+  if (!App._reportySort) App._reportySort = { col: "datum", asc: false };
+  renderReportyTable(rows);
+}
 
+function sortReporty(col) {
+  const s = App._reportySort;
+  if (s.col === col) s.asc = !s.asc;
+  else { s.col = col; s.asc = false; }
+  const rows = [...(App._reportyData || [])];
+  rows.sort((a, b) => {
+    const va = a[col] ?? "", vb = b[col] ?? "";
+    if (va < vb) return s.asc ? -1 : 1;
+    if (va > vb) return s.asc ? 1 : -1;
+    return 0;
+  });
+  renderReportyTable(rows);
+}
+
+async function smazBudouciReporty() {
+  if (!confirm("Smazat všechny záznamy s datem v budoucnosti?")) return;
+  const r = await api("/api/reporty/smaz-budouci", { method: "POST" });
+  toast(`Smazáno ${r.smazano} záznamů`);
+  loadReporty();
+}
+
+function renderReportyTable(rows) {
   const el = document.getElementById("reportyList");
   if (!el) return;
+  const s = App._reportySort || { col: "datum", asc: false };
+  const arr = col => s.col === col ? (s.asc ? " ▲" : " ▼") : "";
+  const th = (col, label) => `<th style="cursor:pointer;user-select:none" onclick="sortReporty('${col}')">${label}${arr(col)}</th>`;
 
   if (!rows.length) {
     el.innerHTML = `<div style="text-align:center;color:var(--txt2);padding:3rem">
@@ -1695,10 +1725,10 @@ async function loadReporty() {
     <div style="overflow-x:auto">
     <table style="min-width:900px">
       <thead><tr>
-        <th>Datum</th><th>Den</th>
-        <th>Tržba vč.PK</th><th>Karty</th><th>Hotovost</th><th>Výdaje</th>
-        <th>PK Kč</th>
-        <th>🍕 Celá</th><th>🍕/4</th><th>🍔</th><th>🍲 Guláš</th><th>🍽 Talíře</th>
+        ${th("datum","Datum")}${th("den","Den")}
+        ${th("trzba_vcpk","Tržba vč.PK")}${th("karty","Karty")}${th("hotovost","Hotovost")}${th("vydaje","Výdaje")}
+        ${th("pk_celkem","PK Kč")}
+        ${th("pizza_cela","🍕 Celá")}${th("pizza_ctvrt","🍕/4")}${th("burger","🍔")}${th("burtgulas","🍲 Guláš")}${th("talire","🍽 Talíře")}
         <th>Směna</th><th></th>
       </tr></thead>
       <tbody>
