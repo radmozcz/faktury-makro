@@ -1289,6 +1289,9 @@ def api_reporty_list():
     clauses, params = [], []
     if od:  clauses.append("datum>=?"); params.append(od)
     if do_: clauses.append("datum<=?"); params.append(do_)
+    else:
+        # Nikdy nezobrazovat budoucí záznamy
+        clauses.append("datum<=?"); params.append(date.today().isoformat())
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     with get_db() as conn:
         rows = conn.execute(f"""
@@ -1362,6 +1365,16 @@ def api_report_delete(rid):
     return jsonify({"ok": True})
 
 
+@app.route("/api/reporty/smaz-budouci", methods=["POST"])
+def api_reporty_smaz_budouci():
+    """Smaže záznamy s datem v budoucnosti."""
+    dnes = date.today().isoformat()
+    with get_db() as conn:
+        cur = conn.execute("DELETE FROM reporty WHERE datum > ?", (dnes,))
+        smazano = cur.rowcount
+    return jsonify({"ok": True, "smazano": smazano})
+
+
 @app.route("/api/reporty/import-xlsx", methods=["POST"])
 def api_report_import_xlsx():
     """Importuje historická data z xlsx souboru (formát CLAUDE_vykaz)."""
@@ -1396,6 +1409,8 @@ def api_report_import_xlsx():
             ws = wb[sheet_name]
 
             current_mesic = None
+            dnes = date.today()
+            konec_import = date(dnes.year, dnes.month, dnes.day)  # max do dneška
             for row in ws.iter_rows(min_row=2, values_only=True):
                 if not row or row[0] is None:
                     continue
@@ -1415,9 +1430,14 @@ def api_report_import_xlsx():
                 if not current_mesic:
                     continue
 
-                # Přeskočit řádky bez data (ale ne nulové tržby - ty jsou validní)
-                karty_val    = float(row[4] or 0)
-                hotovost_val = float(row[5] or 0)
+                # Přeskočit budoucí data (po dnešku)
+                try:
+                    datum_test = date(year, current_mesic, den_cislo)
+                    if datum_test > konec_import:
+                        skipped += 1
+                        continue
+                except ValueError:
+                    continue
 
                 try:
                     datum_iso = date(year, current_mesic, den_cislo).isoformat()
