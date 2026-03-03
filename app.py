@@ -155,8 +155,22 @@ def migrate_db():
         );
         """)
 
-
+    # Přidat chybějící sloupce do existující tabulky reporty
     with get_db() as conn:
+        existing = [row[1] for row in conn.execute("PRAGMA table_info(reporty)").fetchall()]
+        migrations = [
+            ("burtgulas", "INTEGER DEFAULT 0"),
+            ("hotdog",    "INTEGER DEFAULT 0"),
+            ("snidane",   "INTEGER DEFAULT 0"),
+            ("nakupy",    "INTEGER DEFAULT 0"),
+            ("foto_cesta","TEXT"),
+        ]
+        for col, typ in migrations:
+            if col not in existing:
+                try:
+                    conn.execute(f"ALTER TABLE reporty ADD COLUMN {col} {typ}")
+                except Exception:
+                    pass
         conn.executescript("""
         CREATE TABLE IF NOT EXISTS faktury (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
