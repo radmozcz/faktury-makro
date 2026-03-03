@@ -1073,7 +1073,7 @@ def api_vyplaty():
 @app.route("/api/vyplaty", methods=["POST"])
 def api_vyplata_ulozit():
     data = request.json
-    if not data.get("jmeno") or not data.get("datum") or not data.get("castka"):
+    if not data.get("jmeno") or not data.get("datum") or data.get("castka") is None:
         return jsonify({"error": "Chybí povinná pole"}), 400
     with get_db() as conn:
         cur = conn.execute("""
