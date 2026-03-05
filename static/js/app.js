@@ -393,6 +393,19 @@ async function renderFaktury() {
   });
 }
 
+// Stav řazení faktur
+let _faktSort = { col: "datum_vystaveni", dir: "desc" };
+
+function fakturySort(col) {
+  if (_faktSort.col === col) {
+    _faktSort.dir = _faktSort.dir === "asc" ? "desc" : "asc";
+  } else {
+    _faktSort.col = col;
+    _faktSort.dir = "asc";
+  }
+  loadFaktury();
+}
+
 async function loadFaktury() {
   const params = new URLSearchParams({
     firma: document.getElementById("fFirma")?.value || "",
@@ -408,11 +421,31 @@ async function loadFaktury() {
   const tbl = document.getElementById("fakturyTable");
   if (!tbl) return;
 
+  // Řazení na klientu
+  const sortFns = {
+    cislo_faktury:   (a,b) => (a.cislo_faktury||"").localeCompare(b.cislo_faktury||""),
+    datum_vystaveni: (a,b) => (a.datum_vystaveni||"").localeCompare(b.datum_vystaveni||""),
+    celkem_s_dph:    (a,b) => (a.celkem_s_dph||0) - (b.celkem_s_dph||0),
+  };
+  if (sortFns[_faktSort.col]) {
+    data.faktury.sort((a,b) => {
+      const r = sortFns[_faktSort.col](a,b);
+      return _faktSort.dir === "asc" ? r : -r;
+    });
+  }
+
+  const arrow = (col) => _faktSort.col === col ? (_faktSort.dir === "asc" ? " ▲" : " ▼") : " ⇅";
+  const thSort = (col, label) =>
+    `<th style="cursor:pointer;user-select:none" onclick="fakturySort('${col}')">${label}${arrow(col)}</th>`;
+
   tbl.innerHTML = `
     <table>
       <thead><tr>
-        <th>Firma</th><th>Dodavatel</th><th>Č. faktury</th>
-        <th>Vystavení</th><th>Splatnost</th><th>Celkem s DPH</th><th>Stav</th>
+        <th>Firma</th><th>Dodavatel</th>
+        ${thSort("cislo_faktury","Č. faktury")}
+        ${thSort("datum_vystaveni","Vystavení")}
+        ${thSort("celkem_s_dph","Celkem s DPH")}
+        <th>Stav</th>
       </tr></thead>
       <tbody>
         ${data.faktury.map(f => `
@@ -421,16 +454,15 @@ async function loadFaktury() {
             <td>${escHtml(f.dodavatel)}</td>
             <td>${escHtml(f.cislo_faktury||"—")}</td>
             <td>${czDate(f.datum_vystaveni)}</td>
-            <td>${czDate(f.datum_splatnosti)}</td>
             <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
             <td>${stavBadge(f.stav)}</td>
           </tr>`).join("") ||
-          "<tr><td colspan='7' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"}
+          "<tr><td colspan='6' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"}
       </tbody>
       ${data.faktury.length ? `
       <tfoot>
         <tr class="table-footer">
-          <td colspan="5">Celkem (${data.faktury.length} faktur)</td>
+          <td colspan="4">Celkem (${data.faktury.length} faktur)</td>
           <td colspan="2"><strong>${czMoney(data.celkem)}</strong></td>
         </tr>
       </tfoot>` : ""}
