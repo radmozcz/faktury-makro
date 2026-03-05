@@ -125,9 +125,9 @@ class _PgConn:
         sql = sql.replace("datetime('now','localtime')", "NOW()")
         sql = sql.replace("date('now','-12 months')", "CURRENT_DATE - INTERVAL '12 months'")
         sql = sql.replace("date('now')", "CURRENT_DATE")
-        sql = _re.sub(r"strftime\('%Y',\s*([^)]+)\)", r"TO_CHAR((\1)::timestamp, 'YYYY')", sql)
-        sql = _re.sub(r"strftime\('%m',\s*([^,)]+)\)", r"TO_CHAR(\1::date, 'MM')", sql)
-        sql = _re.sub(r"strftime\('%Y-%m',\s*([^,)]+)\)", r"TO_CHAR(\1::date, 'YYYY-MM')", sql)
+        sql = _re.sub(r"strftime\('%Y',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'YYYY')", sql)
+        sql = _re.sub(r"strftime\('%m',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'MM')", sql)
+        sql = _re.sub(r"strftime\('%Y-%m',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'YYYY-MM')", sql)
         return sql
     def execute(self, sql, params=()):
         if sql.strip().upper().startswith("PRAGMA"):
@@ -1021,10 +1021,12 @@ def api_dashboard():
         params_base = (firma,) if firma else ()
 
         # ── OPRAVA: pojmenované sloupce místo indexů [0],[1]
+        # ── OPRAVA2: PostgreSQL potřebuje cast pro LIKE na textovém sloupci
+        like_cond = "AND datum_vystaveni::text LIKE ?" if _USE_PG else "AND datum_vystaveni LIKE ?"
         row = conn.execute(f"""
             SELECT COUNT(*) as pocet, COALESCE(SUM(celkem_s_dph),0) as vydaje
             FROM faktury
-            WHERE datum_vystaveni LIKE ? {where_firma}
+            WHERE 1=1 {like_cond} {where_firma}
         """, (mesic + "%",) + params_base).fetchone()
         pocet_mesic  = row["pocet"]  if isinstance(row, dict) else row[0]
         vydaje_mesic = row["vydaje"] if isinstance(row, dict) else row[1]
@@ -1039,7 +1041,7 @@ def api_dashboard():
         graf = conn.execute(f"""
             SELECT strftime('%Y-%m', datum_vystaveni) as m, COALESCE(SUM(celkem_s_dph),0) as castka
             FROM faktury
-            WHERE datum_vystaveni >= date('now','-12 months') {where_firma}
+            WHERE datum_vystaveni IS NOT NULL AND datum_vystaveni != '' AND datum_vystaveni >= date('now','-12 months') {where_firma}
             GROUP BY m ORDER BY m
         """, params_base).fetchall()
 
