@@ -123,8 +123,11 @@ class _PgConn:
         sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
         sql = sql.replace("DEFAULT (datetime('now','localtime'))", "DEFAULT NOW()")
         sql = sql.replace("datetime('now','localtime')", "NOW()")
-        sql = sql.replace("date('now','-12 months')", "CURRENT_DATE - INTERVAL '12 months'")
-        sql = sql.replace("date('now')", "CURRENT_DATE")
+        sql = sql.replace("date('now','-12 months')", "(CURRENT_DATE - INTERVAL '12 months')")
+        sql = sql.replace("date('now')", "CURRENT_DATE::text")
+        # datum_vystaveni a datum jsou TEXT sloupce – při porovnání s datem je nutný cast
+        sql = _re.sub(r"\bdatum_vystaveni\b(\s*)(>=|<=|>|<)", r"datum_vystaveni::date\1\2", sql)
+        sql = _re.sub(r"\bdatum\b(\s*)(>=|<=|>|<)", r"datum::date\1\2", sql)
         sql = _re.sub(r"strftime\('%Y',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'YYYY')", sql)
         sql = _re.sub(r"strftime\('%m',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'MM')", sql)
         sql = _re.sub(r"strftime\('%Y-%m',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'YYYY-MM')", sql)
@@ -1038,10 +1041,11 @@ def api_dashboard():
         pocet_po_spl  = row2["pocet"]  if isinstance(row2, dict) else row2[0]
         castka_po_spl = row2["castka"] if isinstance(row2, dict) else row2[1]
 
+        datum_filter = "AND datum_vystaveni::date >= CURRENT_DATE - INTERVAL '12 months'" if _USE_PG else "AND datum_vystaveni >= date('now','-12 months')"
         graf = conn.execute(f"""
             SELECT strftime('%Y-%m', datum_vystaveni) as m, COALESCE(SUM(celkem_s_dph),0) as castka
             FROM faktury
-            WHERE datum_vystaveni IS NOT NULL AND datum_vystaveni != '' AND datum_vystaveni >= date('now','-12 months') {where_firma}
+            WHERE datum_vystaveni IS NOT NULL AND datum_vystaveni != '' {datum_filter} {where_firma}
             GROUP BY m ORDER BY m
         """, params_base).fetchall()
 
@@ -1753,8 +1757,8 @@ def api_nahrat():
             row = conn.execute("""
                 SELECT id, firma_zkratka, datum_vystaveni, celkem_s_dph
                 FROM faktury
-                WHERE cislo_faktury = ? AND dodavatel LIKE '%MAKRO%'
-            """, (data["cislo_faktury"],)).fetchone()
+                WHERE cislo_faktury = ? AND dodavatel LIKE ?
+            """, (data["cislo_faktury"], "%MAKRO%")).fetchone()
             if row:
                 data["duplicita"] = {
                     "id": row["id"],
