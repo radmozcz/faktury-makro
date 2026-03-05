@@ -1758,7 +1758,8 @@ def api_nahrat():
                 SELECT id, firma_zkratka, datum_vystaveni, celkem_s_dph
                 FROM faktury
                 WHERE cislo_faktury = ? AND dodavatel LIKE ?
-            """, (data["cislo_faktury"], "%MAKRO%")).fetchone()
+                AND ABS(celkem_s_dph - ?) < 0.01
+            """, (data["cislo_faktury"], "%MAKRO%", float(data.get("celkem_s_dph", 0)))).fetchone()
             if row:
                 data["duplicita"] = {
                     "id": row["id"],
