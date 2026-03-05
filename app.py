@@ -125,7 +125,7 @@ class _PgConn:
         sql = sql.replace("datetime('now','localtime')", "NOW()")
         sql = sql.replace("date('now','-12 months')", "CURRENT_DATE - INTERVAL '12 months'")
         sql = sql.replace("date('now')", "CURRENT_DATE")
-        sql = _re.sub(r"strftime\('%Y',\s*([^,)]+)\)", r"TO_CHAR(\1::date, 'YYYY')", sql)
+        sql = _re.sub(r"strftime\('%Y',\s*([^)]+)\)", r"TO_CHAR((\1)::timestamp, 'YYYY')", sql)
         sql = _re.sub(r"strftime\('%m',\s*([^,)]+)\)", r"TO_CHAR(\1::date, 'MM')", sql)
         sql = _re.sub(r"strftime\('%Y-%m',\s*([^,)]+)\)", r"TO_CHAR(\1::date, 'YYYY-MM')", sql)
         return sql
