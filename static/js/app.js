@@ -681,6 +681,12 @@ async function hromadneNahrat(files) {
         continue;
       }
 
+      // ── Duplicita = přeskočit automaticky
+      if (data.duplicita) {
+        row.innerHTML = `<span style="color:var(--txt2)">⏭ ${file.name} – přeskočeno (duplicita č. ${data.cislo_faktury})</span>`;
+        continue;
+      }
+
       const payload = {
         firma_zkratka: firma,
         dodavatel:     data.dodavatel || 'MAKRO Cash & Carry ČR s.r.o.',
