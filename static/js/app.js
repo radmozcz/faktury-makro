@@ -393,19 +393,6 @@ async function renderFaktury() {
   });
 }
 
-// Stav řazení faktur
-let _faktSort = { col: "datum_vystaveni", dir: "desc" };
-
-function fakturySort(col) {
-  if (_faktSort.col === col) {
-    _faktSort.dir = _faktSort.dir === "asc" ? "desc" : "asc";
-  } else {
-    _faktSort.col = col;
-    _faktSort.dir = "asc";
-  }
-  loadFaktury();
-}
-
 async function loadFaktury() {
   const params = new URLSearchParams({
     firma: document.getElementById("fFirma")?.value || "",
@@ -421,31 +408,11 @@ async function loadFaktury() {
   const tbl = document.getElementById("fakturyTable");
   if (!tbl) return;
 
-  // Řazení na klientu
-  const sortFns = {
-    cislo_faktury:   (a,b) => (a.cislo_faktury||"").localeCompare(b.cislo_faktury||""),
-    datum_vystaveni: (a,b) => (a.datum_vystaveni||"").localeCompare(b.datum_vystaveni||""),
-    celkem_s_dph:    (a,b) => (a.celkem_s_dph||0) - (b.celkem_s_dph||0),
-  };
-  if (sortFns[_faktSort.col]) {
-    data.faktury.sort((a,b) => {
-      const r = sortFns[_faktSort.col](a,b);
-      return _faktSort.dir === "asc" ? r : -r;
-    });
-  }
-
-  const arrow = (col) => _faktSort.col === col ? (_faktSort.dir === "asc" ? " ▲" : " ▼") : " ⇅";
-  const thSort = (col, label) =>
-    `<th style="cursor:pointer;user-select:none" onclick="fakturySort('${col}')">${label}${arrow(col)}</th>`;
-
   tbl.innerHTML = `
     <table>
       <thead><tr>
-        <th>Firma</th><th>Dodavatel</th>
-        ${thSort("cislo_faktury","Č. faktury")}
-        ${thSort("datum_vystaveni","Vystavení")}
-        ${thSort("celkem_s_dph","Celkem s DPH")}
-        <th>Stav</th>
+        <th>Firma</th><th>Dodavatel</th><th>Č. faktury</th>
+        <th>Vystavení</th><th>Splatnost</th><th>Celkem s DPH</th><th>Stav</th>
       </tr></thead>
       <tbody>
         ${data.faktury.map(f => `
@@ -454,15 +421,16 @@ async function loadFaktury() {
             <td>${escHtml(f.dodavatel)}</td>
             <td>${escHtml(f.cislo_faktury||"—")}</td>
             <td>${czDate(f.datum_vystaveni)}</td>
+            <td>${czDate(f.datum_splatnosti)}</td>
             <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
             <td>${stavBadge(f.stav)}</td>
           </tr>`).join("") ||
-          "<tr><td colspan='6' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"}
+          "<tr><td colspan='7' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"}
       </tbody>
       ${data.faktury.length ? `
       <tfoot>
         <tr class="table-footer">
-          <td colspan="4">Celkem (${data.faktury.length} faktur)</td>
+          <td colspan="5">Celkem (${data.faktury.length} faktur)</td>
           <td colspan="2"><strong>${czMoney(data.celkem)}</strong></td>
         </tr>
       </tfoot>` : ""}
@@ -571,7 +539,7 @@ let uploadedFilePath = null;
 
 function renderNahrat() {
   document.getElementById("mainContent").innerHTML = `
-    <div class="page-header"><h1 class="page-title">Nahrát fakturu (MAKRO)</h1></div>
+    <div class="page-header"><h1 class="page-title">Nahrát doklad</h1></div>
     <div class="card" style="max-width:900px">
       <div class="form-group">
         <label class="form-label">Firma</label>
@@ -581,9 +549,10 @@ function renderNahrat() {
       </div>
 
       <div style="display:flex;gap:.5rem;margin-bottom:1rem;border-bottom:2px solid var(--border);padding-bottom:0">
-        <button id="tabPdf" class="tab-btn tab-active" onclick="switchTab('pdf')">📄 PDF soubor</button>
-        <button id="tabText" class="tab-btn" onclick="switchTab('text')">📋 Vložit text</button>
-        <button id="tabHromadne" class="tab-btn" onclick="switchTab('hromadne')">📦 Hromadné nahrání</button>
+        <button id="tabPdf" class="tab-btn tab-active" onclick="switchTab('pdf')">📄 MAKRO PDF</button>
+        <button id="tabText" class="tab-btn" onclick="switchTab('text')">📋 MAKRO text</button>
+        <button id="tabHromadne" class="tab-btn" onclick="switchTab('hromadne')">📦 Hromadné</button>
+        <button id="tabDoklad" class="tab-btn" onclick="switchTab('doklad')">🧾 Jiný doklad</button>
       </div>
 
       <div id="tabPanelPdf">
@@ -620,6 +589,22 @@ function renderNahrat() {
         <div id="hromadneStatus" style="margin-top:1rem"></div>
       </div>
 
+      <div id="tabPanelDoklad" style="display:none">
+        <div style="background:var(--bg2);border-radius:8px;padding:.8rem 1rem;margin-bottom:1rem;font-size:.9rem;color:var(--txt2)">
+          📱 <strong>Mobilní workflow:</strong> Vyfotit účtenku → nahrát → Claude přečte → zkontrolovat → uložit<br>
+          Funguje pro: Globus, Penny, Albert, Lidl, benzínky, libovolné faktury...
+        </div>
+        <div class="dropzone" id="dropzoneDoklad">
+          <div class="dropzone-icon">🧾</div>
+          <div class="dropzone-text">
+            <strong>Přetáhněte účtenku nebo fakturu</strong> nebo klikněte<br>
+            <small>Fotka, sken nebo PDF – Claude přečte jakýkoliv doklad</small>
+          </div>
+          <input type="file" id="fileInputDoklad" accept=".pdf,.png,.jpg,.jpeg">
+        </div>
+        <div id="dokladStatus" style="margin-top:1rem;color:var(--txt2);font-size:.9rem"></div>
+      </div>
+
       <div id="parsedForm" style="display:none; margin-top:1.5rem;">
         <h3 style="font-family:var(--font-head);margin-bottom:1rem">Zkontrolujte a případně opravte</h3>
         <div class="grid-2" style="gap:1rem">
@@ -645,10 +630,11 @@ function renderNahrat() {
 
   setupDropzone();
   setupDropzoneHromadne();
+  setupDropzoneDoklad();
 }
 
 function switchTab(tab) {
-  ['pdf','text','hromadne'].forEach(t => {
+  ['pdf','text','hromadne','doklad'].forEach(t => {
     document.getElementById('tabPanel' + t.charAt(0).toUpperCase() + t.slice(1)).style.display = t === tab ? '' : 'none';
     document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1)).classList.toggle('tab-active', t === tab);
   });
@@ -676,7 +662,7 @@ function setupDropzoneHromadne() {
   const dz  = document.getElementById('dropzoneHromadne');
   const inp = document.getElementById('fileInputHromadne');
   if (!dz) return;
-  dz.addEventListener('click', (e) => { if (e.target !== inp) inp.click(); });
+  dz.addEventListener('click', () => inp.click());
   inp.addEventListener('change', () => { if (inp.files.length) hromadneNahrat(inp.files); });
   dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
   dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
@@ -713,12 +699,6 @@ async function hromadneNahrat(files) {
         continue;
       }
 
-      // ── Duplicita = přeskočit automaticky
-      if (data.duplicita) {
-        row.innerHTML = `<span style="color:var(--txt2)">⏭ ${file.name} – přeskočeno (duplicita č. ${data.cislo_faktury})</span>`;
-        continue;
-      }
-
       const payload = {
         firma_zkratka: firma,
         dodavatel:     data.dodavatel || 'MAKRO Cash & Carry ČR s.r.o.',
@@ -746,7 +726,7 @@ function setupDropzone() {
   const dz   = document.getElementById("dropzone");
   const inp  = document.getElementById("fileInput");
 
-  dz.addEventListener("click", (e) => { if (e.target !== inp) inp.click(); });
+  dz.addEventListener("click", () => inp.click());
   inp.addEventListener("change", () => { if (inp.files[0]) uploadFile(inp.files[0]); });
 
   dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag-over"); });
@@ -962,7 +942,7 @@ async function ulozitFakturuMakro() {
     zpusob_uhrady: "Hotovost",
     stav:          "zaplaceno",
     soubor_cesta:  uploadedFilePath || "",
-    zdroj:         "makro",
+    zdroj:         document._dokladZdroj || "makro",
     polozky,
   };
 
@@ -1671,6 +1651,64 @@ async function loadMesicniStatistiky() {
         <tbody>${mRows}</tbody>
       </table></div>
     </div>`;
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+//  JINÝ DOKLAD (účtenka, faktura od jiného dodavatele)
+// ═══════════════════════════════════════════════════════════════
+function setupDropzoneDoklad() {
+  const dz  = document.getElementById('dropzoneDoklad');
+  const inp = document.getElementById('fileInputDoklad');
+  if (!dz) return;
+  dz.addEventListener('click', (e) => { if (e.target !== inp) inp.click(); });
+  inp.addEventListener('change', () => { if (inp.files[0]) uploadDoklad(inp.files[0]); });
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) uploadDoklad(e.dataTransfer.files[0]);
+  });
+}
+
+async function uploadDoklad(file) {
+  const statusEl = document.getElementById('dokladStatus');
+  statusEl.innerHTML = '<span class="spinner"></span> Claude čte doklad…';
+
+  const fd = new FormData();
+  fd.append('soubor', file);
+  fd.append('typ_dokladu', 'doklad');
+
+  let data;
+  try {
+    const r = await fetch('/api/nahrat', { method: 'POST', body: fd });
+    data = await r.json();
+  } catch (e) {
+    statusEl.textContent = '❌ Chyba: ' + e.message;
+    return;
+  }
+
+  if (data.error && !data.soubor_cesta) {
+    statusEl.textContent = '❌ ' + data.error;
+    return;
+  }
+
+  statusEl.innerHTML = `✅ Načteno: <strong>${escHtml(data.dodavatel||'')}</strong>, ${data.datum_vystaveni||'?'}, ${czMoney(data.celkem_s_dph)} – zkontrolujte a uložte`;
+  uploadedFilePath = data.soubor_cesta || '';
+  document._dokladZdroj = 'doklad';
+
+  document.getElementById('parsedForm').style.display = 'block';
+  document.getElementById('pDodavatel').value = data.dodavatel || '';
+  document.getElementById('pCislo').value     = data.cislo_faktury || '';
+  document.getElementById('pDatVys').value    = data.datum_vystaveni || '';
+  document.getElementById('pDatSpl').value    = '';
+
+  const tbody = document.getElementById('polozkyBody');
+  tbody.innerHTML = '';
+  (data.polozky || []).forEach(p => appendPolozkaRow(p));
+  updateTotal();
+
+  document.getElementById('parsedForm').scrollIntoView({ behavior: 'smooth' });
 }
 
 
