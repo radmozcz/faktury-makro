@@ -1503,6 +1503,7 @@ def api_report_import_xlsx():
         wb = openpyxl.load_workbook(fpath, data_only=True)
         imported = 0
         skipped  = 0
+        updated  = 0
         errors   = []
 
         den_map = {
@@ -1516,63 +1517,71 @@ def api_report_import_xlsx():
         }
 
         rows_to_insert = []
+        dnes = date.today()
+
         for sheet_name in wb.sheetnames:
-            if sheet_name not in ("2025", "2026"):
+            # Zpracuj pouze listy s roky (číselné názvy)
+            try:
+                year = int(sheet_name)
+            except ValueError:
                 continue
-            year = int(sheet_name)
+            if year < 2020 or year > 2030:
+                continue
+
             ws = wb[sheet_name]
 
-            current_mesic = None
-            dnes = date.today()
-            konec_import = date(dnes.year, dnes.month, dnes.day)
             for row in ws.iter_rows(min_row=2, values_only=True):
                 if not row or row[0] is None:
                     continue
-                if str(row[0]).upper() in ("SOUČET", "DNÍ", "PRŮMĚR", "SOU\u010cET"):
-                    continue
-                if row[1] and str(row[1]).upper() in mesic_map:
-                    current_mesic = mesic_map[str(row[1]).upper()]
 
+                # Přeskoč souhrnné řádky
+                if str(row[0]).upper().strip() in ("SOUČET", "DNÍ", "PRŮMĚR", "DATUM", "CELKEM"):
+                    continue
+
+                # Sloupec A musí být číslo dne
                 try:
                     den_cislo = int(row[0])
+                    if den_cislo < 1 or den_cislo > 31:
+                        continue
                 except (TypeError, ValueError):
                     continue
 
-                if not current_mesic:
+                # Sloupec B = název měsíce
+                mesic_str = str(row[1] or "").upper().strip()
+                mesic = mesic_map.get(mesic_str)
+                if not mesic:
                     continue
 
+                # Sestav datum
                 try:
-                    datum_test = date(year, current_mesic, den_cislo)
-                    if datum_test > konec_import:
-                        skipped += 1
-                        continue
+                    d = date(year, mesic, den_cislo)
                 except ValueError:
+                    errors.append(f"Neplatné datum: {year}-{mesic}-{den_cislo}")
                     continue
 
-                try:
-                    datum_iso = date(year, current_mesic, den_cislo).isoformat()
-                except ValueError:
-                    errors.append(f"Neplatné datum: {year}-{current_mesic}-{den_cislo}")
+                # Budoucí datumy přeskočíme
+                if d > dnes:
+                    skipped += 1
                     continue
 
-                den_str = den_map.get(str(row[2] or "").lower(), str(row[2] or ""))
-                trzba_vcpk = float(row[3] or 0)
-                karty      = float(row[4] or 0)
-                hotovost   = float(row[5] or 0)
-                vydaje     = float(row[6] or 0)
-                trzba      = float(row[7] or 0)
-                pk50_ks    = int(row[8] or 0)
-                pk100_ks   = int(row[9] or 0)
-                pk_celkem  = float(row[10] or 0)
-                pizza_cela = int(row[11] or 0)
-                pizza_ctvrt= int(row[12] or 0)
-                burger     = int(row[13] or 0)
-                talire     = int(row[14] or 0)
-                burtgulas  = int(row[15] or 0)
-                smena      = normalize_jmena(str(row[16] or ""))
-
-                kov   = 0
-                papir = hotovost
+                datum_iso   = d.isoformat()
+                den_str     = den_map.get(str(row[2] or "").lower().strip(), str(row[2] or ""))
+                trzba_vcpk  = float(row[3] or 0)
+                karty       = float(row[4] or 0)
+                hotovost    = float(row[5] or 0)
+                vydaje      = float(row[6] or 0)
+                trzba       = float(row[7] or 0)
+                pk50_ks     = int(row[8] or 0)
+                pk100_ks    = int(row[9] or 0)
+                pk_celkem   = float(row[10] or 0)
+                pizza_cela  = int(row[11] or 0)
+                pizza_ctvrt = int(row[12] or 0)
+                burger      = int(row[13] or 0)
+                talire      = int(row[14] or 0)
+                burtgulas   = int(row[15] or 0)
+                smena       = normalize_jmena(str(row[16] or ""))
+                kov         = 0
+                papir       = hotovost
 
                 rows_to_insert.append((
                     datum_iso, den_str, smena, karty, kov, papir, hotovost,
@@ -1582,21 +1591,42 @@ def api_report_import_xlsx():
 
         with get_db() as conn:
             for params in rows_to_insert:
-                existing = conn.execute("SELECT id FROM reporty WHERE datum=?", (params[0],)).fetchone()
+                datum_iso = params[0]
+                existing = conn.execute("SELECT id FROM reporty WHERE datum=?", (datum_iso,)).fetchone()
                 if existing:
-                    skipped += 1
-                    continue
-                conn.execute("""
-                    INSERT INTO reporty (datum,den,smena,karty,kov,papir,hotovost,vydaje,
-                    trzba,trzba_vcpk,pk50_ks,pk100_ks,pk_celkem,
-                    pizza_cela,pizza_ctvrt,burger,talire,burtgulas)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """, params)
-                imported += 1
+                    # Aktualizuj existující záznam (přepíše data z xlsx)
+                    conn.execute("""
+                        UPDATE reporty SET den=?,smena=?,karty=?,kov=?,papir=?,hotovost=?,
+                        vydaje=?,trzba=?,trzba_vcpk=?,pk50_ks=?,pk100_ks=?,pk_celkem=?,
+                        pizza_cela=?,pizza_ctvrt=?,burger=?,talire=?,burtgulas=?
+                        WHERE datum=?
+                    """, (
+                        params[1], params[2], params[3], params[4], params[5], params[6],
+                        params[7], params[8], params[9], params[10], params[11], params[12],
+                        params[13], params[14], params[15], params[16], params[17],
+                        datum_iso
+                    ))
+                    updated += 1
+                else:
+                    conn.execute("""
+                        INSERT INTO reporty (datum,den,smena,karty,kov,papir,hotovost,vydaje,
+                        trzba,trzba_vcpk,pk50_ks,pk100_ks,pk_celkem,
+                        pizza_cela,pizza_ctvrt,burger,talire,burtgulas)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """, params)
+                    imported += 1
 
-        return jsonify({"ok": True, "imported": imported, "skipped": skipped, "errors": errors[:10]})
+        return jsonify({
+            "ok": True,
+            "imported": imported,
+            "updated": updated,
+            "skipped": skipped,
+            "errors": errors[:10]
+        })
 
     except Exception as e:
+        import traceback
+        app.logger.error(f"import_xlsx error: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
 
