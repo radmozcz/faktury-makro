@@ -125,7 +125,6 @@ class _PgConn:
         sql = sql.replace("datetime('now','localtime')", "NOW()")
         sql = sql.replace("date('now','-12 months')", "(CURRENT_DATE - INTERVAL '12 months')")
         sql = sql.replace("date('now')", "CURRENT_DATE::text")
-        # datum_vystaveni a datum jsou TEXT sloupce – při porovnání s datem je nutný cast
         sql = _re.sub(r"\bdatum_vystaveni\b(\s*)(>=|<=|>|<)", r"datum_vystaveni::date\1\2", sql)
         sql = _re.sub(r"\bdatum\b(\s*)(>=|<=|>|<)", r"datum::date\1\2", sql)
         sql = _re.sub(r"strftime\('%Y',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'YYYY')", sql)
@@ -772,9 +771,13 @@ def _map_unit(u):
     return mapping.get(u.upper(), u.lower())
 
 
+# ── JMÉNA – mapa pro normalizaci ──────────────────────────────────────────────
+# OPRAVA: Ráďa místo Radek, přidány překlepy z OCR, Verča = Věrka
 JMENA_MAP = {
-    "rada": "Radek", "radek": "Radek", "ráďa": "Radek", "radi": "Radek",
+    "rada": "Ráďa", "radek": "Ráďa", "ráďa": "Ráďa", "radi": "Ráďa",
+    "žaďa": "Ráďa", "žada": "Ráďa", "řaďa": "Ráďa", "zaďa": "Ráďa",
     "verka": "Věrka", "vera": "Věrka", "věra": "Věrka", "věrka": "Věrka",
+    "verča": "Věrka", "věrča": "Věrka", "verca": "Věrka",
     "renča": "Renča", "renata": "Renča", "renca": "Renča",
     "vendy": "Vendy", "wendy": "Vendy",
     "vali": "Vali",
@@ -783,14 +786,19 @@ JMENA_MAP = {
 def normalize_jmena(text):
     if not text:
         return ""
+    # Odstraň číslice – AI je někdy namíchá ke jménům
+    text = re.sub(r'\b\d+\b', '', text)
     parts = re.split(r"[,/\s]+", text.strip())
     result = []
     for p in parts:
         p = p.strip().lower().rstrip(".,")
-        if not p:
+        if not p or len(p) < 2:
             continue
-        canonical = JMENA_MAP.get(p, p.capitalize())
-        result.append(canonical)
+        canonical = JMENA_MAP.get(p)
+        if canonical:
+            result.append(canonical)
+        else:
+            result.append(p.capitalize())
     return ", ".join(result)
 
 
@@ -812,6 +820,8 @@ def parse_report_image_claude(filepath):
 
         _t = date.today()
         today = f"{_t.day}.{_t.month}"
+
+        # OPRAVA: lepší prompt – přeskrtnutá nula, jména bez čísel
         prompt = f"""Jsi expert na čtení ručně psaných restauračních reportů. Přečti tento denní report VELMI PEČLIVĚ.
 Odpověz POUZE platným JSON objektem, žádný jiný text, žádné backticky.
 
@@ -837,13 +847,16 @@ PRAVIDLA PRO ČÍSLA:
 - Tečka nebo čárka uvnitř čísla = ODDĚLOVAČ TISÍCŮ (6.696 = 6696, 5.100 = 5100, 12.327 = 12327)
 - NIKDY neinterpretuj tečku jako desetinnou čárku u celých částek v Kč
 - Čísla zapisuj jako celá čísla bez teček a čárek
+- Přeškrtnutá nula (nula s čarou přes střed, symbol Ø) = ČÍSLO 0, ne písmeno
 
-PRAVIDLA PRO JMÉNA:
-- Ráďa, Rada, Radek → "Radek"
-- Věrka, Verka, Věra → "Věrka"
+PRAVIDLA PRO JMÉNA (pole "smena"):
+- Do pole "smena" patří POUZE jména osob – nikdy číslice ani čísla
+- Ráďa, Rada, Radek, Rádi → "Ráďa"
+- Věrka, Verka, Věra, Verča, Věrča → "Věrka"
 - Renča, Renata → "Renča"
 - Vendy, Wendy → "Vendy"
 - Vali → "Vali"
+- Neznámá jména přidej jak jsou napsána, ale nikdy nepřidávej číslice
 
 PRAVIDLA PRO DATUM:
 - Hledej datum ve formátu "D.M" nahoře na lístku
@@ -990,14 +1003,8 @@ def build_report_from_parsed(parsed, year=None):
     }
 
 
-
-
 # ── Univerzální parser dokladů (Claude AI) ────────────────────────────────────
 def parse_doklad_claude(filepath):
-    """
-    Přečte jakýkoliv doklad (účtenku, fakturu) pomocí Claude Vision API.
-    Vrací standardizovaný dict se stejnou strukturou jako MAKRO parser.
-    """
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         return None, "ANTHROPIC_API_KEY není nastaven"
@@ -1005,7 +1012,6 @@ def parse_doklad_claude(filepath):
     try:
         ext = filepath.rsplit(".", 1)[-1].lower()
 
-        # PDF: extrahuj text přes pdfplumber
         if ext == "pdf" and PDF_SUPPORT:
             text_pages = []
             with pdfplumber.open(filepath) as pdf:
@@ -1015,7 +1021,6 @@ def parse_doklad_claude(filepath):
                         text_pages.append(t)
             doklad_text = "\n".join(text_pages)
             content = [{"type": "text", "text": doklad_text}]
-            is_image = False
         else:
             with open(filepath, "rb") as f:
                 img_data = base64.standard_b64encode(f.read()).decode("utf-8")
@@ -1025,7 +1030,6 @@ def parse_doklad_claude(filepath):
             content = [
                 {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": img_data}}
             ]
-            is_image = True
 
         client = anthropic.Anthropic(api_key=api_key)
 
@@ -1141,8 +1145,6 @@ def api_dashboard():
         where_firma = "AND firma_zkratka=?" if firma else ""
         params_base = (firma,) if firma else ()
 
-        # ── OPRAVA: pojmenované sloupce místo indexů [0],[1]
-        # ── OPRAVA2: PostgreSQL potřebuje cast pro LIKE na textovém sloupci
         like_cond = "AND datum_vystaveni::text LIKE ?" if _USE_PG else "AND datum_vystaveni LIKE ?"
         row = conn.execute(f"""
             SELECT COUNT(*) as pocet, COALESCE(SUM(celkem_s_dph),0) as vydaje
@@ -1308,7 +1310,6 @@ def api_vyplaty():
             rows = conn.execute(f"""
                 SELECT * FROM vyplaty {where} ORDER BY datum DESC, created_at DESC
             """, params).fetchall()
-            # ── OPRAVA: pojmenovaný sloupec – funguje v PG i SQLite
             total_row = conn.execute(
                 f"SELECT COALESCE(SUM(castka),0) as total FROM vyplaty {where}", params
             ).fetchone()
@@ -1859,7 +1860,6 @@ def api_nahrat():
     fpath  = os.path.join(UPLOAD_DIR, fname)
     f.save(fpath)
 
-    # Typ dokladu: "makro" (výchozí MAKRO parser) nebo "doklad" (univerzální AI)
     typ_dokladu = request.form.get("typ_dokladu", "makro")
 
     ext = fname.rsplit(".", 1)[1].lower()
