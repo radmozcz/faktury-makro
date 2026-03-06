@@ -990,6 +990,124 @@ def build_report_from_parsed(parsed, year=None):
     }
 
 
+
+
+# ── Univerzální parser dokladů (Claude AI) ────────────────────────────────────
+def parse_doklad_claude(filepath):
+    """
+    Přečte jakýkoliv doklad (účtenku, fakturu) pomocí Claude Vision API.
+    Vrací standardizovaný dict se stejnou strukturou jako MAKRO parser.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return None, "ANTHROPIC_API_KEY není nastaven"
+
+    try:
+        ext = filepath.rsplit(".", 1)[-1].lower()
+
+        # PDF: extrahuj text přes pdfplumber
+        if ext == "pdf" and PDF_SUPPORT:
+            text_pages = []
+            with pdfplumber.open(filepath) as pdf:
+                for page in pdf.pages:
+                    t = page.extract_text()
+                    if t:
+                        text_pages.append(t)
+            doklad_text = "\n".join(text_pages)
+            content = [{"type": "text", "text": doklad_text}]
+            is_image = False
+        else:
+            with open(filepath, "rb") as f:
+                img_data = base64.standard_b64encode(f.read()).decode("utf-8")
+            media_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+                         "bmp": "image/bmp", "tiff": "image/tiff"}
+            media_type = media_map.get(ext, "image/jpeg")
+            content = [
+                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": img_data}}
+            ]
+            is_image = True
+
+        client = anthropic.Anthropic(api_key=api_key)
+
+        prompt_text = """Jsi expert na čtení účtenek a faktur. Přečti přiložený doklad a extrahuj data.
+Odpověz POUZE platným JSON objektem – žádný jiný text, žádné backticky.
+
+Formát:
+{
+  "dodavatel": "název obchodu/firmy (napiš přesně jak stojí na dokladu)",
+  "cislo_faktury": "číslo dokladu/pokladního bloku nebo null",
+  "datum_vystaveni": "YYYY-MM-DD nebo null",
+  "celkem_s_dph": číslo s desetinnými místy (celková částka k zaplacení),
+  "polozky": [
+    {
+      "nazev": "název položky",
+      "mnozstvi": číslo,
+      "jednotka": "ks nebo kg nebo l nebo bal",
+      "cena_za_jednotku_s_dph": číslo,
+      "celkem_s_dph": číslo
+    }
+  ]
+}
+
+PRAVIDLA:
+- dodavatel: celý název obchodu (Globus, Penny Market, Albert, Lidl, atd.)
+- datum_vystaveni: převeď na YYYY-MM-DD, pokud chybí dej null
+- celkem_s_dph: CELKOVÁ částka k zaplacení (hledej CELKEM nebo TOTAL nebo K ÚHRADĚ)
+- u váhového zboží: jednotka "kg", množství v kg
+- u kusového: jednotka "ks", množství počet kusů
+- cislo_faktury: číslo dokladu, účtenky nebo null pokud není"""
+
+        content.append({"type": "text", "text": prompt_text})
+
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": content}]
+        )
+
+        text_resp = message.content[0].text.strip()
+        text_resp = re.sub(r"^```json\s*", "", text_resp)
+        text_resp = re.sub(r"```$", "", text_resp).strip()
+
+        parsed = json.loads(text_resp)
+
+        result = {
+            "dodavatel":        parsed.get("dodavatel", "Neznámý dodavatel"),
+            "cislo_faktury":    parsed.get("cislo_faktury") or "",
+            "datum_vystaveni":  parsed.get("datum_vystaveni") or "",
+            "datum_splatnosti": "",
+            "zpusob_uhrady":    "Hotovost",
+            "stav":             "zaplaceno",
+            "celkem_s_dph":     float(parsed.get("celkem_s_dph", 0) or 0),
+            "firma_zkratka":    "",
+            "polozky":          []
+        }
+
+        for p in parsed.get("polozky", []):
+            nazev = str(p.get("nazev", "")).strip()
+            if not nazev:
+                continue
+            mnozstvi = float(p.get("mnozstvi", 1) or 1)
+            celkem   = float(p.get("celkem_s_dph", 0) or 0)
+            cena_j   = float(p.get("cena_za_jednotku_s_dph", 0) or 0)
+            if cena_j == 0 and mnozstvi and celkem:
+                cena_j = round(celkem / mnozstvi, 4)
+            result["polozky"].append({
+                "nazev":                  nazev,
+                "mnozstvi":               mnozstvi,
+                "jednotka":               p.get("jednotka", "ks"),
+                "cena_za_jednotku_s_dph": cena_j,
+                "celkem_s_dph":           round(celkem, 2)
+            })
+
+        if result["celkem_s_dph"] == 0 and result["polozky"]:
+            result["celkem_s_dph"] = round(sum(p["celkem_s_dph"] for p in result["polozky"]), 2)
+
+        return result, None
+
+    except Exception as e:
+        return None, str(e)
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ROUTES
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1741,8 +1859,13 @@ def api_nahrat():
     fpath  = os.path.join(UPLOAD_DIR, fname)
     f.save(fpath)
 
+    # Typ dokladu: "makro" (výchozí MAKRO parser) nebo "doklad" (univerzální AI)
+    typ_dokladu = request.form.get("typ_dokladu", "makro")
+
     ext = fname.rsplit(".", 1)[1].lower()
-    if ext == "pdf":
+    if typ_dokladu == "doklad":
+        data, err = parse_doklad_claude(fpath)
+    elif ext == "pdf":
         data, err = parse_makro_pdf(fpath)
     else:
         data, err = parse_makro_image(fpath)
@@ -1752,7 +1875,7 @@ def api_nahrat():
 
     data["soubor_cesta"] = fname
 
-    if data.get("cislo_faktury"):
+    if data.get("cislo_faktury") and typ_dokladu == "makro":
         with get_db() as conn:
             row = conn.execute("""
                 SELECT id, firma_zkratka, datum_vystaveni, celkem_s_dph
