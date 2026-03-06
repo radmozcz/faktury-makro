@@ -740,14 +740,20 @@ function setupDropzone() {
 }
 
 function handlePaste(e) {
-  const panel = document.getElementById("tabPanelPdf");
-  if (!panel || panel.style.display === "none") return;
-
   const items = (e.clipboardData || e.originalEvent.clipboardData).items;
   for (const item of items) {
     if (item.type.startsWith("image/")) {
       const file = item.getAsFile();
-      if (file) {
+      if (!file) break;
+
+      const panelDoklad = document.getElementById("tabPanelDoklad");
+      const panelPdf    = document.getElementById("tabPanelPdf");
+
+      if (panelDoklad && panelDoklad.style.display !== "none") {
+        document.getElementById("dokladStatus").innerHTML =
+          `<span class="spinner"></span> Zpracovávám obrázek ze schránky…`;
+        uploadDoklad(file);
+      } else if (panelPdf && panelPdf.style.display !== "none") {
         document.getElementById("uploadStatus").innerHTML =
           `<span class="spinner"></span> Zpracovávám obrázek ze schránky…`;
         uploadFile(file);
