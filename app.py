@@ -777,7 +777,8 @@ JMENA_MAP = {
     "rada": "Ráďa", "radek": "Ráďa", "ráďa": "Ráďa", "radi": "Ráďa",
     "žaďa": "Ráďa", "žada": "Ráďa", "řaďa": "Ráďa", "zaďa": "Ráďa",
     "verka": "Věrka", "vera": "Věrka", "věra": "Věrka", "věrka": "Věrka",
-    "verča": "Věrka", "věrča": "Věrka", "verca": "Věrka",
+    "verca": "Věrka",
+    "verča": "Verča", "věrča": "Verča",
     "renča": "Renča", "renata": "Renča", "renca": "Renča",
     "vendy": "Vendy", "wendy": "Vendy",
     "vali": "Vali",
@@ -852,7 +853,8 @@ PRAVIDLA PRO ČÍSLA:
 PRAVIDLA PRO JMÉNA (pole "smena"):
 - Do pole "smena" patří POUZE jména osob – nikdy číslice ani čísla
 - Ráďa, Rada, Radek, Rádi → "Ráďa"
-- Věrka, Verka, Věra, Verča, Věrča → "Věrka"
+- Věrka, Verka, Věra, Verca → "Věrka"
+- Verča, Věrča → "Verča" (jiná osoba než Věrka!)
 - Renča, Renata → "Renča"
 - Vendy, Wendy → "Vendy"
 - Vali → "Vali"
