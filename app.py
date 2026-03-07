@@ -1632,20 +1632,21 @@ def api_report_import_xlsx():
 
 @app.route("/api/reporty/karty-alert")
 def api_karty_alert():
+    datum_12m = (date.today() - timedelta(days=365)).isoformat()
     with get_db() as conn:
         total_row = conn.execute("""
             SELECT COALESCE(SUM(karty),0) as total
             FROM reporty
-            WHERE datum >= date('now','-12 months')
-        """).fetchone()
+            WHERE datum >= ?
+        """, (datum_12m,)).fetchone()
         total = _first_val(total_row)
         per_firma = conn.execute("""
             SELECT firma_zkratka, COALESCE(SUM(karty),0) as karty_12m
             FROM reporty
-            WHERE datum >= date('now','-12 months')
+            WHERE datum >= ?
             GROUP BY firma_zkratka
             ORDER BY karty_12m DESC
-        """).fetchall()
+        """, (datum_12m,)).fetchall()
     LIMIT = 1500000
     firmy_alert = []
     for r in per_firma:
