@@ -775,9 +775,8 @@ def _map_unit(u):
 # OPRAVA: Ráďa místo Radek, přidány překlepy z OCR, Verča = Věrka
 JMENA_MAP = {
     "rada": "Ráďa", "radek": "Ráďa", "ráďa": "Ráďa", "radi": "Ráďa",
-    "žaďa": "Ráďa", "žada": "Ráďa", "řaďa": "Ráďa", "zaďa": "Ráďa",
+    "žaďa": "Ráďa", "řaďa": "Ráďa",
     "verka": "Věrka", "vera": "Věrka", "věra": "Věrka", "věrka": "Věrka",
-    "verca": "Věrka",
     "verča": "Verča", "věrča": "Verča",
     "renča": "Renča", "renata": "Renča", "renca": "Renča",
     "vendy": "Vendy", "wendy": "Vendy",
@@ -787,19 +786,17 @@ JMENA_MAP = {
 def normalize_jmena(text):
     if not text:
         return ""
-    # Odstraň číslice – AI je někdy namíchá ke jménům
-    text = re.sub(r'\b\d+\b', '', text)
     parts = re.split(r"[,/\s]+", text.strip())
     result = []
     for p in parts:
         p = p.strip().lower().rstrip(".,")
-        if not p or len(p) < 2:
+        if not p:
             continue
-        canonical = JMENA_MAP.get(p)
-        if canonical:
-            result.append(canonical)
-        else:
-            result.append(p.capitalize())
+        p = re.sub(r"\d+", "", p).strip()  # odstraní číslice
+        if not p:
+            continue
+        canonical = JMENA_MAP.get(p, p.capitalize())
+        result.append(canonical)
     return ", ".join(result)
 
 
@@ -1178,11 +1175,12 @@ def api_dashboard():
             ORDER BY created_at DESC LIMIT 5
         """, params_base).fetchall()
 
+        datum_12m = (date.today() - timedelta(days=365)).isoformat()
         karty_row = conn.execute("""
             SELECT COALESCE(SUM(karty),0) as karty
             FROM reporty
-            WHERE datum >= date('now','-12 months')
-        """).fetchone()
+            WHERE datum >= ?
+        """, (datum_12m,)).fetchone()
         karty_12m = karty_row["karty"] if isinstance(karty_row, dict) else karty_row[0]
 
     def graf_row(r):
