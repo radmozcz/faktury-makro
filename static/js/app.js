@@ -153,11 +153,22 @@ document.getElementById("modalOverlay").addEventListener("click", e => {
 function czMoney(v) {
   return Number(v).toLocaleString("cs-CZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " Kč";
 }
+// Celé číslo bez desetinné čárky a bez "Kč" – pro tabulku reportů
+function czInt(v) {
+  return Math.round(Number(v)).toLocaleString("cs-CZ");
+}
 function czDate(s) {
   if (!s) return "—";
   const d = new Date(s);
   if (isNaN(d)) return s;
   return d.toLocaleDateString("cs-CZ");
+}
+// Kompaktní datum – den.měsíc. (bez roku) pro tabulku reportů
+function czDateShort(s) {
+  if (!s) return "—";
+  const d = new Date(s);
+  if (isNaN(d)) return s;
+  return d.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" });
 }
 function stavBadge(s) {
   const m = { zaplaceno: "Zaplaceno", ceka: "Čeká", po_splatnosti: "Po splatnosti" };
@@ -393,6 +404,19 @@ async function renderFaktury() {
   });
 }
 
+// Stav řazení faktur
+let _faktSort = { col: "datum_vystaveni", dir: "desc" };
+
+function fakturySort(col) {
+  if (_faktSort.col === col) {
+    _faktSort.dir = _faktSort.dir === "asc" ? "desc" : "asc";
+  } else {
+    _faktSort.col = col;
+    _faktSort.dir = "asc";
+  }
+  loadFaktury();
+}
+
 async function loadFaktury() {
   const params = new URLSearchParams({
     firma: document.getElementById("fFirma")?.value || "",
@@ -408,11 +432,30 @@ async function loadFaktury() {
   const tbl = document.getElementById("fakturyTable");
   if (!tbl) return;
 
+  const sortFns = {
+    cislo_faktury:   (a,b) => (a.cislo_faktury||"").localeCompare(b.cislo_faktury||""),
+    datum_vystaveni: (a,b) => (a.datum_vystaveni||"").localeCompare(b.datum_vystaveni||""),
+    celkem_s_dph:    (a,b) => (a.celkem_s_dph||0) - (b.celkem_s_dph||0),
+  };
+  if (sortFns[_faktSort.col]) {
+    data.faktury.sort((a,b) => {
+      const r = sortFns[_faktSort.col](a,b);
+      return _faktSort.dir === "asc" ? r : -r;
+    });
+  }
+
+  const arrow = (col) => _faktSort.col === col ? (_faktSort.dir === "asc" ? " ▲" : " ▼") : " ⇅";
+  const thSort = (col, label) =>
+    `<th style="cursor:pointer;user-select:none" onclick="fakturySort('${col}')">${label}${arrow(col)}</th>`;
+
   tbl.innerHTML = `
     <table>
       <thead><tr>
-        <th>Firma</th><th>Dodavatel</th><th>Č. faktury</th>
-        <th>Vystavení</th><th>Splatnost</th><th>Celkem s DPH</th><th>Stav</th>
+        <th>Firma</th><th>Dodavatel</th>
+        ${thSort("cislo_faktury","Č. faktury")}
+        ${thSort("datum_vystaveni","Vystavení")}
+        ${thSort("celkem_s_dph","Celkem s DPH")}
+        <th>Stav</th>
       </tr></thead>
       <tbody>
         ${data.faktury.map(f => `
@@ -421,16 +464,15 @@ async function loadFaktury() {
             <td>${escHtml(f.dodavatel)}</td>
             <td>${escHtml(f.cislo_faktury||"—")}</td>
             <td>${czDate(f.datum_vystaveni)}</td>
-            <td>${czDate(f.datum_splatnosti)}</td>
             <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
             <td>${stavBadge(f.stav)}</td>
           </tr>`).join("") ||
-          "<tr><td colspan='7' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"}
+          "<tr><td colspan='6' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"}
       </tbody>
       ${data.faktury.length ? `
       <tfoot>
         <tr class="table-footer">
-          <td colspan="5">Celkem (${data.faktury.length} faktur)</td>
+          <td colspan="4">Celkem (${data.faktury.length} faktur)</td>
           <td colspan="2"><strong>${czMoney(data.celkem)}</strong></td>
         </tr>
       </tfoot>` : ""}
@@ -539,7 +581,7 @@ let uploadedFilePath = null;
 
 function renderNahrat() {
   document.getElementById("mainContent").innerHTML = `
-    <div class="page-header"><h1 class="page-title">Nahrát doklad</h1></div>
+    <div class="page-header"><h1 class="page-title">Nahrát fakturu (MAKRO)</h1></div>
     <div class="card" style="max-width:900px">
       <div class="form-group">
         <label class="form-label">Firma</label>
@@ -549,10 +591,9 @@ function renderNahrat() {
       </div>
 
       <div style="display:flex;gap:.5rem;margin-bottom:1rem;border-bottom:2px solid var(--border);padding-bottom:0">
-        <button id="tabPdf" class="tab-btn tab-active" onclick="switchTab('pdf')">📄 MAKRO PDF</button>
-        <button id="tabText" class="tab-btn" onclick="switchTab('text')">📋 MAKRO text</button>
-        <button id="tabHromadne" class="tab-btn" onclick="switchTab('hromadne')">📦 Hromadné</button>
-        <button id="tabDoklad" class="tab-btn" onclick="switchTab('doklad')">🧾 Jiný doklad</button>
+        <button id="tabPdf" class="tab-btn tab-active" onclick="switchTab('pdf')">📄 PDF soubor</button>
+        <button id="tabText" class="tab-btn" onclick="switchTab('text')">📋 Vložit text</button>
+        <button id="tabHromadne" class="tab-btn" onclick="switchTab('hromadne')">📦 Hromadné nahrání</button>
       </div>
 
       <div id="tabPanelPdf">
@@ -589,22 +630,6 @@ function renderNahrat() {
         <div id="hromadneStatus" style="margin-top:1rem"></div>
       </div>
 
-      <div id="tabPanelDoklad" style="display:none">
-        <div style="background:var(--bg2);border-radius:8px;padding:.8rem 1rem;margin-bottom:1rem;font-size:.9rem;color:var(--txt2)">
-          📱 <strong>Mobilní workflow:</strong> Vyfotit účtenku → nahrát → Claude přečte → zkontrolovat → uložit<br>
-          Funguje pro: Globus, Penny, Albert, Lidl, benzínky, libovolné faktury...
-        </div>
-        <div class="dropzone" id="dropzoneDoklad">
-          <div class="dropzone-icon">🧾</div>
-          <div class="dropzone-text">
-            <strong>Přetáhněte účtenku nebo fakturu</strong> nebo klikněte<br>
-            <small>Fotka, sken nebo PDF – Claude přečte jakýkoliv doklad</small>
-          </div>
-          <input type="file" id="fileInputDoklad" accept=".pdf,.png,.jpg,.jpeg">
-        </div>
-        <div id="dokladStatus" style="margin-top:1rem;color:var(--txt2);font-size:.9rem"></div>
-      </div>
-
       <div id="parsedForm" style="display:none; margin-top:1.5rem;">
         <h3 style="font-family:var(--font-head);margin-bottom:1rem">Zkontrolujte a případně opravte</h3>
         <div class="grid-2" style="gap:1rem">
@@ -630,11 +655,10 @@ function renderNahrat() {
 
   setupDropzone();
   setupDropzoneHromadne();
-  setupDropzoneDoklad();
 }
 
 function switchTab(tab) {
-  ['pdf','text','hromadne','doklad'].forEach(t => {
+  ['pdf','text','hromadne'].forEach(t => {
     document.getElementById('tabPanel' + t.charAt(0).toUpperCase() + t.slice(1)).style.display = t === tab ? '' : 'none';
     document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1)).classList.toggle('tab-active', t === tab);
   });
@@ -662,7 +686,7 @@ function setupDropzoneHromadne() {
   const dz  = document.getElementById('dropzoneHromadne');
   const inp = document.getElementById('fileInputHromadne');
   if (!dz) return;
-  dz.addEventListener('click', () => inp.click());
+  dz.addEventListener('click', (e) => { if (e.target !== inp) inp.click(); });
   inp.addEventListener('change', () => { if (inp.files.length) hromadneNahrat(inp.files); });
   dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
   dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
@@ -699,6 +723,11 @@ async function hromadneNahrat(files) {
         continue;
       }
 
+      if (data.duplicita) {
+        row.innerHTML = `<span style="color:var(--txt2)">⏭ ${file.name} – přeskočeno (duplicita č. ${data.cislo_faktury})</span>`;
+        continue;
+      }
+
       const payload = {
         firma_zkratka: firma,
         dodavatel:     data.dodavatel || 'MAKRO Cash & Carry ČR s.r.o.',
@@ -726,7 +755,7 @@ function setupDropzone() {
   const dz   = document.getElementById("dropzone");
   const inp  = document.getElementById("fileInput");
 
-  dz.addEventListener("click", () => inp.click());
+  dz.addEventListener("click", (e) => { if (e.target !== inp) inp.click(); });
   inp.addEventListener("change", () => { if (inp.files[0]) uploadFile(inp.files[0]); });
 
   dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag-over"); });
@@ -740,20 +769,14 @@ function setupDropzone() {
 }
 
 function handlePaste(e) {
+  const panel = document.getElementById("tabPanelPdf");
+  if (!panel || panel.style.display === "none") return;
+
   const items = (e.clipboardData || e.originalEvent.clipboardData).items;
   for (const item of items) {
     if (item.type.startsWith("image/")) {
       const file = item.getAsFile();
-      if (!file) break;
-
-      const panelDoklad = document.getElementById("tabPanelDoklad");
-      const panelPdf    = document.getElementById("tabPanelPdf");
-
-      if (panelDoklad && panelDoklad.style.display !== "none") {
-        document.getElementById("dokladStatus").innerHTML =
-          `<span class="spinner"></span> Zpracovávám obrázek ze schránky…`;
-        uploadDoklad(file);
-      } else if (panelPdf && panelPdf.style.display !== "none") {
+      if (file) {
         document.getElementById("uploadStatus").innerHTML =
           `<span class="spinner"></span> Zpracovávám obrázek ze schránky…`;
         uploadFile(file);
@@ -948,7 +971,7 @@ async function ulozitFakturuMakro() {
     zpusob_uhrady: "Hotovost",
     stav:          "zaplaceno",
     soubor_cesta:  uploadedFilePath || "",
-    zdroj:         document._dokladZdroj || "makro",
+    zdroj:         "makro",
     polozky,
   };
 
@@ -1102,7 +1125,7 @@ async function ulozitRucni() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//  ZBOŽÍ / POLOŽKY – se sortováním
+//  ZBOŽÍ / POLOŽKY
 // ═══════════════════════════════════════════════════════════════
 async function renderPolozky() {
   document.getElementById("mainContent").innerHTML = `
@@ -1605,7 +1628,6 @@ async function saveConfig() {
 // ═══════════════════════════════════════════════════════════════
 //  Util
 // ═══════════════════════════════════════════════════════════════
-// ── Statistiky reportů ──────────────────────────────────────────
 async function loadMesicniStatistiky() {
   const firma = document.getElementById("sFirma")?.value || "";
   let mesice, roky;
@@ -1659,71 +1681,11 @@ async function loadMesicniStatistiky() {
     </div>`;
 }
 
-
-// ═══════════════════════════════════════════════════════════════
-//  JINÝ DOKLAD (účtenka, faktura od jiného dodavatele)
-// ═══════════════════════════════════════════════════════════════
-function setupDropzoneDoklad() {
-  const dz  = document.getElementById('dropzoneDoklad');
-  const inp = document.getElementById('fileInputDoklad');
-  if (!dz) return;
-  dz.addEventListener('click', (e) => { if (e.target !== inp) inp.click(); });
-  inp.addEventListener('change', () => { if (inp.files[0]) uploadDoklad(inp.files[0]); });
-  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
-  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
-  dz.addEventListener('drop', e => {
-    e.preventDefault(); dz.classList.remove('drag-over');
-    if (e.dataTransfer.files[0]) uploadDoklad(e.dataTransfer.files[0]);
-  });
-}
-
-async function uploadDoklad(file) {
-  const statusEl = document.getElementById('dokladStatus');
-  statusEl.innerHTML = '<span class="spinner"></span> Claude čte doklad…';
-
-  const fd = new FormData();
-  fd.append('soubor', file);
-  fd.append('typ_dokladu', 'doklad');
-
-  let data;
-  try {
-    const r = await fetch('/api/nahrat', { method: 'POST', body: fd });
-    data = await r.json();
-  } catch (e) {
-    statusEl.textContent = '❌ Chyba: ' + e.message;
-    return;
-  }
-
-  if (data.error && !data.soubor_cesta) {
-    statusEl.textContent = '❌ ' + data.error;
-    return;
-  }
-
-  statusEl.innerHTML = `✅ Načteno: <strong>${escHtml(data.dodavatel||'')}</strong>, ${data.datum_vystaveni||'?'}, ${czMoney(data.celkem_s_dph)} – zkontrolujte a uložte`;
-  uploadedFilePath = data.soubor_cesta || '';
-  document._dokladZdroj = 'doklad';
-
-  document.getElementById('parsedForm').style.display = 'block';
-  document.getElementById('pDodavatel').value = data.dodavatel || '';
-  document.getElementById('pCislo').value     = data.cislo_faktury || '';
-  document.getElementById('pDatVys').value    = data.datum_vystaveni || '';
-  document.getElementById('pDatSpl').value    = '';
-
-  const tbody = document.getElementById('polozkyBody');
-  tbody.innerHTML = '';
-  (data.polozky || []).forEach(p => appendPolozkaRow(p));
-  updateTotal();
-
-  document.getElementById('parsedForm').scrollIntoView({ behavior: 'smooth' });
-}
-
-
 function escHtml(s) {
   return String(s||"")
     .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
     .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 }
-
 
 // ═══════════════════════════════════════════════════════════════
 //  REPORTY – Denní výkazy
@@ -1732,26 +1694,25 @@ function escHtml(s) {
 const KARTY_LIMIT = 1500000;
 
 async function renderReporty() {
-  // Načti DPH alert
   let alert_data = { karty_12m: 0, procent: 0, alert: false, varovani: false };
   try { alert_data = await api("/api/reporty/karty-alert"); } catch {}
 
   const alertHtml = alert_data.alert
     ? `<div style="background:#fee2e2;border:2px solid #ef4444;border-radius:8px;padding:.8rem 1.2rem;margin-bottom:1rem;color:#991b1b;font-weight:600">
-        🚨 POZOR! Karty za posledních 12 měsíců: <strong>${czMoney(alert_data.karty_12m)}</strong> 
-        – překročen limit 1 500 000 Kč!
+        🚨 POZOR! Karty za posledních 12 měsíců: <strong>${czInt(alert_data.karty_12m)}</strong> 
+        – překročen limit 1 500 000!
        </div>`
     : alert_data.varovani
     ? `<div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:8px;padding:.8rem 1.2rem;margin-bottom:1rem;color:#92400e;font-weight:600">
-        ⚠️ Karty za posledních 12 měsíců: <strong>${czMoney(alert_data.karty_12m)}</strong>
-        (${alert_data.procent}% z limitu 1,5M Kč) – blíží se limit!
+        ⚠️ Karty za posledních 12 měsíců: <strong>${czInt(alert_data.karty_12m)}</strong>
+        (${alert_data.procent}% z limitu 1 500 000) – blíží se limit!
        </div>`
     : `<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:.6rem 1.2rem;margin-bottom:1rem;color:#166534;font-size:.9rem">
-        💳 Karty celkem (12 měs.): <strong>${czMoney(alert_data.karty_12m)}</strong>
-        &nbsp;|&nbsp; ${alert_data.procent}% z limitu 1,5M Kč
+        💳 Karty celkem (12 měs.): <strong>${czInt(alert_data.karty_12m)}</strong>
+        &nbsp;|&nbsp; ${alert_data.procent}% z limitu 1,5M
         ${(alert_data.per_firma||[]).map(f=>`
           <span style="margin-left:1rem;padding:.2rem .6rem;border-radius:4px;background:${f.alert?"#fee2e2":f.varovani?"#fef3c7":"#dcfce7"};color:${f.alert?"#991b1b":f.varovani?"#92400e":"#166534"}">
-            ${escHtml(f.firma)}: <strong>${czMoney(f.karty_12m)}</strong> (${f.procent}%)
+            ${escHtml(f.firma)}: <strong>${czInt(f.karty_12m)}</strong> (${f.procent}%)
           </span>`).join("")}
         <div style="background:#dcfce7;border-radius:4px;height:6px;margin-top:.4rem">
           <div style="background:#16a34a;height:6px;border-radius:4px;width:${Math.min(alert_data.procent,100)}%"></div>
@@ -1785,7 +1746,7 @@ async function renderReporty() {
       <div class="table-wrap" id="reportyList"><div class="loading-center"><span class="spinner"></span></div></div>
     </div>`;
 
-  nastavRokFiltr(); // nastav výchozí rok 2026 a načti
+  nastavRokFiltr();
 }
 
 function nastavRokFiltr() {
@@ -1870,20 +1831,20 @@ function renderReportyTable(rows) {
       <thead><tr>
         ${th("datum","Datum")}${th("den","Den")}
         ${th("trzba_vcpk","Tržba vč.PK")}${th("karty","Karty")}${th("hotovost","Hotovost")}${th("vydaje","Výdaje")}
-        ${th("pk_celkem","PK Kč")}
-        ${th("pizza_cela","🍕 Celá")}${th("pizza_ctvrt","🍕/4")}${th("burger","🍔")}${th("burtgulas","🍲 Guláš")}${th("talire","🍽 Talíře")}
+        ${th("pk_celkem","PK")}
+        ${th("pizza_cela","🍕")}${th("pizza_ctvrt","🍕/4")}${th("burger","🍔")}${th("burtgulas","🍲")}${th("talire","🍽")}
         <th>Firma</th><th>Směna</th><th></th>
       </tr></thead>
       <tbody>
         ${rows.map(r => `
           <tr>
-            <td><strong>${czDate(r.datum)}</strong></td>
-            <td style="color:var(--txt2)">${escHtml(r.den||"")}</td>
-            <td><strong>${czMoney(r.trzba_vcpk)}</strong></td>
-            <td>${czMoney(r.karty)}</td>
-            <td>${czMoney(r.hotovost)}</td>
-            <td>${r.vydaje ? czMoney(r.vydaje) : "—"}</td>
-            <td>${r.pk_celkem ? czMoney(r.pk_celkem) : "—"}</td>
+            <td style="white-space:nowrap"><strong>${czDateShort(r.datum)}</strong></td>
+            <td style="color:var(--txt2);font-size:.82rem">${escHtml(r.den||"")}</td>
+            <td style="text-align:right"><strong>${czInt(r.trzba_vcpk)}</strong></td>
+            <td style="text-align:right">${czInt(r.karty)}</td>
+            <td style="text-align:right">${czInt(r.hotovost)}</td>
+            <td style="text-align:right">${r.vydaje ? czInt(r.vydaje) : "—"}</td>
+            <td style="text-align:right">${r.pk_celkem ? czInt(r.pk_celkem) : "—"}</td>
             <td style="text-align:center">${r.pizza_cela || "—"}</td>
             <td style="text-align:center">${r.pizza_ctvrt || "—"}</td>
             <td style="text-align:center">${r.burger || "—"}</td>
@@ -1891,7 +1852,7 @@ function renderReportyTable(rows) {
             <td style="text-align:center">${r.talire || "—"}</td>
             <td style="font-size:.82rem"><strong>${escHtml(r.firma_zkratka||"")}</strong></td>
             <td style="font-size:.82rem;color:var(--txt2)">${escHtml(r.smena||"")}</td>
-            <td>
+            <td style="white-space:nowrap">
               <button class="btn btn-secondary btn-sm" onclick="editReport(${r.id})" title="Upravit">✏️</button>
               <button class="btn btn-danger btn-sm" onclick="deleteReport(${r.id})" title="Smazat">🗑</button>
             </td>
@@ -1900,17 +1861,17 @@ function renderReportyTable(rows) {
       <tfoot>
         <tr class="table-footer">
           <td colspan="2">Celkem (${rows.length} dní)</td>
-          <td><strong>${czMoney(sumy.trzba_vcpk)}</strong></td>
-          <td><strong>${czMoney(sumy.karty)}</strong></td>
-          <td><strong>${czMoney(sumy.hotovost)}</strong></td>
-          <td><strong>${czMoney(sumy.vydaje)}</strong></td>
-          <td><strong>${czMoney(sumy.pk_celkem)}</strong></td>
+          <td style="text-align:right"><strong>${czInt(sumy.trzba_vcpk)}</strong></td>
+          <td style="text-align:right"><strong>${czInt(sumy.karty)}</strong></td>
+          <td style="text-align:right"><strong>${czInt(sumy.hotovost)}</strong></td>
+          <td style="text-align:right"><strong>${czInt(sumy.vydaje)}</strong></td>
+          <td style="text-align:right"><strong>${czInt(sumy.pk_celkem)}</strong></td>
           <td style="text-align:center"><strong>${sumy.pizza_cela}</strong></td>
           <td style="text-align:center"><strong>${sumy.pizza_ctvrt}</strong></td>
           <td style="text-align:center"><strong>${sumy.burger}</strong></td>
           <td style="text-align:center"><strong>${sumy.burtgulas}</strong></td>
           <td style="text-align:center"><strong>${sumy.talire}</strong></td>
-          <td colspan="2"></td>
+          <td colspan="3"></td>
         </tr>
       </tfoot>
     </table>
@@ -1928,14 +1889,12 @@ function reportFormHtml(r = {}) {
         ${App.config.firmy.map(f=>`<option value="${f}" ${(r.firma_zkratka||App._lastReportFirma||"")==f?"selected":""}>${f}</option>`).join("")}
       </select>
     </div>
-    <!-- Tabs: Fotka | Text | Ruční -->
     <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:2px solid var(--border);padding-bottom:0">
       <button id="rtabFoto"  class="tab-btn tab-active" onclick="switchRTab('foto')">📷 Fotka</button>
       <button id="rtabText"  class="tab-btn" onclick="switchRTab('text')">📋 Vložit text</button>
       <button id="rtabRucni" class="tab-btn" onclick="switchRTab('rucni')">✏️ Ruční</button>
     </div>
 
-    <!-- Panel: Fotka -->
     <div id="rtabPanelFoto">
       <div class="dropzone" id="reportDropzone" style="padding:1rem">
         <div class="dropzone-icon" style="font-size:2rem">📷</div>
@@ -1948,7 +1907,6 @@ function reportFormHtml(r = {}) {
       <div id="reportFotoStatus" style="margin-top:.5rem;font-size:.9rem;color:var(--txt2)"></div>
     </div>
 
-    <!-- Panel: Text (Ctrl+C/V) -->
     <div id="rtabPanelText" style="display:none">
       <p style="color:var(--txt2);font-size:.88rem;margin-bottom:.5rem">
         Zkopírujte text ze zprávy (WhatsApp, SMS) a vložte sem (Ctrl+V):
@@ -1961,12 +1919,10 @@ function reportFormHtml(r = {}) {
       <div id="reportTextStatus" style="margin-top:.4rem;font-size:.9rem;color:var(--txt2)"></div>
     </div>
 
-    <!-- Panel: Ruční -->
     <div id="rtabPanelRucni" style="display:none">
       <p style="color:var(--txt2);font-size:.88rem">Vyplňte hodnoty ručně nebo opravte načtené.</p>
     </div>
 
-    <!-- Formulář (sdílený, vždy viditelný pod taby) -->
     <div id="reportFormFields" style="margin-top:1rem">
       <div class="grid-2" style="gap:.8rem">
         <div class="form-group">
@@ -2012,7 +1968,6 @@ function reportFormHtml(r = {}) {
           <input type="number" id="rfPk100" class="form-control" value="${r.pk100_ks||0}" oninput="rfRecalc()">
         </div>
       </div>
-      <!-- Výpočty -->
       <div id="rfVypocty" style="background:var(--green-pale);border-radius:8px;padding:.6rem 1rem;margin:.8rem 0;font-size:.9rem">
         <span id="rfHotovostDisp">Hotovost: 0 Kč</span> &nbsp;|&nbsp;
         <span id="rfTrzbaDisp">Tržba: 0 Kč</span> &nbsp;|&nbsp;
@@ -2127,7 +2082,6 @@ function setupReportDropzone() {
     if (e.dataTransfer.files[0]) uploadReportFoto(e.dataTransfer.files[0]);
   });
 
-  // Ctrl+V – vložení obrázku ze schránky (např. z WhatsApp Web)
   document.addEventListener("paste", function reportPasteHandler(e) {
     const modal = document.getElementById("modalOverlay");
     if (!modal || modal.style.display === "none") return;
@@ -2162,7 +2116,6 @@ async function uploadReportFoto(file) {
     }
     statusEl.textContent = "✅ Lístek přečten – zkontrolujte a uložte";
     naplnReportFormular(data);
-    // Přepni na ruční tab pro kontrolu
     switchRTab("rucni");
   } catch (e) {
     statusEl.textContent = "❌ Chyba: " + e.message;
@@ -2239,7 +2192,7 @@ function openImportXlsx() {
 
   const dz  = document.getElementById("importDropzone");
   const inp = document.getElementById("importFileInput");
-  inp.style.display = "none"; // skrýt input, klik řídí jen dropzone
+  inp.style.display = "none";
   dz.addEventListener("click", () => inp.click());
   inp.addEventListener("change", () => { if (inp.files[0]) doImportXlsx(inp.files[0]); });
   dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag-over"); });
