@@ -791,6 +791,7 @@ async function uploadFile(file) {
   document.getElementById("uploadStatus").innerHTML = `<span class="spinner"></span> Nahrávám a zpracovávám…`;
   const fd = new FormData();
   fd.append("soubor", file);
+  fd.append("typ_dokladu", "doklad");
 
   let data;
   try {
