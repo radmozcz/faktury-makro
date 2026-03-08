@@ -1719,7 +1719,7 @@ async function renderReporty() {
           <div style="background:#16a34a;height:6px;border-radius:4px;width:${Math.min(alert_data.procent,100)}%"></div>
         </div>
        </div>`;
-}
+
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
       <h1 class="page-title">Denní reporty</h1>
