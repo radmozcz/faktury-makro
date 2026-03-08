@@ -1719,7 +1719,6 @@ async function renderReporty() {
           <div style="background:#16a34a;height:6px;border-radius:4px;width:${Math.min(alert_data.procent,100)}%"></div>
         </div>
        </div>`;
-loadReporty();
 }
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
@@ -1749,6 +1748,7 @@ loadReporty();
     </div>`;
 
   nastavRokFiltr();
+  loadReporty();
 }
 
 function nastavRokFiltr() {
@@ -1789,6 +1789,7 @@ function sortReporty(col) {
     return 0;
   });
   renderReportyTable(rows);
+  loadReporty();
 }
 
 async function smazBudouciReporty() {
