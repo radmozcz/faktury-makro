@@ -1748,8 +1748,7 @@ async function renderReporty() {
     </div>`;
 
   nastavRokFiltr();
-  loadReporty();
-}
+  setTimeout(loadReporty, 50);}
 
 function nastavRokFiltr() {
   const rok = document.getElementById("rRok")?.value;
