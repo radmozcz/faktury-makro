@@ -168,7 +168,8 @@ function czDateShort(s) {
   if (!s) return "—";
   const d = new Date(s);
   if (isNaN(d)) return s;
-  return d.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" });
+  const rok = String(d.getFullYear()).slice(-2);
+  return d.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" }) + rok;
 }
 function stavBadge(s) {
   const m = { zaplaceno: "Zaplaceno", ceka: "Čeká", po_splatnosti: "Po splatnosti" };
