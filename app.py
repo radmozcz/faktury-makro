@@ -251,12 +251,12 @@ def init_db():
 
 def migrate_db():
     with get_db() as conn:
-        if _USE_PG:
+            if _USE_PG:
             cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='reporty'")
             existing = [r["column_name"] for r in cur.fetchall()]
         else:
             existing = [row[1] for row in conn.execute("PRAGMA table_info(reporty)").fetchall()]
-       for col, typ in [
+            for col, typ in [
             ("burtgulas","INTEGER DEFAULT 0"),("hotdog","INTEGER DEFAULT 0"),
             ("snidane","INTEGER DEFAULT 0"),("nakupy","INTEGER DEFAULT 0"),
             ("foto_cesta","TEXT"),("firma_zkratka","TEXT DEFAULT ''"),
