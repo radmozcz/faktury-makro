@@ -1355,7 +1355,7 @@ async function loadVyplaty() {
 
   el.innerHTML = `
     <table>
-      <thead><tr><th>Firma</th><th>Jméno</th><th>Datum</th><th>Částka</th><th>Poznámka</th><th></th></tr></thead>
+      <thead><tr><th>Firma</th><th>Jméno</th><th>Datum</th><th>Období</th><th>Částka</th><th>Poznámka</th><th></th></tr></thead>
       <tbody>
         ${data.vyplaty.map(v => `
           <tr>
@@ -1363,9 +1363,10 @@ async function loadVyplaty() {
             <td><strong>${escHtml(v.jmeno)}</strong></td>
             <td>${czDate(v.datum)}</td>
             <td><strong>${czMoney(v.castka)}</strong></td>
+            <td style="color:var(--txt2);font-size:.88rem">${v.obdobi_od||v.obdobi_do ? (czDate(v.obdobi_od)||"—") + " – " + (czDate(v.obdobi_do)||"—") : "—"}</td>
             <td style="color:var(--txt2);font-size:.88rem">${escHtml(v.poznamka||"")}</td>
             <td>
-              <button class="btn btn-secondary btn-sm" onclick="editVyplata(${v.id},'${escHtml(v.jmeno)}','${v.datum}',${v.castka},'${escHtml(v.poznamka||"")}','${escHtml(v.firma_zkratka||"")}')">✏️</button>
+              <button class="btn btn-secondary btn-sm" onclick="editVyplata(${v.id},'${escHtml(v.jmeno)}','${v.datum}',${v.castka},'${escHtml(v.poznamka||"")}','${escHtml(v.firma_zkratka||"")}','${v.obdobi_od||""}','${v.obdobi_do||""}')">✏️</button>
               <button class="btn btn-danger btn-sm" onclick="deleteVyplata(${v.id})">🗑</button>
             </td>
           </tr>`).join("") ||
@@ -1374,7 +1375,7 @@ async function loadVyplaty() {
       ${data.vyplaty.length ? `
       <tfoot>
         <tr class="table-footer">
-          <td colspan="3">Celkem (${data.vyplaty.length} výplat)</td>
+          <td colspan="4">Celkem (${data.vyplaty.length} výplat)</td>
           <td colspan="3"><strong>${czMoney(data.celkem)}</strong></td>
         </tr>
       </tfoot>` : ""}
@@ -1400,6 +1401,14 @@ function vyplataFormHtml(v = {}) {
         <input type="number" step="0.01" id="vCastka" class="form-control" value="${v.castka||""}">
       </div>
     </div>
+    <div class="grid-2" style="gap:1rem">
+      <div class="form-group"><label class="form-label">Období od</label>
+        <input type="date" id="vObdobiOd" class="form-control" value="${v.obdobi_od||""}">
+      </div>
+      <div class="form-group"><label class="form-label">Období do</label>
+        <input type="date" id="vObdobiDo" class="form-control" value="${v.obdobi_do||""}">
+      </div>
+    </div>
     <div class="form-group"><label class="form-label">Poznámka</label>
       <input id="vPoznamka" class="form-control" value="${escHtml(v.poznamka||"")}" placeholder="Volitelná poznámka">
     </div>`;
@@ -1413,9 +1422,9 @@ function openNovVyplata() {
     </div>`);
 }
 
-function editVyplata(id, jmeno, datum, castka, poznamka, firma_zkratka) {
+function editVyplata(id, jmeno, datum, castka, poznamka, firma_zkratka, obdobi_od='', obdobi_do='') {
   openModal("Upravit výplatu", `
-    ${vyplataFormHtml({jmeno, datum, castka, poznamka, firma_zkratka})}
+    ${vyplataFormHtml({jmeno, datum, castka, poznamka, firma_zkratka, obdobi_od, obdobi_do})}
     <div class="btn-group" style="margin-top:1rem">
       <button class="btn btn-primary" onclick="ulozitVyplatuEdit(${id})">💾 Uložit změny</button>
     </div>`);
@@ -1437,9 +1446,11 @@ async function ulozitVyplatu() {
         jmeno, datum, castka,
         poznamka: document.getElementById("vPoznamka").value,
         firma_zkratka: document.getElementById("vFirmaF").value,
+        obdobi_od: document.getElementById("vObdobiOd").value || null,
+        obdobi_do: document.getElementById("vObdobiDo").value || null,
       })
     });
-    toast("Vyplata ulozena");
+    toast("Výplata uložena ✓");
     closeModal();
     loadVyplaty();
   } catch(e) {
@@ -1459,6 +1470,8 @@ async function ulozitVyplatuEdit(id) {
       jmeno, datum, castka,
       poznamka: document.getElementById("vPoznamka").value,
       firma_zkratka: document.getElementById("vFirmaF").value,
+      obdobi_od: document.getElementById("vObdobiOd").value || null,
+      obdobi_do: document.getElementById("vObdobiDo").value || null,
     })
   });
   toast("Výplata upravena ✓");
