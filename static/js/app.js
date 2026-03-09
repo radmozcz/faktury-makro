@@ -724,10 +724,11 @@ async function hromadneNahrat(files) {
         continue;
       }
 
-      if (data.duplicita) {
-        row.innerHTML = `<span style="color:var(--txt2)">⏭ ${file.name} – přeskočeno (duplicita č. ${data.cislo_faktury})</span>`;
-        continue;
-      }
+       if (data.duplicita) {
+          row.innerHTML = `⚠️ ${file.name} – <span style="color:orange">duplikát faktury #${data.duplicita.id} (${data.duplicita.firma}, ${data.duplicita.datum}, ${czMoney(data.duplicita.celkem)} Kč) – uloženo</span>`;
+          ok++;
+          continue;
+        }
 
       const payload = {
         firma_zkratka: firma,
