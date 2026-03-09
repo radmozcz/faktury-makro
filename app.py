@@ -1970,8 +1970,8 @@ def api_faktura_ulozit():
     with get_db() as conn:
         cur = conn.execute("""
             INSERT INTO faktury (firma_zkratka, dodavatel, cislo_faktury, datum_vystaveni,
-                datum_splatnosti, zpusob_uhrady, stav, celkem_s_dph, soubor_cesta, zdroj)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
+                datum_splatnosti, zpusob_uhrady, stav, celkem_s_dph, soubor_cesta, zdroj, duplicita_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
         """, (
             data.get("firma_zkratka"),
             data.get("dodavatel"),
@@ -1982,7 +1982,8 @@ def api_faktura_ulozit():
             data.get("stav","ceka"),
             data.get("celkem_s_dph", 0),
             data.get("soubor_cesta",""),
-            data.get("zdroj","rucni")
+            data.get("zdroj","rucni"),
+            data.get("duplicita_id", None)
         ))
         faktura_id = cur.lastrowid
 
