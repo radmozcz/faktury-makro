@@ -943,20 +943,33 @@ Formát odpovědi:
 }}
 
 PRAVIDLA PRO ČÍSLA:
-- Tečka nebo čárka uvnitř čísla = ODDĚLOVAČ TISÍCŮ (6.696 = 6696, 5.100 = 5100, 12.327 = 12327)
-- NIKDY neinterpretuj tečku jako desetinnou čárku u celých částek v Kč
+- Tečka nebo čárka UVNITŘ čísla = VŽDY oddělovač tisíců, NIKDY desetinná čárka
+- Příklady: 6.888 = 6888, 6.600 = 6600, 13.541 = 13541, 5.100 = 5100
 - Čísla zapisuj jako celá čísla bez teček a čárek
+- Pomlčka nebo lomítko za číslem (6.888,- nebo 6.888/) = ignoruj, je to jen styl zápisu
+- Číslo před "x" nebo "X" = počet kusů (6x = 6, 5X = 5) — "x" NENÍ číslice!
+- PK zápis: "6x/600" nebo "6x 100" znamená 6 kusů poukazek — zapiš jako pk50_ks nebo pk100_ks podle hodnoty
 
-PRAVIDLA PRO JMÉNA:
-- Ráďa, Rada, Radek → "Radek"
-- Věrka, Verka, Věra → "Věrka"
-- Renča, Renata → "Renča"
-- Vendy, Wendy → "Vendy"
-- Vali → "Vali"
+PRAVIDLA PRO JMÉNA (SMĚNA):
+- Jména jsou oddělena čárkou nebo mezerou
+- Ráďa, Rada, Rado, Radek → "Radek"
+- Věrka, Verka, Věra, Vera → "Věrka"
+- Renča, Renata, Renca → "Renča"
+- Vendy, Wendy, Vendi, Vendu → "Vendy" (POZOR: nezaměňuj s Věrkou!)
+- Vali, Valy → "Vali"
+- Pokud vidíš písmena V-E-N na začátku jména → je to VENDY, ne Věrka
 
 PRAVIDLA PRO DATUM:
-- Hledej datum ve formátu "D.M" nahoře na lístku
+- Hledej datum ve formátu "D.M" nebo "D/M" nahoře na lístku
 - Pokud chybí, vrať dnešní datum: "{today}"
+
+PRAVIDLA PRO PIZZU A BURGERY:
+- "CELÁ" nebo "CELÉ" u pizzy = pizza_cela
+- "ČTVRT" nebo "1/4" u pizzy = pizza_ctvrt  
+- Číslo za názvem s "x" = počet kusů (5x = 5)
+- BURTGULÁŠ, BURTGULAS, BURGULÁŠ → burtgulas
+- BURGER, BURGR → burger
+- TALÍŘ, TALIRE, POČET TALÍŘŮ → talire
 """
 
         message = client.messages.create(
