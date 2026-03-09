@@ -467,8 +467,7 @@ async function loadFaktury() {
               <td>${escHtml(f.cislo_faktury||"–")}${f.duplicita_id ? " <small style='color:orange'>⚠️ dup #" + f.duplicita_id + "</small>" : ""}</td>
               <td>${czDate(f.datum_vystaveni)}</td>
               <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
-              <td>${f.duplicita_id ? "<span class=\"badge\" style=\"background:#fff3cd;color:#856404\">Duplik\u00e1t</span>" : stavBadge(f.stav)}</td>              </tr>
-             `).join("") ||
+              <td>${f.duplicita_id ? '<span class="badge" style="background:#fff3cd;color:#856404">Duplik\u00e1t</span>' : stavBadge(f.stav)}</td>             `).join("") ||
           "<tr><td colspan='6' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"
       </tbody>
       ${data.faktury.length ? `
