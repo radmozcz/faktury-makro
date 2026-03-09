@@ -2000,7 +2000,7 @@ def api_polozky():
                 ROUND(SUM(p.celkem_s_dph),2)        AS celkem_utraceno,
                 ROUND(AVG(p.cena_za_jednotku_s_dph),4) AS prumerna_cena,
                 COUNT(DISTINCT p.faktura_id)        AS pocet_nakupu,
-                GROUP_CONCAT(DISTINCT f.dodavatel)  AS dodavatele
+                STRING_AGG(DISTINCT f.dodavatel, ', ')  AS dodavatele
             FROM polozky p
             JOIN faktury f ON f.id = p.faktura_id
             LEFT JOIN zbozi z ON z.id = p.zbozi_id
@@ -2178,7 +2178,7 @@ def export_polozky():
                    ROUND(SUM(p.mnozstvi),3), ROUND(SUM(p.celkem_s_dph),2),
                    ROUND(AVG(p.cena_za_jednotku_s_dph),4),
                    COUNT(DISTINCT p.faktura_id),
-                   GROUP_CONCAT(DISTINCT f.dodavatel)
+                   STRING_AGG(DISTINCT f.dodavatel, ', ')
             FROM polozky p JOIN faktury f ON f.id=p.faktura_id
             LEFT JOIN zbozi z ON z.id=p.zbozi_id
             WHERE 1=1 {f_cond} {od_c} {do_c}
