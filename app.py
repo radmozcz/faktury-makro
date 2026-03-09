@@ -33,7 +33,7 @@ try:
     import pytesseract
     from PIL import Image
     import os as _os
-    _tess_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    _tess_path = r"C:\Program Files\Tesseract-OCR\	esseract.exe"
     if _os.path.exists(_tess_path):
         pytesseract.pytesseract.tesseract_cmd = _tess_path
     OCR_SUPPORT = True
@@ -125,6 +125,7 @@ class _PgConn:
         sql = sql.replace("datetime('now','localtime')", "NOW()")
         sql = sql.replace("date('now','-12 months')", "(CURRENT_DATE - INTERVAL '12 months')")
         sql = sql.replace("date('now')", "CURRENT_DATE::text")
+        # datum_vystaveni a datum jsou TEXT sloupce – při porovnání s datem je nutný cast
         sql = _re.sub(r"\bdatum_vystaveni\b(\s*)(>=|<=|>|<)", r"datum_vystaveni::date\1\2", sql)
         sql = _re.sub(r"\bdatum\b(\s*)(>=|<=|>|<)", r"datum::date\1\2", sql)
         sql = _re.sub(r"strftime\('%Y',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'YYYY')", sql)
@@ -248,6 +249,7 @@ def init_db():
             conn.execute(sql)
     print("init_db OK")
 
+
 def migrate_db():
     with get_db() as conn:
         if _USE_PG:
@@ -272,7 +274,6 @@ def migrate_db():
             try: conn.execute("ALTER TABLE faktury ADD COLUMN duplicita_id INTEGER")
             except Exception: pass
     print("migrate_db OK")
-
 
 
 def allowed_file(filename):
@@ -779,13 +780,9 @@ def _map_unit(u):
     return mapping.get(u.upper(), u.lower())
 
 
-# ── JMÉNA – mapa pro normalizaci ──────────────────────────────────────────────
-# OPRAVA: Ráďa místo Radek, přidány překlepy z OCR, Verča = Věrka
 JMENA_MAP = {
-    "rada": "Ráďa", "radek": "Ráďa", "ráďa": "Ráďa", "radi": "Ráďa",
-    "žaďa": "Ráďa", "řaďa": "Ráďa",
+    "rada": "Radek", "radek": "Radek", "ráďa": "Radek", "radi": "Radek",
     "verka": "Věrka", "vera": "Věrka", "věra": "Věrka", "věrka": "Věrka",
-    "verča": "Verča", "věrča": "Verča",
     "renča": "Renča", "renata": "Renča", "renca": "Renča",
     "vendy": "Vendy", "wendy": "Vendy",
     "vali": "Vali",
@@ -798,9 +795,6 @@ def normalize_jmena(text):
     result = []
     for p in parts:
         p = p.strip().lower().rstrip(".,")
-        if not p:
-            continue
-        p = re.sub(r"\d+", "", p).strip()  # odstraní číslice
         if not p:
             continue
         canonical = JMENA_MAP.get(p, p.capitalize())
@@ -826,8 +820,6 @@ def parse_report_image_claude(filepath):
 
         _t = date.today()
         today = f"{_t.day}.{_t.month}"
-
-        # OPRAVA: lepší prompt – přeskrtnutá nula, jména bez čísel
         prompt = f"""Jsi expert na čtení ručně psaných restauračních reportů. Přečti tento denní report VELMI PEČLIVĚ.
 Odpověz POUZE platným JSON objektem, žádný jiný text, žádné backticky.
 
@@ -853,17 +845,13 @@ PRAVIDLA PRO ČÍSLA:
 - Tečka nebo čárka uvnitř čísla = ODDĚLOVAČ TISÍCŮ (6.696 = 6696, 5.100 = 5100, 12.327 = 12327)
 - NIKDY neinterpretuj tečku jako desetinnou čárku u celých částek v Kč
 - Čísla zapisuj jako celá čísla bez teček a čárek
-- Přeškrtnutá nula (nula s čarou přes střed, symbol Ø) = ČÍSLO 0, ne písmeno
 
-PRAVIDLA PRO JMÉNA (pole "smena"):
-- Do pole "smena" patří POUZE jména osob – nikdy číslice ani čísla
-- Ráďa, Rada, Radek, Rádi → "Ráďa"
-- Věrka, Verka, Věra, Verca → "Věrka"
-- Verča, Věrča → "Verča" (jiná osoba než Věrka!)
+PRAVIDLA PRO JMÉNA:
+- Ráďa, Rada, Radek → "Radek"
+- Věrka, Verka, Věra → "Věrka"
 - Renča, Renata → "Renča"
 - Vendy, Wendy → "Vendy"
 - Vali → "Vali"
-- Neznámá jména přidej jak jsou napsána, ale nikdy nepřidávej číslice
 
 PRAVIDLA PRO DATUM:
 - Hledej datum ve formátu "D.M" nahoře na lístku
@@ -1010,115 +998,6 @@ def build_report_from_parsed(parsed, year=None):
     }
 
 
-# ── Univerzální parser dokladů (Claude AI) ────────────────────────────────────
-def parse_doklad_claude(filepath):
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return None, "ANTHROPIC_API_KEY není nastaven"
-
-    try:
-        ext = filepath.rsplit(".", 1)[-1].lower()
-
-        if ext == "pdf" and PDF_SUPPORT:
-            text_pages = []
-            with pdfplumber.open(filepath) as pdf:
-                for page in pdf.pages:
-                    t = page.extract_text()
-                    if t:
-                        text_pages.append(t)
-            doklad_text = "\n".join(text_pages)
-            content = [{"type": "text", "text": doklad_text}]
-        else:
-            with open(filepath, "rb") as f:
-                img_data = base64.standard_b64encode(f.read()).decode("utf-8")
-            media_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-                         "bmp": "image/bmp", "tiff": "image/tiff"}
-            media_type = media_map.get(ext, "image/jpeg")
-            content = [
-                {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": img_data}}
-            ]
-
-        client = anthropic.Anthropic(api_key=api_key)
-
-        prompt_text = """Jsi expert na čtení účtenek a faktur. Přečti přiložený doklad a extrahuj data.
-Odpověz POUZE platným JSON objektem – žádný jiný text, žádné backticky.
-
-Formát:
-{
-  "dodavatel": "název obchodu/firmy (napiš přesně jak stojí na dokladu)",
-  "cislo_faktury": "číslo dokladu/pokladního bloku nebo null",
-  "datum_vystaveni": "YYYY-MM-DD nebo null",
-  "celkem_s_dph": číslo s desetinnými místy (celková částka k zaplacení),
-  "polozky": [
-    {
-      "nazev": "název položky",
-      "mnozstvi": číslo,
-      "jednotka": "ks nebo kg nebo l nebo bal",
-      "cena_za_jednotku_s_dph": číslo,
-      "celkem_s_dph": číslo
-    }
-  ]
-}
-
-PRAVIDLA:
-- dodavatel: celý název obchodu (Globus, Penny Market, Albert, Lidl, atd.)
-- datum_vystaveni: převeď na YYYY-MM-DD, pokud chybí dej null
-- celkem_s_dph: CELKOVÁ částka k zaplacení (hledej CELKEM nebo TOTAL nebo K ÚHRADĚ)
-- u váhového zboží: jednotka "kg", množství v kg
-- u kusového: jednotka "ks", množství počet kusů
-- cislo_faktury: číslo dokladu, účtenky nebo null pokud není"""
-
-        content.append({"type": "text", "text": prompt_text})
-
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            messages=[{"role": "user", "content": content}]
-        )
-
-        text_resp = message.content[0].text.strip()
-        text_resp = re.sub(r"^```json\s*", "", text_resp)
-        text_resp = re.sub(r"```$", "", text_resp).strip()
-
-        parsed = json.loads(text_resp)
-
-        result = {
-            "dodavatel":        parsed.get("dodavatel", "Neznámý dodavatel"),
-            "cislo_faktury":    parsed.get("cislo_faktury") or "",
-            "datum_vystaveni":  parsed.get("datum_vystaveni") or "",
-            "datum_splatnosti": "",
-            "zpusob_uhrady":    "Hotovost",
-            "stav":             "zaplaceno",
-            "celkem_s_dph":     float(parsed.get("celkem_s_dph", 0) or 0),
-            "firma_zkratka":    "",
-            "polozky":          []
-        }
-
-        for p in parsed.get("polozky", []):
-            nazev = str(p.get("nazev", "")).strip()
-            if not nazev:
-                continue
-            mnozstvi = float(p.get("mnozstvi", 1) or 1)
-            celkem   = float(p.get("celkem_s_dph", 0) or 0)
-            cena_j   = float(p.get("cena_za_jednotku_s_dph", 0) or 0)
-            if cena_j == 0 and mnozstvi and celkem:
-                cena_j = round(celkem / mnozstvi, 4)
-            result["polozky"].append({
-                "nazev":                  nazev,
-                "mnozstvi":               mnozstvi,
-                "jednotka":               p.get("jednotka", "ks"),
-                "cena_za_jednotku_s_dph": cena_j,
-                "celkem_s_dph":           round(celkem, 2)
-            })
-
-        if result["celkem_s_dph"] == 0 and result["polozky"]:
-            result["celkem_s_dph"] = round(sum(p["celkem_s_dph"] for p in result["polozky"]), 2)
-
-        return result, None
-
-    except Exception as e:
-        return None, str(e)
-
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ROUTES
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1152,6 +1031,8 @@ def api_dashboard():
         where_firma = "AND firma_zkratka=?" if firma else ""
         params_base = (firma,) if firma else ()
 
+        # ── OPRAVA: pojmenované sloupce místo indexů [0],[1]
+        # ── OPRAVA2: PostgreSQL potřebuje cast pro LIKE na textovém sloupci
         like_cond = "AND datum_vystaveni::text LIKE ?" if _USE_PG else "AND datum_vystaveni LIKE ?"
         row = conn.execute(f"""
             SELECT COUNT(*) as pocet, COALESCE(SUM(celkem_s_dph),0) as vydaje
@@ -1183,12 +1064,11 @@ def api_dashboard():
             ORDER BY created_at DESC LIMIT 5
         """, params_base).fetchall()
 
-        datum_12m = (date.today() - timedelta(days=365)).isoformat()
         karty_row = conn.execute("""
             SELECT COALESCE(SUM(karty),0) as karty
             FROM reporty
-            WHERE datum >= ?
-        """, (datum_12m,)).fetchone()
+            WHERE datum >= date('now','-12 months')
+        """).fetchone()
         karty_12m = karty_row["karty"] if isinstance(karty_row, dict) else karty_row[0]
 
     def graf_row(r):
@@ -1318,6 +1198,7 @@ def api_vyplaty():
             rows = conn.execute(f"""
                 SELECT * FROM vyplaty {where} ORDER BY datum DESC, created_at DESC
             """, params).fetchall()
+            # ── OPRAVA: pojmenovaný sloupec – funguje v PG i SQLite
             total_row = conn.execute(
                 f"SELECT COALESCE(SUM(castka),0) as total FROM vyplaty {where}", params
             ).fetchone()
@@ -1511,7 +1392,6 @@ def api_report_import_xlsx():
         wb = openpyxl.load_workbook(fpath, data_only=True)
         imported = 0
         skipped  = 0
-        updated  = 0
         errors   = []
 
         den_map = {
@@ -1525,71 +1405,63 @@ def api_report_import_xlsx():
         }
 
         rows_to_insert = []
-        dnes = date.today()
-
         for sheet_name in wb.sheetnames:
-            # Zpracuj pouze listy s roky (číselné názvy)
-            try:
-                year = int(sheet_name)
-            except ValueError:
+            if sheet_name not in ("2025", "2026"):
                 continue
-            if year < 2020 or year > 2030:
-                continue
-
+            year = int(sheet_name)
             ws = wb[sheet_name]
 
+            current_mesic = None
+            dnes = date.today()
+            konec_import = date(dnes.year, dnes.month, dnes.day)
             for row in ws.iter_rows(min_row=2, values_only=True):
                 if not row or row[0] is None:
                     continue
-
-                # Přeskoč souhrnné řádky
-                if str(row[0]).upper().strip() in ("SOUČET", "DNÍ", "PRŮMĚR", "DATUM", "CELKEM"):
+                if str(row[0]).upper() in ("SOUČET", "DNÍ", "PRŮMĚR", "SOU\ČET"):
                     continue
+                if row[1] and str(row[1]).upper() in mesic_map:
+                    current_mesic = mesic_map[str(row[1]).upper()]
 
-                # Sloupec A musí být číslo dne
                 try:
                     den_cislo = int(row[0])
-                    if den_cislo < 1 or den_cislo > 31:
-                        continue
                 except (TypeError, ValueError):
                     continue
 
-                # Sloupec B = název měsíce
-                mesic_str = str(row[1] or "").upper().strip()
-                mesic = mesic_map.get(mesic_str)
-                if not mesic:
+                if not current_mesic:
                     continue
 
-                # Sestav datum
                 try:
-                    d = date(year, mesic, den_cislo)
+                    datum_test = date(year, current_mesic, den_cislo)
+                    if datum_test > konec_import:
+                        skipped += 1
+                        continue
                 except ValueError:
-                    errors.append(f"Neplatné datum: {year}-{mesic}-{den_cislo}")
                     continue
 
-                # Budoucí datumy přeskočíme
-                if d > dnes:
-                    skipped += 1
+                try:
+                    datum_iso = date(year, current_mesic, den_cislo).isoformat()
+                except ValueError:
+                    errors.append(f"Neplatné datum: {year}-{current_mesic}-{den_cislo}")
                     continue
 
-                datum_iso   = d.isoformat()
-                den_str     = den_map.get(str(row[2] or "").lower().strip(), str(row[2] or ""))
-                trzba_vcpk  = float(row[3] or 0)
-                karty       = float(row[4] or 0)
-                hotovost    = float(row[5] or 0)
-                vydaje      = float(row[6] or 0)
-                trzba       = float(row[7] or 0)
-                pk50_ks     = int(row[8] or 0)
-                pk100_ks    = int(row[9] or 0)
-                pk_celkem   = float(row[10] or 0)
-                pizza_cela  = int(row[11] or 0)
-                pizza_ctvrt = int(row[12] or 0)
-                burger      = int(row[13] or 0)
-                talire      = int(row[14] or 0)
-                burtgulas   = int(row[15] or 0)
-                smena       = normalize_jmena(str(row[16] or ""))
-                kov         = 0
-                papir       = hotovost
+                den_str = den_map.get(str(row[2] or "").lower(), str(row[2] or ""))
+                trzba_vcpk = float(row[3] or 0)
+                karty      = float(row[4] or 0)
+                hotovost   = float(row[5] or 0)
+                vydaje     = float(row[6] or 0)
+                trzba      = float(row[7] or 0)
+                pk50_ks    = int(row[8] or 0)
+                pk100_ks   = int(row[9] or 0)
+                pk_celkem  = float(row[10] or 0)
+                pizza_cela = int(row[11] or 0)
+                pizza_ctvrt= int(row[12] or 0)
+                burger     = int(row[13] or 0)
+                talire     = int(row[14] or 0)
+                burtgulas  = int(row[15] or 0)
+                smena      = normalize_jmena(str(row[16] or ""))
+
+                kov   = 0
+                papir = hotovost
 
                 rows_to_insert.append((
                     datum_iso, den_str, smena, karty, kov, papir, hotovost,
@@ -1599,62 +1471,40 @@ def api_report_import_xlsx():
 
         with get_db() as conn:
             for params in rows_to_insert:
-                datum_iso = params[0]
-                existing = conn.execute("SELECT id FROM reporty WHERE datum=?", (datum_iso,)).fetchone()
+                existing = conn.execute("SELECT id FROM reporty WHERE datum=?", (params[0],)).fetchone()
                 if existing:
-                    # Aktualizuj existující záznam (přepíše data z xlsx)
-                    conn.execute("""
-                        UPDATE reporty SET den=?,smena=?,karty=?,kov=?,papir=?,hotovost=?,
-                        vydaje=?,trzba=?,trzba_vcpk=?,pk50_ks=?,pk100_ks=?,pk_celkem=?,
-                        pizza_cela=?,pizza_ctvrt=?,burger=?,talire=?,burtgulas=?
-                        WHERE datum=?
-                    """, (
-                        params[1], params[2], params[3], params[4], params[5], params[6],
-                        params[7], params[8], params[9], params[10], params[11], params[12],
-                        params[13], params[14], params[15], params[16], params[17],
-                        datum_iso
-                    ))
-                    updated += 1
-                else:
-                    conn.execute("""
-                        INSERT INTO reporty (datum,den,smena,karty,kov,papir,hotovost,vydaje,
-                        trzba,trzba_vcpk,pk50_ks,pk100_ks,pk_celkem,
-                        pizza_cela,pizza_ctvrt,burger,talire,burtgulas)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                    """, params)
-                    imported += 1
+                    skipped += 1
+                    continue
+                conn.execute("""
+                    INSERT INTO reporty (datum,den,smena,karty,kov,papir,hotovost,vydaje,
+                    trzba,trzba_vcpk,pk50_ks,pk100_ks,pk_celkem,
+                    pizza_cela,pizza_ctvrt,burger,talire,burtgulas)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                """, params)
+                imported += 1
 
-        return jsonify({
-            "ok": True,
-            "imported": imported,
-            "updated": updated,
-            "skipped": skipped,
-            "errors": errors[:10]
-        })
+        return jsonify({"ok": True, "imported": imported, "skipped": skipped, "errors": errors[:10]})
 
     except Exception as e:
-        import traceback
-        app.logger.error(f"import_xlsx error: {traceback.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/reporty/karty-alert")
 def api_karty_alert():
-    datum_12m = (date.today() - timedelta(days=365)).isoformat()
     with get_db() as conn:
         total_row = conn.execute("""
             SELECT COALESCE(SUM(karty),0) as total
             FROM reporty
-            WHERE datum >= ?
-        """, (datum_12m,)).fetchone()
+            WHERE datum >= date('now','-12 months')
+        """).fetchone()
         total = _first_val(total_row)
         per_firma = conn.execute("""
             SELECT firma_zkratka, COALESCE(SUM(karty),0) as karty_12m
             FROM reporty
-            WHERE datum >= ?
+            WHERE datum >= date('now','-12 months')
             GROUP BY firma_zkratka
             ORDER BY karty_12m DESC
-        """, (datum_12m,)).fetchall()
+        """).fetchall()
     LIMIT = 1500000
     firmy_alert = []
     for r in per_firma:
@@ -1899,12 +1749,8 @@ def api_nahrat():
     fpath  = os.path.join(UPLOAD_DIR, fname)
     f.save(fpath)
 
-    typ_dokladu = request.form.get("typ_dokladu", "makro")
-
     ext = fname.rsplit(".", 1)[1].lower()
-    if typ_dokladu == "doklad":
-        data, err = parse_doklad_claude(fpath)
-    elif ext == "pdf":
+    if ext == "pdf":
         data, err = parse_makro_pdf(fpath)
     else:
         data, err = parse_makro_image(fpath)
@@ -1914,7 +1760,7 @@ def api_nahrat():
 
     data["soubor_cesta"] = fname
 
-    if data.get("cislo_faktury") and typ_dokladu == "makro":
+    if data.get("cislo_faktury"):
         with get_db() as conn:
             row = conn.execute("""
                 SELECT id, firma_zkratka, datum_vystaveni, celkem_s_dph
@@ -1924,30 +1770,8 @@ def api_nahrat():
                 AND ABS(celkem_s_dph - ?) < 0.01
             """, (data["cislo_faktury"], data.get("datum_vystaveni",""), float(data.get("celkem_s_dph", 0)))).fetchone()
             if row:
-                dup_id = row["id"]
-                # Ulož fakturu jako duplikát
-                with get_db() as conn2:
-                    conn2.execute("""
-                        INSERT INTO faktury
-                          (firma_zkratka, dodavatel, cislo_faktury, datum_vystaveni,
-                           datum_splatnosti, zpusob_uhrady, stav, celkem_s_dph,
-                           soubor_cesta, zdroj, duplicita_id)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?)
-                    """, (
-                        data.get("firma_zkratka",""),
-                        data.get("dodavatel",""),
-                        data.get("cislo_faktury",""),
-                        data.get("datum_vystaveni",""),
-                        data.get("datum_splatnosti",""),
-                        data.get("zpusob_uhrady","Hotovost"),
-                        "duplikat",
-                        float(data.get("celkem_s_dph",0)),
-                        data.get("soubor_cesta",""),
-                        "makro",
-                        dup_id,
-                    ))
                 data["duplicita"] = {
-                    "id": dup_id,
+                    "id": row["id"],
                     "firma": row["firma_zkratka"],
                     "datum": row["datum_vystaveni"],
                     "celkem": row["celkem_s_dph"]
