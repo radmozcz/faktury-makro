@@ -251,6 +251,18 @@ def init_db():
 
 
 def migrate_db():
+    # Migrace: obdobi_od, obdobi_do ve vyplatach
+    with get_db() as conn:
+        if _USE_PG:
+            cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='vyplaty'")
+            vypl_cols = [r["column_name"] for r in cur.fetchall()]
+        else:
+            vypl_cols = [row[1] for row in conn.execute("PRAGMA table_info(vyplaty)").fetchall()]
+        for col, typ in [("obdobi_od","TEXT"), ("obdobi_do","TEXT")]:
+            if col not in vypl_cols:
+                try: conn.execute(f"ALTER TABLE vyplaty ADD COLUMN {col} {typ}")
+                except Exception: pass
+
     with get_db() as conn:
         if _USE_PG:
             cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='reporty'")
@@ -1335,14 +1347,16 @@ def api_vyplata_ulozit():
             return jsonify({"error": "Chybí povinná pole"}), 400
         with get_db() as conn:
             cur = conn.execute("""
-                INSERT INTO vyplaty (jmeno, datum, castka, poznamka, firma_zkratka)
-                VALUES (?,?,?,?,?)
+                INSERT INTO vyplaty (jmeno, datum, castka, poznamka, firma_zkratka, obdobi_od, obdobi_do)
+                VALUES (?,?,?,?,?,?,?)
             """, (
                 data["jmeno"],
                 data["datum"],
                 float(data["castka"]),
                 data.get("poznamka", ""),
-                data.get("firma_zkratka", "")
+                data.get("firma_zkratka", ""),
+                data.get("obdobi_od") or None,
+                data.get("obdobi_do") or None,
             ))
         return jsonify({"ok": True, "id": cur.lastrowid})
     except Exception as e:
@@ -1359,7 +1373,7 @@ def api_vyplata_delete(vid):
 @app.route("/api/vyplaty/<int:vid>", methods=["PUT"])
 def api_vyplata_update(vid):
     data = request.json
-    fields = ["jmeno", "datum", "castka", "poznamka", "firma_zkratka"]
+    fields = ["jmeno", "datum", "castka", "poznamka", "firma_zkratka", "obdobi_od", "obdobi_do"]
     set_parts = [f"{f}=?" for f in fields if f in data]
     vals = [data[f] for f in fields if f in data]
     if not set_parts:
