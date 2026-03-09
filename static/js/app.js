@@ -460,15 +460,15 @@ async function loadFaktury() {
         <th>Stav</th>
       </tr></thead>
       <tbody>
-        ${data.faktury.map(f => `
-          <tr class="faktura-row" data-id="${f.id}" style="${f.duplicita_id ? 'opacity:0.55' : ''}">
-            <td><span class="badge badge-zaplaceno" style="background:var(--green-pale)">${f.firma_zkratka}</span></td>
-            <td>${escHtml(f.dodavatel)}</td>
-            <td>${escHtml(f.cislo_faktury||"–")}${f.duplicita_id ? ' <span style="color:orange;font-size:.8em">⚠️ duplikát #' + f.duplicita_id + '</span>' : ''}</td>            <td>${czDate(f.datum_vystaveni)}</td>
-            <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
-     <td>${f.duplicita_id ? '<span class="badge" style="background:var(--orange-pale,#fff3cd);color:#856404">Duplikát</span>' : stavBadge(f.stav)}</td>          
-    </tr>
-        `).join("") ||
+       ${data.faktury.map(f => `
+            <tr class="faktura-row" data-id="${f.id}" style="${f.duplicita_id ? 'opacity:0.55' : ''}">
+              <td><span class="badge badge-zaplaceno" style="background:var(--green-pale)">${f.firma_zkratka}</span></td>
+              <td>${escHtml(f.dodavatel)}</td>
+              <td>${escHtml(f.cislo_faktury||"–")}${f.duplicita_id ? " <small style='color:orange'>⚠️ dup #" + f.duplicita_id + "</small>" : ""}</td>
+              <td>${czDate(f.datum_vystaveni)}</td>
+              <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
+              <td>${f.duplicita_id ? "<span class='badge' style='background:#fff3cd;color:#856404'>Duplikát</span>" : stavBadge(f.stav)}</td>
+            </tr>
           "<tr><td colspan='6' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"
       </tbody>
       ${data.faktury.length ? `
