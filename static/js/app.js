@@ -467,7 +467,7 @@ async function loadFaktury() {
               <td>${escHtml(f.cislo_faktury||"–")}${f.duplicita_id ? " <small style='color:orange'>⚠️ dup #" + f.duplicita_id + "</small>" : ""}</td>
               <td>${czDate(f.datum_vystaveni)}</td>
               <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
-              <td>${f.duplicita_id ? '<span class="badge" style="background:#fd7e14;color:#fff">Duplikát</span>' : stavBadge(f.stav)}</td>
+              <td>${f.duplicita_id ? '<span class="badge" style="background:#0d6efd;color:#fff;cursor:pointer" onclick="event.stopPropagation();openFakturaDetail(' + f.duplicita_id + ')">🔗 Duplikát</span>' : stavBadge(f.stav)}</td>
               </tr>`).join("") ||
           "<tr><td colspan='6' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"}
       </tbody>
@@ -1606,7 +1606,21 @@ async function renderNastaveni() {
         </table>
       </div>
       <button class="btn btn-primary" onclick="saveConfig()">💾 Uložit nastavení</button>
+      <button class="btn" style="background:var(--accent);color:#fff;margin-left:.5rem" onclick="opravDuplicity()">🔍 Zkontrolovat duplicity</button>
     </div>`;
+}
+
+async function opravDuplicity() {
+  try {
+    const res = await api("/api/oprav-duplicity", { method: "POST" });
+    if (res.ok) {
+      toast(`Hotovo – označeno ${res.opraveno} duplikát${res.opraveno === 1 ? "" : res.opraveno < 5 ? "y" : "ů"} ✓`);
+    } else {
+      toast("Chyba: " + (res.chyba || "neznámá"), true);
+    }
+  } catch (e) {
+    toast("Chyba při kontrole duplicit", true);
+  }
 }
 
 async function saveConfig() {
