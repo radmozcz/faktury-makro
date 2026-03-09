@@ -572,6 +572,107 @@ def _ocr_best_orientation(img):
     return best_text
 
 
+def parse_faktura_claude(filepath):
+    """Univerzální parser faktur a účtenek přes Claude API – funguje pro PDF i obrázky."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return None, "ANTHROPIC_API_KEY není nastaven"
+
+    try:
+        ext = filepath.rsplit(".", 1)[-1].lower()
+        with open(filepath, "rb") as f:
+            raw = f.read()
+        b64 = base64.standard_b64encode(raw).decode("utf-8")
+
+        if ext == "pdf":
+            media_type = "application/pdf"
+            source_type = "base64"
+            content_block = {
+                "type": "document",
+                "source": {"type": "base64", "media_type": media_type, "data": b64}
+            }
+        else:
+            media_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+                         "bmp": "image/bmp", "tiff": "image/tiff", "webp": "image/webp"}
+            media_type = media_map.get(ext, "image/jpeg")
+            content_block = {
+                "type": "image",
+                "source": {"type": "base64", "media_type": media_type, "data": b64}
+            }
+
+        prompt = """Jsi expert na čtení faktur a účtenek. Přečti tento doklad VELMI PEČLIVĚ.
+Odpověz POUZE platným JSON objektem, žádný jiný text, žádné backticky, žádné komentáře.
+
+Formát odpovědi:
+{
+  "dodavatel": "název dodavatele nebo obchodu",
+  "cislo_faktury": "číslo faktury nebo variabilní symbol nebo číslo účtenky, nebo null",
+  "datum_vystaveni": "YYYY-MM-DD nebo null",
+  "datum_splatnosti": "YYYY-MM-DD nebo null",
+  "zpusob_uhrady": "hotově/kartou/převodem nebo null",
+  "celkem_s_dph": číslo (celková částka včetně DPH),
+  "polozky": [
+    {
+      "nazev": "název položky",
+      "mnozstvi": číslo,
+      "jednotka": "ks/kg/l/...",
+      "cena_za_jednotku_s_dph": číslo,
+      "celkem_s_dph": číslo
+    }
+  ]
+}
+
+PRAVIDLA:
+- Všechny částky jsou v Kč, piš jen číslo bez symbolu Kč
+- Desetinná čárka nebo tečka = desetinné místo (475,55 = 475.55)
+- Pokud není datum splatnosti, vrať null
+- Pokud není číslo faktury/VS, vrať null
+- Způsob úhrady: pokud vidíš "karta", "card", "kartou" → "kartou"; "cash", "hotov" → "hotově"
+- Položky: zahrň všechny položky které vidíš na dokladu
+- celkem_s_dph u položky = množství × cena za jednotku
+"""
+
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            messages=[{
+                "role": "user",
+                "content": [content_block, {"type": "text", "text": prompt}]
+            }]
+        )
+
+        text = message.content[0].text.strip()
+        text = re.sub(r"^```json\s*", "", text)
+        text = re.sub(r"```$", "", text).strip()
+        parsed = json.loads(text)
+
+        # Normalizace výstupu
+        result = {
+            "dodavatel":        parsed.get("dodavatel", ""),
+            "cislo_faktury":    parsed.get("cislo_faktury") or "",
+            "datum_vystaveni":  parsed.get("datum_vystaveni") or "",
+            "datum_splatnosti": parsed.get("datum_splatnosti") or "",
+            "zpusob_uhrady":    parsed.get("zpusob_uhrady") or "",
+            "celkem_s_dph":     float(parsed.get("celkem_s_dph") or 0),
+            "polozky": [
+                {
+                    "nazev":                   p.get("nazev", ""),
+                    "mnozstvi":                float(p.get("mnozstvi", 1) or 1),
+                    "jednotka":                p.get("jednotka", "ks"),
+                    "cena_za_jednotku_s_dph":  float(p.get("cena_za_jednotku_s_dph", 0) or 0),
+                    "celkem_s_dph":            float(p.get("celkem_s_dph", 0) or 0),
+                }
+                for p in parsed.get("polozky", [])
+                if p.get("nazev", "").strip()
+            ]
+        }
+        return result, None
+
+    except Exception as e:
+        return None, str(e)
+
+
 def parse_makro_image(filepath):
     if not OCR_SUPPORT:
         return None, "pytesseract/Pillow není nainstalován"
@@ -1750,10 +1851,19 @@ def api_nahrat():
     f.save(fpath)
 
     ext = fname.rsplit(".", 1)[1].lower()
-    if ext == "pdf":
-        data, err = parse_makro_pdf(fpath)
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if api_key:
+        if ext == "pdf":
+            data, err = parse_makro_pdf(fpath)
+            if err or not data:
+                data, err = parse_faktura_claude(fpath)
+        else:
+            data, err = parse_faktura_claude(fpath)
     else:
-        data, err = parse_makro_image(fpath)
+        if ext == "pdf":
+            data, err = parse_makro_pdf(fpath)
+        else:
+            data, err = parse_makro_image(fpath)
 
     if err:
         return jsonify({"error": err, "soubor_cesta": fname}), 200
