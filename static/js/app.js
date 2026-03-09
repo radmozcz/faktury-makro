@@ -471,7 +471,7 @@ async function loadFaktury() {
               </tr>`).join("") ||
           "<tr><td colspan='6' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"}
       </tbody>
-      ${data.faktury.length ?
+      ${data.faktury.length ?`
       <tfoot>
         <tr class="table-footer">
           <td colspan="4">Celkem (${data.faktury.length} faktur)</td>
