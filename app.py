@@ -2005,7 +2005,7 @@ def api_polozky():
             JOIN faktury f ON f.id = p.faktura_id
             LEFT JOIN zbozi z ON z.id = p.zbozi_id
             WHERE 1=1 {f_cond} {od_c} {do_c}
-            GROUP BY COALESCE(z.id, p.nazev)
+            GROUP BY COALESCE(z.id::text, p.nazev)
             ORDER BY celkem_utraceno DESC
         """, params).fetchall()
     return jsonify([dict(r) for r in rows])
@@ -2098,7 +2098,7 @@ def api_statistiky():
             JOIN faktury f ON f.id=p.faktura_id
             LEFT JOIN zbozi z ON z.id=p.zbozi_id
             WHERE f.datum_vystaveni>=? AND f.datum_vystaveni<=? {f_cond}
-            GROUP BY COALESCE(z.id, p.nazev) ORDER BY castka DESC LIMIT 20
+            GROUP BY COALESCE(z.id::text, p.nazev) ORDER BY castka DESC LIMIT 20
         """, (od, do_) + f_params).fetchall()
 
         zbozi_id = request.args.get("zbozi_id")
@@ -2182,7 +2182,7 @@ def export_polozky():
             FROM polozky p JOIN faktury f ON f.id=p.faktura_id
             LEFT JOIN zbozi z ON z.id=p.zbozi_id
             WHERE 1=1 {f_cond} {od_c} {do_c}
-            GROUP BY COALESCE(z.id, p.nazev)
+            GROUP BY COALESCE(z.id::text, p.nazev)
             ORDER BY SUM(p.celkem_s_dph) DESC
         """, params).fetchall()
 
