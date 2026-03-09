@@ -949,15 +949,19 @@ PRAVIDLA PRO ČÍSLA:
 - Pomlčka nebo lomítko za číslem (6.888,- nebo 6.888/) = ignoruj, je to jen styl zápisu
 - Číslo před "x" nebo "X" = počet kusů (6x = 6, 5X = 5) — "x" NENÍ číslice!
 - PK zápis: "6x/600" nebo "6x 100" znamená 6 kusů poukazek — zapiš jako pk50_ks nebo pk100_ks podle hodnoty
+- POZOR na záměnu číslic: "5" a "3" jsou si podobné při ručním psaní — čti kontext (53 je reálná hodnota KOV)
+- Pokud číslo vypadá jako "33" ale kontext říká KOV nebo KARTY → přečti znovu, může být "53" nebo "83"
+- BURGER: hledej slovo BURGER nebo BURGR na reportu a číslo za ním nebo před ním — nezapisuj 0 pokud tam číslo je
 
 PRAVIDLA PRO JMÉNA (SMĚNA):
 - Jména jsou oddělena čárkou nebo mezerou
-- Ráďa, Rada, Rado, Radek → "Radek"
-- Věrka, Verka, Věra, Vera → "Věrka"
+- Ráďa, Rádá, Rada, Rado, Radek, Radu → "Radek"
+- Věrka, Verka, Věra, Vera → "Věrka" — POUZE pokud jméno začíná VĚ nebo VE a druhé písmeno je E nebo Ě
 - Renča, Renata, Renca → "Renča"
-- Vendy, Wendy, Vendi, Vendu → "Vendy" (POZOR: nezaměňuj s Věrkou!)
+- Vendy, Wendy, Vendi, Vendu, Vendy → "Vendy" — jméno začíná VEN nebo WEN
 - Vali, Valy → "Vali"
-- Pokud vidíš písmena V-E-N na začátku jména → je to VENDY, ne Věrka
+- KRITICKÉ: "VENDY" a "Věrka" jsou RŮZNÉ osoby! Pokud vidíš VEN → VENDY. Pokud vidíš VĚR nebo VER → Věrka.
+- Na směně mohou být najednou: Radek, Vendy, Vali, Věrka, Renča — přečti KAŽDÉ jméno samostatně
 
 PRAVIDLA PRO DATUM:
 - Hledej datum ve formátu "D.M" nebo "D/M" nahoře na lístku
