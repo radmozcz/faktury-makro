@@ -256,15 +256,24 @@ def migrate_db():
             existing = [r["column_name"] for r in cur.fetchall()]
         else:
             existing = [row[1] for row in conn.execute("PRAGMA table_info(reporty)").fetchall()]
-        for col, typ in [
+       for col, typ in [
             ("burtgulas","INTEGER DEFAULT 0"),("hotdog","INTEGER DEFAULT 0"),
             ("snidane","INTEGER DEFAULT 0"),("nakupy","INTEGER DEFAULT 0"),
             ("foto_cesta","TEXT"),("firma_zkratka","TEXT DEFAULT ''"),
-            ("duplicita_id","INTEGER DEFAULT NULL"),
         ]:
             if col not in existing:
                 try: conn.execute(f"ALTER TABLE reporty ADD COLUMN {col} {typ}")
                 except Exception: pass
+
+        # migrate faktury tabulka
+        if _USE_PG:
+            cur2 = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='faktury'")
+            fakt_cols = [r["column_name"] for r in cur2.fetchall()]
+        else:
+            fakt_cols = [row[1] for row in conn.execute("PRAGMA table_info(faktury)").fetchall()]
+        if "duplicita_id" not in fakt_cols:
+            try: conn.execute("ALTER TABLE faktury ADD COLUMN duplicita_id INTEGER")
+            except Exception: pass
     print("migrate_db OK")
 
 
