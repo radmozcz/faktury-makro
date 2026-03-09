@@ -1996,16 +1996,16 @@ def api_polozky():
                 COALESCE(z.nazev_canonical, p.nazev) AS zbozi_nazev,
                 z.id AS zbozi_id,
                 p.jednotka,
-                ROUND(SUM(p.mnozstvi)::numeric,3)            AS celkove_mnozstvi,
-                ROUND(SUM(p.celkem_s_dph)::numeric,2)        AS celkem_utraceno,
-                ROUND(AVG(p.cena_za_jednotku_s_dph)::numeric,4) AS prumerna_cena,
+                ROUND(CAST(SUM(p.mnozstvi) AS NUMERIC), 3)            AS celkove_mnozstvi,
+                ROUND(CAST(SUM(p.celkem_s_dph) AS NUMERIC), 2)        AS celkem_utraceno,
+                ROUND(CAST(AVG(p.cena_za_jednotku_s_dph) AS NUMERIC), 4) AS prumerna_cena,
                 COUNT(DISTINCT p.faktura_id)        AS pocet_nakupu,
                 STRING_AGG(DISTINCT f.dodavatel, ', ')  AS dodavatele
             FROM polozky p
             JOIN faktury f ON f.id = p.faktura_id
             LEFT JOIN zbozi z ON z.id = p.zbozi_id
             WHERE 1=1 {f_cond} {od_c} {do_c}
-            GROUP BY COALESCE(z.id::text, p.nazev)
+            GROUP BY z.id, COALESCE(z.nazev_canonical, p.nazev), p.jednotka
             ORDER BY celkem_utraceno DESC
         """, params).fetchall()
     return jsonify([dict(r) for r in rows])
