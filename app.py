@@ -1674,24 +1674,24 @@ def api_statistiky_mesice():
                 strftime('%Y', datum) as rok,
                 strftime('%m', datum) as mesic,
                 COUNT(*) as dni,
-                ROUND(SUM(trzba_vcpk),2)  as trzba_vcpk_sum,
-                ROUND(AVG(trzba_vcpk),2)  as trzba_vcpk_avg,
-                ROUND(SUM(karty),2)       as karty_sum,
-                ROUND(AVG(karty),2)       as karty_avg,
-                ROUND(SUM(hotovost),2)    as hotovost_sum,
-                ROUND(AVG(hotovost),2)    as hotovost_avg,
-                ROUND(SUM(vydaje),2)      as vydaje_sum,
-                ROUND(SUM(pk_celkem),2)   as pk_celkem_sum,
+                ROUND((SUM(trzba_vcpk))::numeric,2)  as trzba_vcpk_sum,
+                ROUND((AVG(trzba_vcpk))::numeric,2)  as trzba_vcpk_avg,
+                ROUND((SUM(karty))::numeric,2)       as karty_sum,
+                ROUND((AVG(karty))::numeric,2)       as karty_avg,
+                ROUND((SUM(hotovost))::numeric,2)    as hotovost_sum,
+                ROUND((AVG(hotovost))::numeric,2)    as hotovost_avg,
+                ROUND((SUM(vydaje))::numeric,2)      as vydaje_sum,
+                ROUND((SUM(pk_celkem))::numeric,2)   as pk_celkem_sum,
                 SUM(pizza_cela)           as pizza_cela_sum,
                 SUM(pizza_ctvrt)          as pizza_ctvrt_sum,
                 SUM(burger)               as burger_sum,
                 SUM(talire)               as talire_sum,
                 SUM(burtgulas)            as burtgulas_sum,
-                ROUND(AVG(pizza_cela),1)  as pizza_cela_avg,
-                ROUND(AVG(pizza_ctvrt),1) as pizza_ctvrt_avg,
-                ROUND(AVG(burger),1)      as burger_avg,
-                ROUND(AVG(talire),1)      as talire_avg,
-                ROUND(AVG(burtgulas),1)   as burtgulas_avg
+                ROUND((AVG(pizza_cela))::numeric,1)  as pizza_cela_avg,
+                ROUND((AVG(pizza_ctvrt))::numeric,1) as pizza_ctvrt_avg,
+                ROUND((AVG(burger))::numeric,1)      as burger_avg,
+                ROUND((AVG(talire))::numeric,1)      as talire_avg,
+                ROUND((AVG(burtgulas))::numeric,1)   as burtgulas_avg
             FROM reporty {where}
             AND trzba_vcpk > 0
             GROUP BY rok, mesic
@@ -1707,7 +1707,7 @@ def api_statistiky_roky():
             SELECT
                 strftime('%Y', datum) as rok,
                 strftime('%m', datum) as mesic,
-                ROUND(AVG(trzba_vcpk),0) as prumer_den,
+                ROUND((AVG(trzba_vcpk))::numeric,0) as prumer_den,
                 firma_zkratka
             FROM reporty
             WHERE datum <= ? AND trzba_vcpk > 0
@@ -1996,9 +1996,9 @@ def api_polozky():
                 COALESCE(z.nazev_canonical, p.nazev) AS zbozi_nazev,
                 z.id AS zbozi_id,
                 p.jednotka,
-                ROUND(SUM(p.mnozstvi),3)            AS celkove_mnozstvi,
-                ROUND(SUM(p.celkem_s_dph),2)        AS celkem_utraceno,
-                ROUND(AVG(p.cena_za_jednotku_s_dph),4) AS prumerna_cena,
+                ROUND(SUM(p.mnozstvi)::numeric,3)            AS celkove_mnozstvi,
+                ROUND(SUM(p.celkem_s_dph)::numeric,2)        AS celkem_utraceno,
+                ROUND(AVG(p.cena_za_jednotku_s_dph)::numeric,4) AS prumerna_cena,
                 COUNT(DISTINCT p.faktura_id)        AS pocet_nakupu,
                 STRING_AGG(DISTINCT f.dodavatel, ', ')  AS dodavatele
             FROM polozky p
@@ -2078,22 +2078,22 @@ def api_statistiky():
 
     with get_db() as conn:
         mesice = conn.execute(f"""
-            SELECT strftime('%Y-%m', datum_vystaveni) m, ROUND(SUM(celkem_s_dph),2) castka
+            SELECT strftime('%Y-%m', datum_vystaveni) m, ROUND((SUM(celkem_s_dph))::numeric,2) castka
             FROM faktury
             WHERE datum_vystaveni>=? AND datum_vystaveni<=? {f_cond}
             GROUP BY m ORDER BY m
         """, (od, do_) + f_params).fetchall()
 
         dodavatele = conn.execute(f"""
-            SELECT dodavatel, ROUND(SUM(celkem_s_dph),2) castka, COUNT(*) pocet
+            SELECT dodavatel, ROUND((SUM(celkem_s_dph))::numeric,2) castka, COUNT(*) pocet
             FROM faktury
             WHERE datum_vystaveni>=? AND datum_vystaveni<=? {f_cond}
             GROUP BY dodavatel ORDER BY castka DESC LIMIT 10
         """, (od, do_) + f_params).fetchall()
 
         zbozi_top = conn.execute(f"""
-            SELECT COALESCE(z.nazev_canonical, p.nazev) zbozi, ROUND(SUM(p.celkem_s_dph),2) castka,
-                   ROUND(SUM(p.mnozstvi),2) mnozstvi, p.jednotka
+            SELECT COALESCE(z.nazev_canonical, p.nazev) zbozi, ROUND((SUM(p.celkem_s_dph))::numeric,2) castka,
+                   ROUND((SUM(p.mnozstvi))::numeric,2) mnozstvi, p.jednotka
             FROM polozky p
             JOIN faktury f ON f.id=p.faktura_id
             LEFT JOIN zbozi z ON z.id=p.zbozi_id
@@ -2175,8 +2175,8 @@ def export_polozky():
     with get_db() as conn:
         rows = conn.execute(f"""
             SELECT COALESCE(z.nazev_canonical, p.nazev), p.jednotka,
-                   ROUND(SUM(p.mnozstvi),3), ROUND(SUM(p.celkem_s_dph),2),
-                   ROUND(AVG(p.cena_za_jednotku_s_dph),4),
+                   ROUND((SUM(p.mnozstvi))::numeric,3), ROUND((SUM(p.celkem_s_dph))::numeric,2),
+                   ROUND((AVG(p.cena_za_jednotku_s_dph))::numeric,4),
                    COUNT(DISTINCT p.faktura_id),
                    STRING_AGG(DISTINCT f.dodavatel, ', ')
             FROM polozky p JOIN faktury f ON f.id=p.faktura_id
