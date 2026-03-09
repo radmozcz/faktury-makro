@@ -385,6 +385,7 @@ async function renderFaktury() {
         <option value="ceka">Čeká</option>
         <option value="zaplaceno">Zaplaceno</option>
         <option value="po_splatnosti">Po splatnosti</option>
+        <option value="duplikat">Duplikát</option>
       </select>
       <label>Od:</label><input type="date" id="fOd">
       <label>Do:</label><input type="date" id="fDo">
@@ -460,7 +461,14 @@ async function loadFaktury() {
       </tr></thead>
       <tbody>
         ${data.faktury.map(f => `
-          <tr class="faktura-row" data-id="${f.id}">
+          <tr class="faktura-row" data-id="${f.id}" style="${f.duplicita_id ? 'opacity:0.55' : ''}">
+            <td><span class="badge badge-zaplaceno" style="background:var(--green-pale)">${f.firma_zkratka}</span></td>
+            <td>${escHtml(f.dodavatel)}</td>
+            <td>${escHtml(f.cislo_faktury||"–")}${f.duplicita_id ? ` <span style="color:orange;font-size:.8em">⚠️ duplikát #${f.duplicita_id}</span>` : ''}</td>
+            <td>${czDate(f.datum_vystaveni)}</td>
+            <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
+            <td>${f.duplicita_id ? '<span class="badge" style="background:var(--orange-pale,#fff3cd);color:#856404">Duplikát</span>' : stavBadge(f.stav)}</td>
+          </tr>
             <td><span class="badge badge-zaplaceno" style="background:var(--green-pale)">${f.firma_zkratka}</span></td>
             <td>${escHtml(f.dodavatel)}</td>
             <td>${escHtml(f.cislo_faktury||"—")}</td>
