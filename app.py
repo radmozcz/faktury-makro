@@ -2110,6 +2110,40 @@ def uploaded_file(filename):
 init_db()
 migrate_db()
 
+
+@app.route("/api/oprav-duplicity", methods=["POST"])
+def api_oprav_duplicity():
+    """Jednorázový endpoint – doplní duplicita_id zpětně pro existující duplicitní faktury."""
+    try:
+        with get_db() as conn:
+            faktury = conn.execute(
+                "SELECT id, cislo_faktury, datum_vystaveni, celkem_s_dph FROM faktury ORDER BY id ASC"
+            ).fetchall()
+
+        opraveno = 0
+        with get_db() as conn:
+            for f in faktury:
+                # Hledáme starší fakturu se stejným VS + datum + částka
+                original = conn.execute(
+                    """SELECT id FROM faktury
+                       WHERE cislo_faktury = ? AND datum_vystaveni = ? AND celkem_s_dph = ?
+                       AND id < ? AND (duplicita_id IS NULL OR duplicita_id = 0)
+                       ORDER BY id ASC LIMIT 1""",
+                    (f["cislo_faktury"], f["datum_vystaveni"], f["celkem_s_dph"], f["id"])
+                ).fetchone()
+
+                if original:
+                    conn.execute(
+                        "UPDATE faktury SET duplicita_id = ? WHERE id = ? AND (duplicita_id IS NULL OR duplicita_id = 0)",
+                        (original["id"], f["id"])
+                    )
+                    opraveno += 1
+
+        return jsonify({"ok": True, "opraveno": opraveno})
+    except Exception as e:
+        return jsonify({"ok": False, "chyba": str(e)}), 500
+
+
 if __name__ == "__main__":
     print("=" * 55)
     print("  Správa faktur – spouštím server")
