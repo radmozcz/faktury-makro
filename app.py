@@ -882,7 +882,7 @@ def _map_unit(u):
 
 
 JMENA_MAP = {
-    "rada": "Radek", "radek": "Radek", "ráďa": "Radek", "radi": "Radek",
+    "rada": "Ráďa", "radek": "Ráďa", "ráďa": "Ráďa", "radi": "Ráďa",
     "verka": "Věrka", "vera": "Věrka", "věra": "Věrka", "věrka": "Věrka",
     "renča": "Renča", "renata": "Renča", "renca": "Renča",
     "vendy": "Vendy", "wendy": "Vendy",
@@ -955,13 +955,13 @@ PRAVIDLA PRO ČÍSLA:
 
 PRAVIDLA PRO JMÉNA (SMĚNA):
 - Jména jsou oddělena čárkou nebo mezerou
-- Ráďa, Rádá, Rada, Rado, Radek, Radu → "Radek"
+- Ráďa, Rádá, Rada, Rado, Radi → "Ráďa"
 - Věrka, Verka, Věra, Vera → "Věrka" — POUZE pokud jméno začíná VĚ nebo VE a druhé písmeno je E nebo Ě
 - Renča, Renata, Renca → "Renča"
 - Vendy, Wendy, Vendi, Vendu, Vendy → "Vendy" — jméno začíná VEN nebo WEN
 - Vali, Valy → "Vali"
 - KRITICKÉ: "VENDY" a "Věrka" jsou RŮZNÉ osoby! Pokud vidíš VEN → VENDY. Pokud vidíš VĚR nebo VER → Věrka.
-- Na směně mohou být najednou: Radek, Vendy, Vali, Věrka, Renča — přečti KAŽDÉ jméno samostatně
+- Na směně mohou být najednou: Ráďa, Vendy, Vali, Věrka, Renča — přečti KAŽDÉ jméno samostatně
 
 PRAVIDLA PRO DATUM:
 - Hledej datum ve formátu "D.M" nebo "D/M" nahoře na lístku
