@@ -260,6 +260,7 @@ def migrate_db():
             ("burtgulas","INTEGER DEFAULT 0"),("hotdog","INTEGER DEFAULT 0"),
             ("snidane","INTEGER DEFAULT 0"),("nakupy","INTEGER DEFAULT 0"),
             ("foto_cesta","TEXT"),("firma_zkratka","TEXT DEFAULT ''"),
+            ("duplicita_id","INTEGER DEFAULT NULL"),
         ]:
             if col not in existing:
                 try: conn.execute(f"ALTER TABLE reporty ADD COLUMN {col} {typ}")
@@ -1915,8 +1916,30 @@ def api_nahrat():
                 AND ABS(celkem_s_dph - ?) < 0.01
             """, (data["cislo_faktury"], "%MAKRO%", float(data.get("celkem_s_dph", 0)))).fetchone()
             if row:
+                dup_id = row["id"]
+                # Ulož fakturu jako duplikát
+                with get_db() as conn2:
+                    conn2.execute("""
+                        INSERT INTO faktury
+                          (firma_zkratka, dodavatel, cislo_faktury, datum_vystaveni,
+                           datum_splatnosti, zpusob_uhrady, stav, celkem_s_dph,
+                           soubor_cesta, zdroj, duplicita_id)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                    """, (
+                        data.get("firma_zkratka",""),
+                        data.get("dodavatel",""),
+                        data.get("cislo_faktury",""),
+                        data.get("datum_vystaveni",""),
+                        data.get("datum_splatnosti",""),
+                        data.get("zpusob_uhrady","Hotovost"),
+                        "duplikat",
+                        float(data.get("celkem_s_dph",0)),
+                        data.get("soubor_cesta",""),
+                        "makro",
+                        dup_id,
+                    ))
                 data["duplicita"] = {
-                    "id": row["id"],
+                    "id": dup_id,
                     "firma": row["firma_zkratka"],
                     "datum": row["datum_vystaveni"],
                     "celkem": row["celkem_s_dph"]
