@@ -1261,7 +1261,36 @@ function renderPolozkyTable() {
 
   const { col, asc } = App.polozkySort;
   const numCols = ["celkove_mnozstvi","celkem_utraceno","prumerna_cena","pocet_nakupu"];
-  const sorted = [...App.polozkyData].sort((a, b) => {
+
+  // Seskupit položky podle skupiny (alias)
+  const skupiny = {};
+  const bezSkupiny = [];
+  App.polozkyData.forEach(r => {
+    if (r.skupina) {
+      if (!skupiny[r.skupina]) skupiny[r.skupina] = [];
+      skupiny[r.skupina].push(r);
+    } else {
+      bezSkupiny.push(r);
+    }
+  });
+
+  // Vytvořit agregované řádky pro skupiny
+  const skupinyRows = Object.entries(skupiny).map(([nazev, items]) => ({
+    _skupina: true,
+    _items: items,
+    zbozi_nazev: nazev,
+    zbozi_id: null,
+    jednotka: items[0]?.jednotka || "",
+    celkove_mnozstvi: items.reduce((s,i) => s + parseFloat(i.celkove_mnozstvi||0), 0),
+    celkem_utraceno:  items.reduce((s,i) => s + parseFloat(i.celkem_utraceno||0), 0),
+    prumerna_cena:    items.reduce((s,i) => s + parseFloat(i.prumerna_cena||0), 0) / items.length,
+    pocet_nakupu:     items.reduce((s,i) => s + parseInt(i.pocet_nakupu||0), 0),
+    dodavatele:       [...new Set(items.flatMap(i => (i.dodavatele||"").split(", ")))].filter(Boolean).join(", "),
+    _pocet_polozek:   items.length,
+  }));
+
+  // Seřadit skupiny a položky bez skupiny zvlášť, skupiny vždy nahoře
+  const sortFn = (a, b) => {
     let va = a[col], vb = b[col];
     if (numCols.includes(col)) {
       va = parseFloat(va) || 0;
@@ -1273,11 +1302,50 @@ function renderPolozkyTable() {
     if (va < vb) return asc ? -1 : 1;
     if (va > vb) return asc ? 1 : -1;
     return 0;
-  });
+  };
+  skupinyRows.sort(sortFn);
+  bezSkupiny.sort(sortFn);
+  // Skupiny vždy nahoře, pak položky bez skupiny
+  const allRows = [...skupinyRows, ...bezSkupiny];
 
   const arrow = (c) => col === c ? (asc ? " ▲" : " ▼") : " ⇅";
   const th = (c, label) =>
     `<th style="cursor:pointer;user-select:none" onclick="sortPolozky('${c}')">${label}${arrow(c)}</th>`;
+
+  const renderRow = (r, indent) => {
+    if (r._skupina) {
+      return `
+        <tr class="zbozi-skupina" style="background:var(--green-pale);cursor:pointer" onclick="toggleSkupina('${escHtml(r.zbozi_nazev)}')">
+          <td><strong>📦 ${escHtml(r.zbozi_nazev)}</strong> <small style="color:var(--txt2)">(${r._pocet_polozek} položek)</small></td>
+          <td style="text-align:center">${r.pocet_nakupu}</td>
+          <td>${Number(r.celkove_mnozstvi).toLocaleString("cs-CZ")}</td>
+          <td>${r.jednotka}</td>
+          <td>${czMoney(r.prumerna_cena)}</td>
+          <td><strong>${czMoney(r.celkem_utraceno)}</strong></td>
+          <td style="font-size:.82rem;color:var(--txt2)">${escHtml(r.dodavatele||"")}</td>
+        </tr>
+        ${r._items.map(item => `
+        <tr class="zbozi-row zbozi-child-${escHtml(r.zbozi_nazev).replace(/\s+/g,'_')}" data-id="${item.zbozi_id||""}" data-nazev="${escHtml(item.zbozi_nazev)}" style="display:none">
+          <td style="padding-left:2rem;color:var(--txt2)">↳ ${escHtml(item.zbozi_nazev)}</td>
+          <td style="text-align:center">${item.pocet_nakupu}</td>
+          <td>${Number(item.celkove_mnozstvi).toLocaleString("cs-CZ")}</td>
+          <td>${item.jednotka}</td>
+          <td>${czMoney(item.prumerna_cena)}</td>
+          <td>${czMoney(item.celkem_utraceno)}</td>
+          <td style="font-size:.82rem;color:var(--txt2)">${escHtml(item.dodavatele||"")}</td>
+        </tr>`).join("")}`;
+    }
+    return `
+      <tr class="zbozi-row" data-id="${r.zbozi_id||""}" data-nazev="${escHtml(r.zbozi_nazev)}">
+        <td><strong>${escHtml(r.zbozi_nazev)}</strong></td>
+        <td style="text-align:center">${r.pocet_nakupu}</td>
+        <td>${Number(r.celkove_mnozstvi).toLocaleString("cs-CZ")}</td>
+        <td>${r.jednotka}</td>
+        <td>${czMoney(r.prumerna_cena)}</td>
+        <td><strong>${czMoney(r.celkem_utraceno)}</strong></td>
+        <td style="font-size:.82rem;color:var(--txt2)">${escHtml(r.dodavatele||"")}</td>
+      </tr>`;
+  };
 
   el.innerHTML = `
     <table>
@@ -1291,16 +1359,7 @@ function renderPolozkyTable() {
         <th>Dodavatelé</th>
       </tr></thead>
       <tbody>
-        ${sorted.map(r => `
-          <tr class="zbozi-row" data-id="${r.zbozi_id||""}" data-nazev="${escHtml(r.zbozi_nazev)}">
-            <td><strong>${escHtml(r.zbozi_nazev)}</strong></td>
-            <td style="text-align:center">${r.pocet_nakupu}</td>
-            <td>${Number(r.celkove_mnozstvi).toLocaleString("cs-CZ")}</td>
-            <td>${r.jednotka}</td>
-            <td>${czMoney(r.prumerna_cena)}</td>
-            <td><strong>${czMoney(r.celkem_utraceno)}</strong></td>
-            <td style="font-size:.82rem;color:var(--txt2)">${escHtml(r.dodavatele||"")}</td>
-          </tr>`).join("") ||
+        ${allRows.map(r => renderRow(r)).join("") ||
           "<tr><td colspan='7' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné položky</td></tr>"}
       </tbody>
     </table>`;
@@ -1309,6 +1368,13 @@ function renderPolozkyTable() {
     r.addEventListener("click", () => {
       if (r.dataset.id) openZboziDetail(r.dataset.id, r.dataset.nazev);
     });
+  });
+}
+
+function toggleSkupina(nazev) {
+  const cls = "zbozi-child-" + nazev.replace(/\s+/g, "_");
+  document.querySelectorAll("." + CSS.escape(cls)).forEach(tr => {
+    tr.style.display = tr.style.display === "none" ? "" : "none";
   });
 }
 
@@ -1698,9 +1764,11 @@ async function renderNastaveni() {
           <tbody>${icoRows}</tbody>
         </table>
       </div>
-      <button class="btn btn-primary" onclick="saveConfig()">💾 Uložit nastavení</button>
-      <button class="btn" style="background:var(--accent);color:#fff;margin-left:.5rem" onclick="opravDuplicity()">🔍 Zkontrolovat duplicity</button>
-      <button class="btn" style="background:#6c757d;color:#fff;margin-left:.5rem" onclick="normalizujNazvy()">🧹 Odstranit ARO/MC/FL prefixy</button>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-primary" onclick="saveConfig()">💾 Uložit nastavení</button>
+        <button class="btn" style="background:var(--accent);color:#fff" onclick="opravDuplicity()">🔍 Zkontrolovat duplicity</button>
+        <button class="btn" style="background:#6c757d;color:#fff" onclick="normalizujNazvy()">🧹 Odstranit ARO/MC/FL prefixy</button>
+      </div>
       <hr style="margin:1.5rem 0">
       <div style="border:1px solid #e55;border-radius:8px;padding:1rem;background:#fff5f5">
         <div style="font-weight:600;color:#c00;margin-bottom:.5rem">⚠️ Nebezpečná zóna</div>
