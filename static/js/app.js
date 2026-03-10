@@ -453,7 +453,8 @@ async function loadFaktury() {
   tbl.innerHTML = `
     <table>
       <thead><tr>
-        <th>Firma</th><th>Dodavatel</th>
+        ${thSort("firma_zkratka","Firma")}
+        ${thSort("dodavatel","Dodavatel")}
         ${thSort("cislo_faktury","Č. faktury")}
         ${thSort("datum_vystaveni","Vystavení")}
         ${thSort("celkem_s_dph","Celkem s DPH")}
@@ -513,7 +514,7 @@ async function openFakturaDetail(id) {
         </div>
       </div>
     </div>
-    ${f.soubor_cesta ? `<div style="margin-bottom:1rem"><a href="/uploads/${f.soubor_cesta}" target="_blank" class="btn btn-secondary btn-sm">📎 Zobrazit originál</a></div>` : ""}
+    ${(f.soubor_url || f.soubor_cesta) ? `<div style="margin-bottom:1rem"><a href="${f.soubor_url || '/uploads/' + f.soubor_cesta}" target="_blank" class="btn btn-secondary btn-sm">📎 Zobrazit originál</a></div>` : ""}
     <h4 style="font-family:var(--font-head);margin-bottom:.7rem">Položky</h4>
     <div class="table-wrap">
       <table>
@@ -741,6 +742,7 @@ async function hromadneNahrat(files) {
         stav:          'zaplaceno',
         celkem_s_dph:  data.celkem_s_dph || 0,
         soubor_cesta:  data.soubor_cesta || '',
+        soubor_url:    data.soubor_gcs_url || '',
         zdroj:         'makro',
         polozky:       data.polozky || []
       };
