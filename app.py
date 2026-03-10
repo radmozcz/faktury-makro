@@ -1237,6 +1237,8 @@ def api_config():
             cfg["terminal_od"] = {}
         from datetime import date as _date
         cfg["terminal_od"][firma] = _date.today().isoformat()
+        # Označit tuto firmu jako aktivní (ostatní deaktivovat)
+        cfg["terminal_aktivni"] = {f: (f == firma) for f in cfg.get("firmy", [])}
     save_config(cfg)
     return jsonify({"ok": True})
 
@@ -1270,12 +1272,14 @@ def api_karty_stats():
             """, (firma, od)).fetchone()
             mesicni = float((row2 or {}).get("total", 0))
 
+            aktivni = cfg.get("terminal_aktivni", {}).get(firma, False)
             result[firma] = {
                 "rocni": rocni,
                 "mesicni": mesicni,
                 "terminal_od": od,
                 "terminal_limit": terminal_limit,
                 "dph_limit": dph_limit,
+                "aktivni": aktivni,
             }
     return jsonify(result)
 
