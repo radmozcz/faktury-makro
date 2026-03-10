@@ -1188,10 +1188,16 @@ function renderPolozkyTable() {
   if (!el) return;
 
   const { col, asc } = App.polozkySort;
+  const numCols = ["celkove_mnozstvi","celkem_utraceno","prumerna_cena","pocet_nakupu"];
   const sorted = [...App.polozkyData].sort((a, b) => {
     let va = a[col], vb = b[col];
-    if (typeof va === "string") va = va.toLowerCase();
-    if (typeof vb === "string") vb = vb.toLowerCase();
+    if (numCols.includes(col)) {
+      va = parseFloat(va) || 0;
+      vb = parseFloat(vb) || 0;
+    } else {
+      if (typeof va === "string") va = va.toLowerCase();
+      if (typeof vb === "string") vb = vb.toLowerCase();
+    }
     if (va < vb) return asc ? -1 : 1;
     if (va > vb) return asc ? 1 : -1;
     return 0;
@@ -1254,13 +1260,13 @@ async function openZboziDetail(zbozi_id, nazev) {
         <thead><tr><th>Datum</th><th>Dodavatel</th><th>Firma</th><th>Množství</th><th>Cena/jedn.</th><th>Celkem</th></tr></thead>
         <tbody>
           ${data.nakupy.map(n => `
-            <tr>
+            <tr style="cursor:pointer" onclick="closeModal();openFakturaDetail(${n.faktura_id})" title="Zobrazit fakturu">
               <td>${czDate(n.datum_vystaveni)}</td>
               <td>${escHtml(n.dodavatel)}</td>
               <td>${n.firma_zkratka}</td>
               <td>${Number(n.mnozstvi).toLocaleString("cs-CZ")} ${n.jednotka}</td>
               <td>${czMoney(n.cena_za_jednotku_s_dph)}</td>
-              <td><strong>${czMoney(n.celkem_s_dph)}</strong></td>
+              <td><strong>${czMoney(n.celkem_s_dph)}</strong> <span style="color:var(--txt2);font-size:.8rem">→</span></td>
             </tr>`).join("") || "<tr><td colspan='6' style='text-align:center;color:var(--txt2)'>Žádné nákupy</td></tr>"}
         </tbody>
       </table>
