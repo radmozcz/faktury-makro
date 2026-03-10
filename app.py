@@ -2331,6 +2331,14 @@ init_db()
 migrate_db()
 
 
+@app.route("/api/smazat-vse-faktury", methods=["POST"])
+def api_smazat_vse_faktury():
+    with get_db() as conn:
+        conn.execute("DELETE FROM polozky")
+        cur = conn.execute("DELETE FROM faktury")
+        smazano = cur.rowcount if hasattr(cur, 'rowcount') else 0
+    return jsonify({"ok": True, "smazano": smazano})
+
 @app.route("/api/oprav-duplicity", methods=["POST"])
 def api_oprav_duplicity():
     """Jednorázový endpoint – doplní duplicita_id zpětně pro existující duplicitní faktury."""
