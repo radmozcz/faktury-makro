@@ -1372,14 +1372,36 @@ def api_faktura_delete(fid):
 def api_faktura_update(fid):
     data = request.json
     fields = ["firma_zkratka","dodavatel","cislo_faktury","datum_vystaveni",
-              "datum_splatnosti","zpusob_uhrady","stav"]
+              "datum_splatnosti","zpusob_uhrady","stav","celkem_s_dph"]
     set_parts = [f"{f}=?" for f in fields if f in data]
     vals = [data[f] for f in fields if f in data]
-    if not set_parts:
-        return jsonify({"ok": True})
-    vals.append(fid)
-    with get_db() as conn:
-        conn.execute(f"UPDATE faktury SET {','.join(set_parts)} WHERE id=?", vals)
+    if set_parts:
+        vals.append(fid)
+        with get_db() as conn:
+            conn.execute(f"UPDATE faktury SET {','.join(set_parts)} WHERE id=?", vals)
+
+    # Zpracovat položky pokud jsou v datech
+    polozky = data.get("polozky")
+    if polozky is not None:
+        with get_db() as conn:
+            # Smazat staré položky a vložit nové
+            conn.execute("DELETE FROM polozky WHERE faktura_id=?", (fid,))
+            for p in polozky:
+                nazev = (p.get("nazev") or "").strip()
+                if not nazev: continue
+                mnozstvi = float(p.get("mnozstvi") or 1)
+                celkem   = float(p.get("celkem_s_dph") or 0)
+                cena_j   = float(p.get("cena_za_jednotku_s_dph") or 0)
+                if cena_j == 0 and mnozstvi:
+                    cena_j = celkem / mnozstvi
+                jed = (p.get("jednotka") or "").strip()
+                zbozi_id = _get_or_create_zbozi(conn, nazev)
+                conn.execute("""
+                    INSERT INTO polozky (faktura_id, nazev, mnozstvi, jednotka,
+                        cena_za_jednotku_s_dph, celkem_s_dph, zbozi_id)
+                    VALUES (?,?,?,?,?,?,?)
+                """, (fid, nazev, mnozstvi, jed, round(cena_j,4), round(celkem,2), zbozi_id))
+            recalc_faktura_total(conn, fid)
     return jsonify({"ok": True})
 
 # ── API: výplaty ──────────────────────────────────────────────────────────────
@@ -2343,6 +2365,22 @@ def api_smazat_vse_faktury():
         cur = conn.execute("DELETE FROM faktury")
         smazano = cur.rowcount if hasattr(cur, 'rowcount') else 0
     return jsonify({"ok": True, "smazano": smazano})
+
+@app.route("/api/normalizuj-nazvy", methods=["POST"])
+def api_normalizuj_nazvy():
+    """Odstraní prefixy ARO, MC, FL z názvů položek a sjednotí zbozi."""
+    import re as _re
+    prefix_re = _re.compile(r'^(ARO|MC|FL)\s+', _re.IGNORECASE)
+    with get_db() as conn:
+        polozky = conn.execute("SELECT id, nazev FROM polozky").fetchall()
+        opraveno = 0
+        for p in polozky:
+            nazev = p["nazev"] or ""
+            novy = prefix_re.sub("", nazev).strip()
+            if novy != nazev:
+                conn.execute("UPDATE polozky SET nazev=? WHERE id=?", (novy, p["id"]))
+                opraveno += 1
+    return jsonify({"ok": True, "opraveno": opraveno})
 
 @app.route("/api/oprav-duplicity", methods=["POST"])
 def api_oprav_duplicity():
