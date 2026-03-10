@@ -2369,20 +2369,20 @@ def api_smazat_vse_faktury():
 
 @app.route("/api/normalizuj-nazvy", methods=["POST"])
 def api_normalizuj_nazvy():
-    """Odstraní prefixy ARO, MC, FL z názvů položek a sjednotí zbozi."""
+    """Odstraní prefixy ARO, MC, FL z nazev_canonical v tabulce zbozi.
+    Názvy položek na fakturách zůstanou nedotčeny."""
     import re as _re
     prefix_re = _re.compile(r'^(ARO|MC|FL)\s+', _re.IGNORECASE)
     with get_db() as conn:
-        polozky = conn.execute("SELECT id, nazev FROM polozky").fetchall()
+        zbozi = conn.execute("SELECT id, nazev_canonical FROM zbozi").fetchall()
         opraveno = 0
-        for p in polozky:
-            nazev = p["nazev"] or ""
+        for z in zbozi:
+            nazev = z["nazev_canonical"] or ""
             novy = prefix_re.sub("", nazev).strip()
             if novy != nazev:
-                conn.execute("UPDATE polozky SET nazev=? WHERE id=?", (novy, p["id"]))
+                conn.execute("UPDATE zbozi SET nazev_canonical=? WHERE id=?", (novy, z["id"]))
                 opraveno += 1
     return jsonify({"ok": True, "opraveno": opraveno})
-
 @app.route("/api/oprav-duplicity", methods=["POST"])
 def api_oprav_duplicity():
     """Jednorázový endpoint – doplní duplicita_id zpětně pro existující duplicitní faktury."""
