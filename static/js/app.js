@@ -1609,31 +1609,31 @@ function vyplataFormHtml(v = {}) {
   return `
     <div class="grid-2" style="gap:1rem">
       <div class="form-group"><label class="form-label">Firma</label>
-        <select id="vFirmaF" class="form-control">
+        <select id="fvFirma" class="form-control">
           <option value="">—</option>
           ${App.config.firmy.map(f=>`<option value="${f}" ${v.firma_zkratka===f?"selected":""}>${f}</option>`).join("")}
         </select>
       </div>
       <div class="form-group"><label class="form-label">Jméno *</label>
-        <input id="vJmeno" class="form-control" value="${escHtml(v.jmeno||"")}" placeholder="Jméno zaměstnance">
+        <input id="fvJmeno" class="form-control" value="${escHtml(v.jmeno||"")}" placeholder="Jméno zaměstnance">
       </div>
       <div class="form-group"><label class="form-label">Datum *</label>
-        <input type="date" id="vDatum" class="form-control" value="${v.datum||new Date().toISOString().split('T')[0]}">
+        <input type="date" id="fvDatum" class="form-control" value="${v.datum||new Date().toISOString().split('T')[0]}">
       </div>
       <div class="form-group"><label class="form-label">Částka (Kč) *</label>
-        <input type="number" step="0.01" id="vCastka" class="form-control" value="${v.castka||""}">
+        <input type="number" step="0.01" id="fvCastka" class="form-control" value="${v.castka||""}">
       </div>
     </div>
     <div class="grid-2" style="gap:1rem">
       <div class="form-group"><label class="form-label">Období od</label>
-        <input type="date" id="vObdobiOd" class="form-control" value="${v.obdobi_od||""}">
+        <input type="date" id="fvOd" class="form-control" value="${v.obdobi_od||""}">
       </div>
       <div class="form-group"><label class="form-label">Období do</label>
-        <input type="date" id="vObdobiDo" class="form-control" value="${v.obdobi_do||""}">
+        <input type="date" id="fvDo" class="form-control" value="${v.obdobi_do||""}">
       </div>
     </div>
     <div class="form-group"><label class="form-label">Poznámka</label>
-      <input id="vPoznamka" class="form-control" value="${escHtml(v.poznamka||"")}" placeholder="Volitelná poznámka">
+      <input id="fvPoznamka" class="form-control" value="${escHtml(v.poznamka||"")}" placeholder="Volitelná poznámka">
     </div>`;
 }
 
@@ -1654,9 +1654,9 @@ function editVyplata(id, jmeno, datum, castka, poznamka, firma_zkratka, obdobi_o
 }
 
 async function ulozitVyplatu() {
-  const jmeno  = document.getElementById("vJmeno").value.trim();
-  let datum    = document.getElementById("vDatum").value;
-  const castka = parseFloat(document.getElementById("vCastka").value);
+  const jmeno  = document.getElementById("fvJmeno").value.trim();
+  let datum    = document.getElementById("fvDatum").value;
+  const castka = parseFloat(document.getElementById("fvCastka").value);
   if (!jmeno || !datum || isNaN(castka)) { toast("Vyplnte jmeno, datum a castku", true); return; }
   if (/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(datum)) {
     const [d, m, y] = datum.split(".");
@@ -1667,10 +1667,10 @@ async function ulozitVyplatu() {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({
         jmeno, datum, castka,
-        poznamka: document.getElementById("vPoznamka").value,
-        firma_zkratka: document.getElementById("vFirmaF").value,
-        obdobi_od: document.getElementById("vObdobiOd").value || null,
-        obdobi_do: document.getElementById("vObdobiDo").value || null,
+        poznamka: document.getElementById("fvPoznamka").value,
+        firma_zkratka: document.getElementById("fvFirma").value,
+        obdobi_od: document.getElementById("fvOd").value || null,
+        obdobi_do: document.getElementById("fvDo").value || null,
       })
     });
     toast("Výplata uložena ✓");
@@ -1682,19 +1682,19 @@ async function ulozitVyplatu() {
 }
 
 async function ulozitVyplatuEdit(id) {
-  const jmeno  = document.getElementById("vJmeno").value.trim();
-  const datum  = document.getElementById("vDatum").value;
-  const castka = parseFloat(document.getElementById("vCastka").value);
+  const jmeno  = document.getElementById("fvJmeno").value.trim();
+  const datum  = document.getElementById("fvDatum").value;
+  const castka = parseFloat(document.getElementById("fvCastka").value);
   if (!jmeno || !datum || isNaN(castka)) { toast("Vyplňte jméno, datum a částku", true); return; }
 
   await api(`/api/vyplaty/${id}`, {
     method:"PUT", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({
       jmeno, datum, castka,
-      poznamka: document.getElementById("vPoznamka").value,
-      firma_zkratka: document.getElementById("vFirmaF").value,
-      obdobi_od: document.getElementById("vObdobiOd").value || null,
-      obdobi_do: document.getElementById("vObdobiDo").value || null,
+      poznamka: document.getElementById("fvPoznamka").value,
+      firma_zkratka: document.getElementById("fvFirma").value,
+      obdobi_od: document.getElementById("fvOd").value || null,
+      obdobi_do: document.getElementById("fvDo").value || null,
     })
   });
   toast("Výplata upravena ✓");
@@ -2012,8 +2012,11 @@ function renderKartaStatHtml(stats) {
     const rColor = rPct >= 100 ? "#ef4444" : rPct >= 75 ? "#f59e0b" : "#16a34a";
     const od = d.terminal_od ? new Date(d.terminal_od).toLocaleDateString("cs-CZ") : "—";
     return `
-      <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:1rem;flex:1;min-width:200px">
-        <div style="font-weight:700;font-size:1.1rem;margin-bottom:.6rem;font-family:var(--font-head)">${escHtml(firma)}</div>
+      <div style="background:var(--card-bg);border:${d.aktivni ? '2px solid #16a34a' : '1px solid var(--border)'};border-radius:10px;padding:1rem;flex:1;min-width:200px">
+        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem">
+          <span style="font-weight:700;font-size:1.1rem;font-family:var(--font-head)">${escHtml(firma)}</span>
+          ${d.aktivni ? '<span style="background:#16a34a;color:#fff;font-size:.7rem;padding:.1rem .5rem;border-radius:99px;font-weight:600">● AKTIVNÍ</span>' : '<span style="background:#9ca3af;color:#fff;font-size:.7rem;padding:.1rem .5rem;border-radius:99px">○ neaktivní</span>'}
+        </div>
         <div style="font-size:.8rem;color:var(--txt2);margin-bottom:.3rem">💳 Terminál od ${od}</div>
         <div style="display:flex;justify-content:space-between;font-size:.88rem;margin-bottom:.2rem">
           <span>Měsíční karty</span>
