@@ -1,2423 +1,2387 @@
-"""
-Aplikace pro správu přijatých faktur
-Spuštění: python app.py
-"""
+/**
+ * Správa faktur – hlavní JavaScript (SPA)
+ * Žádný framework, čistý vanilla JS
+ */
 
-import os
-import json
-import sqlite3
-try:
-    import psycopg2
-    import psycopg2.extras
-except ImportError:
-    psycopg2 = None
-import csv
-import io
-import re
-import base64
-import anthropic
+// ═══════════════════════════════════════════════════════════════
+//  Globální stav
+// ═══════════════════════════════════════════════════════════════
+const App = {
+  config: { firmy: [], app_nazev: "Správa faktur" },
+  currentPage: "dashboard",
+  chartInstances: {},
+  polozkyData: [],          // cache pro sortování
+  polozkySort: { col: "celkem_utraceno", asc: false },
+};
 
-# Google Cloud Storage
-try:
-    from google.cloud import storage as gcs_storage
-    from google.oauth2 import service_account
-    GCS_SUPPORT = True
-except ImportError:
-    GCS_SUPPORT = False
-    print("⚠  google-cloud-storage není nainstalován – GCS nebude fungovat")
-from datetime import datetime, date, timedelta
-from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, send_from_directory
-from werkzeug.utils import secure_filename
-import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment
+// ═══════════════════════════════════════════════════════════════
+//  Inicializace
+// ═══════════════════════════════════════════════════════════════
+document.addEventListener("DOMContentLoaded", async () => {
+  loadTheme();
+  showDate();
+  await loadConfig();
+  setupNav();
+  setupThemeSwitch();
+  setupMobileMenu();
+  navigateTo("dashboard");
+});
 
-try:
-    import pdfplumber
-    PDF_SUPPORT = True
-except ImportError:
-    PDF_SUPPORT = False
-    print("⚠  pdfplumber není nainstalován – PDF parsing nebude fungovat")
-
-try:
-    import pytesseract
-    from PIL import Image
-    import os as _os
-    _tess_path = r"C:\Program Files\Tesseract-OCR\	esseract.exe"
-    if _os.path.exists(_tess_path):
-        pytesseract.pytesseract.tesseract_cmd = _tess_path
-    OCR_SUPPORT = True
-except ImportError:
-    OCR_SUPPORT = False
-    print("⚠  pytesseract/Pillow není nainstalován – OCR obrázků nebude fungovat")
-
-BASE_DIR    = os.path.dirname(os.path.abspath(__file__))
-DB_PATH     = os.path.join(BASE_DIR, "faktury.db")
-UPLOAD_DIR  = os.path.join(BASE_DIR, "uploads")
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-ALLOWED_EXT = {"pdf", "png", "jpg", "jpeg", "tiff", "bmp"}
-
-os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-def get_gcs_client():
-    """Vrátí GCS bucket nebo None pokud není nakonfigurováno."""
-    if not GCS_SUPPORT:
-        return None
-    creds_json = os.environ.get("GCS_CREDENTIALS_JSON", "")
-    bucket_name = os.environ.get("GCS_BUCKET_NAME", "")
-    if not creds_json or not bucket_name:
-        return None
-    try:
-        creds_info = json.loads(creds_json)
-        creds = service_account.Credentials.from_service_account_info(creds_info)
-        client = gcs_storage.Client(credentials=creds, project=creds_info.get("project_id"))
-        return client.bucket(bucket_name)
-    except Exception as e:
-        print(f"⚠  GCS init error: {e}")
-        return None
-
-def upload_to_gcs(local_path, filename):
-    """Nahraje soubor do GCS a vrátí signed URL (platné 7 dní) nebo None."""
-    bucket = get_gcs_client()
-    if not bucket:
-        return None
-    try:
-        blob = bucket.blob(f"faktury/{filename}")
-        blob.upload_from_filename(local_path)
-        # Signed URL platné 7 dní
-        url = blob.generate_signed_url(
-            expiration=timedelta(days=7),
-            method="GET",
-            version="v4"
-        )
-        return url
-    except Exception as e:
-        print(f"⚠  GCS upload error: {e}")
-        return None
-
-def get_gcs_url(filename):
-    """Vrátí čerstvé signed URL pro existující soubor v GCS."""
-    bucket = get_gcs_client()
-    if not bucket:
-        return None
-    try:
-        blob = bucket.blob(f"faktury/{filename}")
-        if not blob.exists():
-            return None
-        return blob.generate_signed_url(
-            expiration=timedelta(days=7),
-            method="GET",
-            version="v4"
-        )
-    except Exception as e:
-        print(f"⚠  GCS url error: {e}")
-        return None
-
-app = Flask(__name__)
-app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
-
-DEFAULT_CONFIG = {
-    "firmy": ["FP", "MR", "CFF"],
-    "app_nazev": "Správa faktur",
-    "ico_map": {}
+async function loadConfig() {
+  const cfg = await api("/api/config");
+  App.config = cfg;
+  document.getElementById("appNazev").textContent = cfg.app_nazev;
+  document.title = cfg.app_nazev;
+  fillFirmaSelects();
 }
 
-def load_config():
-    if os.path.exists(CONFIG_PATH):
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return DEFAULT_CONFIG.copy()
-
-def save_config(cfg):
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
-
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
-_USE_PG = bool(DATABASE_URL)
-
-
-def _first_val(row):
-    """Vrátí první hodnotu z řádku – funguje pro dict (PG) i tuple/Row (SQLite)."""
-    if row is None:
-        return 0
-    if isinstance(row, dict):
-        v = list(row.values())[0]
-    else:
-        v = row[0]
-    return v if v is not None else 0
-
-
-class _PgCursor:
-    def __init__(self, cur, is_insert=False):
-        self._cur = cur
-        self._lastrowid = None
-        if is_insert:
-            try:
-                r = self._cur.fetchone()
-                self._lastrowid = r["id"] if r else None
-            except Exception:
-                self._lastrowid = None
-
-    def __iter__(self): return iter(self._cur)
-    def fetchall(self): return [dict(r) for r in self._cur.fetchall()]
-    def fetchone(self):
-        r = self._cur.fetchone()
-        return dict(r) if r else None
-
-    @property
-    def lastrowid(self):
-        return self._lastrowid
-
-    @property
-    def rowcount(self): return self._cur.rowcount
-
-class _PgConn:
-    def __init__(self, conn): self._conn = conn
-    def __enter__(self): return self
-    def __exit__(self, exc_type, *_):
-        if exc_type: self._conn.rollback()
-        else: self._conn.commit()
-        self._conn.close()
-    def commit(self): self._conn.commit()
-    def rollback(self): self._conn.rollback()
-    def close(self): self._conn.close()
-    @staticmethod
-    def _adapt(sql):
-        import re as _re
-        sql = sql.replace("INTEGER PRIMARY KEY AUTOINCREMENT", "SERIAL PRIMARY KEY")
-        sql = sql.replace("DEFAULT (datetime('now','localtime'))", "DEFAULT NOW()")
-        sql = sql.replace("datetime('now','localtime')", "NOW()")
-        sql = sql.replace("date('now','-12 months')", "(CURRENT_DATE - INTERVAL '12 months')")
-        sql = sql.replace("date('now')", "CURRENT_DATE::text")
-        # datum_vystaveni a datum jsou TEXT sloupce – při porovnání s datem je nutný cast
-        sql = _re.sub(r"\bdatum_vystaveni\b(\s*)(>=|<=|>|<)", r"datum_vystaveni::date\1\2", sql)
-        sql = _re.sub(r"\bdatum\b(\s*)(>=|<=|>|<)", r"datum::date\1\2", sql)
-        sql = _re.sub(r"strftime\('%Y',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'YYYY')", sql)
-        sql = _re.sub(r"strftime\('%m',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'MM')", sql)
-        sql = _re.sub(r"strftime\('%Y-%m',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'YYYY-MM')", sql)
-        return sql
-    def execute(self, sql, params=()):
-        if sql.strip().upper().startswith("PRAGMA"):
-            class _D:
-                lastrowid=None; rowcount=0
-                def fetchone(self): return None
-                def fetchall(self): return []
-                def __iter__(self): return iter([])
-            return _D()
-        sql = self._adapt(sql)
-        sql_pg = sql.replace("?", "%s")
-        cur = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-        is_insert = sql_pg.strip().upper().startswith("INSERT")
-        if is_insert and "RETURNING" not in sql_pg.upper():
-            sql_pg = sql_pg.rstrip().rstrip(";") + " RETURNING id"
-        cur.execute(sql_pg, params if params else None)
-        return _PgCursor(cur, is_insert=is_insert)
-    def executescript(self, sql):
-        sql = self._adapt(sql)
-        sql = sql.replace("PRAGMA journal_mode=WAL;", "").replace("PRAGMA foreign_keys=ON;", "")
-        cur = self._conn.cursor()
-        cur.execute(sql)
-        self._conn.commit()
-
-def get_db():
-    if _USE_PG:
-        conn = psycopg2.connect(DATABASE_URL)
-        conn.autocommit = False
-        return _PgConn(conn)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
-
-
-def init_db():
-    TABLES = [
-        ("zbozi", """CREATE TABLE IF NOT EXISTS zbozi (
-            id               SERIAL PRIMARY KEY,
-            nazev_canonical  TEXT    NOT NULL UNIQUE,
-            poznamka         TEXT
-        )"""),
-        ("zbozi_aliasy", """CREATE TABLE IF NOT EXISTS zbozi_aliasy (
-            id        SERIAL PRIMARY KEY,
-            zbozi_id  INTEGER NOT NULL REFERENCES zbozi(id) ON DELETE CASCADE,
-            alias     TEXT    NOT NULL UNIQUE
-        )"""),
-        ("faktury", """CREATE TABLE IF NOT EXISTS faktury (
-            id              SERIAL PRIMARY KEY,
-            firma_zkratka   TEXT    NOT NULL,
-            dodavatel       TEXT    NOT NULL,
-            cislo_faktury   TEXT,
-            datum_vystaveni TEXT,
-            datum_splatnosti TEXT,
-            zpusob_uhrady   TEXT,
-            stav            TEXT    DEFAULT 'ceka',
-            celkem_s_dph    REAL    DEFAULT 0,
-            soubor_cesta    TEXT,
-            soubor_url      TEXT,
-            zdroj           TEXT    DEFAULT 'rucni',
-            created_at      TEXT    DEFAULT NOW()
-        )"""),
-        ("polozky", """CREATE TABLE IF NOT EXISTS polozky (
-            id                    SERIAL PRIMARY KEY,
-            faktura_id            INTEGER NOT NULL REFERENCES faktury(id) ON DELETE CASCADE,
-            nazev                 TEXT    NOT NULL,
-            mnozstvi              REAL    DEFAULT 1,
-            jednotka              TEXT    DEFAULT 'ks',
-            cena_za_jednotku_s_dph REAL   DEFAULT 0,
-            celkem_s_dph          REAL    DEFAULT 0,
-            zbozi_id              INTEGER REFERENCES zbozi(id) ON DELETE SET NULL
-        )"""),
-        ("vyplaty", """CREATE TABLE IF NOT EXISTS vyplaty (
-            id          SERIAL PRIMARY KEY,
-            jmeno       TEXT    NOT NULL,
-            datum       TEXT    NOT NULL,
-            castka      REAL    NOT NULL DEFAULT 0,
-            poznamka    TEXT,
-            firma_zkratka TEXT  DEFAULT '',
-            created_at  TEXT    DEFAULT NOW()
-        )"""),
-        ("reporty", """CREATE TABLE IF NOT EXISTS reporty (
-            id            SERIAL PRIMARY KEY,
-            datum         TEXT    NOT NULL UNIQUE,
-            den           TEXT,
-            smena         TEXT,
-            karty         REAL    DEFAULT 0,
-            kov           REAL    DEFAULT 0,
-            papir         REAL    DEFAULT 0,
-            hotovost      REAL    DEFAULT 0,
-            vydaje        REAL    DEFAULT 0,
-            trzba         REAL    DEFAULT 0,
-            trzba_vcpk    REAL    DEFAULT 0,
-            pk50_ks       INTEGER DEFAULT 0,
-            pk100_ks      INTEGER DEFAULT 0,
-            pk_celkem     REAL    DEFAULT 0,
-            pizza_cela    INTEGER DEFAULT 0,
-            pizza_ctvrt   INTEGER DEFAULT 0,
-            burger        INTEGER DEFAULT 0,
-            talire        INTEGER DEFAULT 0,
-            burtgulas     INTEGER DEFAULT 0,
-            hotdog        INTEGER DEFAULT 0,
-            snidane       INTEGER DEFAULT 0,
-            nakupy        INTEGER DEFAULT 0,
-            foto_cesta    TEXT,
-            firma_zkratka TEXT    DEFAULT '',
-            poznamka      TEXT,
-            created_at    TEXT    DEFAULT NOW()
-        )"""),
-    ]
-    with get_db() as conn:
-        for name, sql in TABLES:
-            if not _USE_PG:
-                sql = sql.replace('SERIAL PRIMARY KEY', 'INTEGER PRIMARY KEY AUTOINCREMENT')
-                sql = sql.replace('DEFAULT NOW()', "DEFAULT (datetime('now','localtime'))")
-            conn.execute(sql)
-    print("init_db OK")
-
-
-def migrate_db():
-    # Migrace: obdobi_od, obdobi_do ve vyplatach
-    with get_db() as conn:
-        if _USE_PG:
-            cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='vyplaty'")
-            vypl_cols = [r["column_name"] for r in cur.fetchall()]
-        else:
-            vypl_cols = [row[1] for row in conn.execute("PRAGMA table_info(vyplaty)").fetchall()]
-        for col, typ in [("obdobi_od","TEXT"), ("obdobi_do","TEXT")]:
-            if col not in vypl_cols:
-                try: conn.execute(f"ALTER TABLE vyplaty ADD COLUMN {col} {typ}")
-                except Exception: pass
-
-    with get_db() as conn:
-        if _USE_PG:
-            cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='reporty'")
-            existing = [r["column_name"] for r in cur.fetchall()]
-        else:
-            existing = [row[1] for row in conn.execute("PRAGMA table_info(reporty)").fetchall()]
-        for col, typ in [
-            ("burtgulas","INTEGER DEFAULT 0"),("hotdog","INTEGER DEFAULT 0"),
-            ("snidane","INTEGER DEFAULT 0"),("nakupy","INTEGER DEFAULT 0"),
-            ("foto_cesta","TEXT"),("firma_zkratka","TEXT DEFAULT ''"),
-        ]:
-            if col not in existing:
-                try: conn.execute(f"ALTER TABLE reporty ADD COLUMN {col} {typ}")
-                except Exception: pass
-        if _USE_PG:
-            cur2 = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='faktury'")
-            fakt_cols = [r["column_name"] for r in cur2.fetchall()]
-        else:
-            fakt_cols = [row[1] for row in conn.execute("PRAGMA table_info(faktury)").fetchall()]
-        if "duplicita_id" not in fakt_cols:
-            try: conn.execute("ALTER TABLE faktury ADD COLUMN duplicita_id INTEGER")
-            except Exception: pass
-        if "soubor_url" not in fakt_cols:
-            try: conn.execute("ALTER TABLE faktury ADD COLUMN soubor_url TEXT")
-            except Exception: pass
-    print("migrate_db OK")
-
-
-def allowed_file(filename):
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
-
-def update_stav_po_splatnosti():
-    today = date.today().isoformat()
-    with get_db() as conn:
-        conn.execute("""
-            UPDATE faktury SET stav = 'po_splatnosti'
-            WHERE stav = 'ceka'
-              AND datum_splatnosti IS NOT NULL
-              AND datum_splatnosti < ?
-        """, (today,))
-
-def recalc_faktura_total(conn, faktura_id):
-    row = conn.execute("SELECT COALESCE(SUM(celkem_s_dph),0) as total FROM polozky WHERE faktura_id=?", (faktura_id,)).fetchone()
-    total = _first_val(row)
-    conn.execute("UPDATE faktury SET celkem_s_dph=? WHERE id=?", (total, faktura_id))
-
-
-# ── MAKRO parser ───────────────────────────────────────────────────────────────
-def parse_makro_pdf(filepath):
-    if not PDF_SUPPORT:
-        return None, "pdfplumber není nainstalován"
-
-    result = {
-        "cislo_faktury":   "",
-        "datum_vystaveni": "",
-        "datum_splatnosti":"",
-        "zpusob_uhrady":   "",
-        "dodavatel":       "MAKRO Cash & Carry ČR s.r.o.",
-        "celkem_s_dph":    0,
-        "polozky":         []
-    }
-
-    try:
-        from collections import defaultdict
-        import re as _re
-
-        all_items      = []
-        full_text_lines = []
-
-        with pdfplumber.open(filepath) as pdf:
-            first_text = pdf.pages[0].extract_text() or ""
-            first_despaced = _re.sub(r"(?<=\S) (?=\S)", "", first_text)
-            if "Súpistovaru" in first_despaced and "FAKTURA" not in first_despaced:
-                return None, "Tento soubor je 'Súpis tovaru' (interní doklad MAKRO) – není to daňová faktura. Soubor nebyl nahrán."
-
-            # Pokud PDF neobsahuje MAKRO text, předej rovnou Claude
-            makro_keywords = ["MAKRO", "makro", "Cash & Carry"]
-            if not any(kw in first_text for kw in makro_keywords):
-                return None, "Není MAKRO faktura"
-
-            for page in pdf.pages:
-                full_text_lines += (page.extract_text() or "").splitlines()
-                words = page.extract_words(x_tolerance=1, y_tolerance=2)
-
-                rows = defaultdict(list)
-                for w in words:
-                    y = round(w["top"] / 2) * 2
-                    rows[y].append(w)
-
-                for y, ws in sorted(rows.items()):
-                    ws = sorted(ws, key=lambda w: w["x0"])
-
-                    left_digits = "".join(
-                        w["text"] for w in ws
-                        if w["x0"] < 95 and len(w["text"]) == 1 and w["text"].isdigit()
-                    )
-                    if len(left_digits) < 6:
-                        left_tokens = "".join(
-                            w["text"] for w in ws if w["x0"] < 95
-                        ).replace("*", "").strip()
-                        if re.match(r"^\d{6,}", left_tokens):
-                            left_digits = left_tokens[:14]
-
-                    unit_chars = "".join(
-                        w["text"] for w in ws
-                        if 230 <= w["x0"] <= 275 and len(w["text"]) == 1
-                        and w["text"].upper() in "PCGKBSLXAW"
-                    ).upper()
-                    if   unit_chars.startswith("PC"): jed = "PC"
-                    elif unit_chars.startswith("KG"): jed = "KG"
-                    elif unit_chars.startswith("BG"): jed = "BG"
-                    elif unit_chars.startswith("BX"): jed = "BX"
-                    elif unit_chars.startswith("KS"): jed = "KS"
-                    elif unit_chars.startswith("CA"): jed = "CA"
-                    elif unit_chars.startswith("SW"): jed = "SW"
-                    elif unit_chars.startswith("WA"): jed = "SW"
-                    elif unit_chars.startswith("L"):  jed = "L"
-                    else:                              jed = ""
-
-                    all_text_j = "".join(w["text"] for w in ws).lower()
-                    is_sleva = "urcenopro" in all_text_j or "kupvice" in all_text_j or "kupvíce" in all_text_j
-                    if is_sleva and all_items:
-                        right_text = "".join(w["text"] for w in sorted(
-                            [w for w in ws if w["x0"] > 265], key=lambda w: w["x0"]
-                        ))
-                        neg = re.findall(r"-?(\d+,\d{2})", right_text)
-                        if neg:
-                            sleva = _parse_money(neg[-1])
-                            all_items[-1]["celkem_s_dph"] = round(max(0, all_items[-1]["celkem_s_dph"] - sleva), 2)
-                            mn = all_items[-1]["mnozstvi"]
-                            if mn:
-                                all_items[-1]["cena_za_jednotku_s_dph"] = round(all_items[-1]["celkem_s_dph"] / mn, 4)
-                        continue
-
-                    if len(left_digits) < 6 or not jed:
-                        continue
-
-                    nazev_ws = [w for w in ws if 90 <= w["x0"] <= 237]
-                    nazev = _rekonstruuj_nazev(nazev_ws)
-
-                    right_ws = sorted([w for w in ws if w["x0"] > 265], key=lambda w: w["x0"])
-                    cf = _makro_reconstruct_numbers(right_ws)
-
-                    if len(cf) < 2:
-                        continue
-
-                    idx_dph      = len(cf)
-                    idx_celkem_s = idx_dph - 1
-                    idx_pocet    = idx_dph - 3
-
-                    celkem_s_dph = cf[idx_celkem_s] if 0 <= idx_celkem_s < len(cf) else 0
-                    pocet        = cf[idx_pocet]    if 0 <= idx_pocet    < len(cf) else 1.0
-                    if pocet <= 0 or pocet > 10000:
-                        pocet = 1.0
-                    cena_j = round(celkem_s_dph / pocet, 4) if pocet else celkem_s_dph
-
-                    if not nazev or celkem_s_dph <= 0:
-                        continue
-
-                    all_items.append({
-                        "nazev":                  nazev,
-                        "mnozstvi":               pocet,
-                        "jednotka":               _map_unit(jed),
-                        "cena_za_jednotku_s_dph": cena_j,
-                        "celkem_s_dph":           round(celkem_s_dph, 2)
-                    })
-
-        result["polozky"] = all_items
-
-        def despace(s):
-            return re.sub(r"(?<=\S) (?=\S)", "", s)
-
-        ico_odberatele = ""
-        for line in full_text_lines:
-            dl = despace(line)
-            if not result["cislo_faktury"]:
-                m = re.search(r"Faktura.*?VS.*?:?\s*(\d{7,12})", dl, re.IGNORECASE)
-                if m: result["cislo_faktury"] = m.group(1)
-            if not result["cislo_faktury"]:
-                m = re.search(r"Súpistovaru\s*(\d{7,12})", dl, re.IGNORECASE)
-                if m: result["cislo_faktury"] = m.group(1)
-            if not result["cislo_faktury"]:
-                m = re.search(r"TechnickéID.*?/(\d{7,12})\)", dl, re.IGNORECASE)
-                if m: result["cislo_faktury"] = m.group(1)
-            if not ico_odberatele:
-                m = re.search(r"IČ\s*:\s*(\d{8})", dl)
-                if m: ico_odberatele = m.group(1)
-            if not result["datum_vystaveni"]:
-                m = re.search(r"vystavení.*?(\d{2}-\d{2}-\d{4})", dl, re.IGNORECASE)
-                if m: result["datum_vystaveni"] = _makro_date(m.group(1))
-            if not result["datum_splatnosti"]:
-                m = re.search(r"splatnosti.*?(\d{2}-\d{2}-\d{4})", dl, re.IGNORECASE)
-                if m: result["datum_splatnosti"] = _makro_date(m.group(1))
-            if not result["zpusob_uhrady"]:
-                m = re.search(r"Způsobúhrady:?\s*([A-Za-záéíóúýžšČřďťňÁÉÍÓÚÝŽŠČŘĎŤŇ]+(?:\s+[A-Za-záéíóúýžšČřďťňÁÉÍÓÚÝŽŠČŘĎŤŇ]+)?)", dl, re.IGNORECASE)
-                if m:
-                    u = m.group(1).strip()
-                    if u and u.lower() not in ("praha", "pruhonice", "chudenicka", ""):
-                        result["zpusob_uhrady"] = u
-
-            dl_line = despace(line)
-            if "Celkov" in dl_line and "stka" in dl_line:
-                nums = re.findall(r"(\d{1,3}(?:\s\d{3})*[,\.]\d{2})", line)
-                if nums:
-                    result["celkem_s_dph"] = _parse_money(nums[-1])
-
-        if result["celkem_s_dph"] == 0 and all_items:
-            result["celkem_s_dph"] = round(sum(p["celkem_s_dph"] for p in all_items), 2)
-
-        result["zpusob_uhrady"] = "Hotovost"
-        result["stav"] = "zaplaceno"
-        result["ico_odberatele"] = ico_odberatele
-        result["firma_zkratka"] = _ico_na_firmu(ico_odberatele)
-
-        for p in result["polozky"]:
-            p["nazev"] = _format_nazev(p["nazev"])
-
-    except Exception as e:
-        return None, str(e)
-
-    return result, None
-
-
-def _makro_reconstruct_numbers(ws_sorted):
-    if not ws_sorted:
-        return []
-    groups = []
-    current = [ws_sorted[0]]
-    for prev, curr in zip(ws_sorted, ws_sorted[1:]):
-        gap = curr["x0"] - prev["x0"] - 3.5
-        if gap > 8:
-            groups.append(current)
-            current = [curr]
-        else:
-            current.append(curr)
-    groups.append(current)
-
-    DPH_SAZBY = {6.0, 10.0, 15.0, 21.0, 23.0}
-
-    parsed = []
-    for g in groups:
-        token = "".join(w["text"] for w in g).replace(",", ".")
-        x0 = g[0]["x0"]
-        if re.match(r"^\d{5,}$", token):
-            continue
-        if re.match(r"^[A-Za-z]+$", token):
-            continue
-        try:
-            val = float(token)
-            parsed.append((x0, val))
-        except Exception:
-            pass
-
-    dph_idx = None
-    for i, (x0, val) in enumerate(parsed):
-        if val in DPH_SAZBY and val == int(val) and x0 > 480:
-            dph_idx = i
-            break
-
-    if dph_idx is not None:
-        parsed = parsed[:dph_idx]
-
-    return [val for _, val in parsed]
-
-
-def _rekonstruuj_nazev(nazev_ws):
-    if not nazev_ws:
-        return ""
-    result = ""
-    for i, w in enumerate(nazev_ws):
-        if i > 0:
-            gap = w["x0"] - nazev_ws[i-1]["x1"]
-            if gap > 3.5:
-                result += " "
-        result += w["text"]
-    result = re.sub(r" {2,}", " ", result)
-    return result.lstrip("*").strip()
-
-
-def _format_nazev(nazev):
-    result = re.sub(r"  +", " ", nazev).strip()
-    return result
-
-
-def _ico_na_firmu(ico):
-    try:
-        import json, os
-        cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
-        with open(cfg_path) as f:
-            cfg = json.load(f)
-        ico_map = cfg.get("ico_map", {})
-        return ico_map.get(ico, "")
-    except Exception:
-        return ""
-
-
-def _makro_date(s):
-    s = s.replace("-", ".")
-    try:
-        return datetime.strptime(s, "%d.%m.%Y").strftime("%Y-%m-%d")
-    except Exception:
-        return s
-
-
-def _parse_makro_items(lines):
-    return []
-
-
-def _ocr_best_orientation(img):
-    best_text = ""
-    best_score = 0
-    for angle in [0, 90, 180, 270]:
-        rotated = img.rotate(angle, expand=True) if angle else img
-        for lang in ["ces+eng", "ces", "eng"]:
-            try:
-                text = pytesseract.image_to_string(rotated, lang=lang, config="--psm 6 --oem 3")
-                score = sum(text.count(kw) for kw in [
-                    "MAKRO", "Faktura", "Datum", "DPH", "Kč", "PC", "KG", "BG",
-                    "splatnosti", "vystavení", "Food Plus", "Odběratel"
-                ])
-                if score > best_score:
-                    best_score = score
-                    best_text = text
-                break
-            except Exception:
-                continue
-    return best_text
-
-
-def parse_faktura_claude(filepath):
-    """Univerzální parser faktur a účtenek přes Claude API – funguje pro PDF i obrázky."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return None, "ANTHROPIC_API_KEY není nastaven"
-
-    try:
-        ext = filepath.rsplit(".", 1)[-1].lower()
-        with open(filepath, "rb") as f:
-            raw = f.read()
-        b64 = base64.standard_b64encode(raw).decode("utf-8")
-
-        if ext == "pdf":
-            media_type = "application/pdf"
-            source_type = "base64"
-            content_block = {
-                "type": "document",
-                "source": {"type": "base64", "media_type": media_type, "data": b64}
-            }
-        else:
-            media_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-                         "bmp": "image/bmp", "tiff": "image/tiff", "webp": "image/webp"}
-            media_type = media_map.get(ext, "image/jpeg")
-            content_block = {
-                "type": "image",
-                "source": {"type": "base64", "media_type": media_type, "data": b64}
-            }
-
-        prompt = """Jsi expert na čtení faktur a účtenek. Přečti tento doklad VELMI PEČLIVĚ.
-Odpověz POUZE platným JSON objektem, žádný jiný text, žádné backticky, žádné komentáře.
-
-Formát odpovědi:
-{
-  "dodavatel": "název dodavatele nebo obchodu",
-  "cislo_faktury": "číslo faktury nebo variabilní symbol nebo číslo účtenky, nebo null",
-  "datum_vystaveni": "YYYY-MM-DD nebo null",
-  "datum_splatnosti": "YYYY-MM-DD nebo null",
-  "zpusob_uhrady": "hotově/kartou/převodem nebo null",
-  "celkem_s_dph": číslo (celková částka včetně DPH),
-  "polozky": [
-    {
-      "nazev": "název položky",
-      "mnozstvi": číslo,
-      "jednotka": "ks/kg/l/...",
-      "cena_za_jednotku_s_dph": číslo,
-      "celkem_s_dph": číslo
-    }
-  ]
+function fillFirmaSelects() {
+  const selects = document.querySelectorAll(".firma-select, #globalFirmaFilter");
+  selects.forEach(sel => {
+    const val = sel.value;
+    sel.innerHTML = `<option value="">Všechny firmy</option>` +
+      App.config.firmy.map(f => `<option value="${f}">${f}</option>`).join("");
+    if (val) sel.value = val;
+  });
 }
 
-PRAVIDLA:
-- Všechny částky jsou v Kč, piš jen číslo bez symbolu Kč
-- Desetinná čárka nebo tečka = desetinné místo (475,55 = 475.55)
-- Pokud není datum splatnosti, vrať null
-- Pokud není číslo faktury/VS, vrať null
-- Způsob úhrady: pokud vidíš "karta", "card", "kartou" → "kartou"; "cash", "hotov" → "hotově"
-- Položky: zahrň všechny položky které vidíš na dokladu
-- celkem_s_dph u položky = množství × cena za jednotku
-"""
-
-        client = anthropic.Anthropic(api_key=api_key)
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            messages=[{
-                "role": "user",
-                "content": [content_block, {"type": "text", "text": prompt}]
-            }]
-        )
-
-        text = message.content[0].text.strip()
-        text = re.sub(r"^```json\s*", "", text)
-        text = re.sub(r"```$", "", text).strip()
-        parsed = json.loads(text)
-
-        # Normalizace výstupu
-        result = {
-            "dodavatel":        parsed.get("dodavatel", ""),
-            "cislo_faktury":    parsed.get("cislo_faktury") or "",
-            "datum_vystaveni":  parsed.get("datum_vystaveni") or "",
-            "datum_splatnosti": parsed.get("datum_splatnosti") or "",
-            "zpusob_uhrady":    parsed.get("zpusob_uhrady") or "",
-            "celkem_s_dph":     float(parsed.get("celkem_s_dph") or 0),
-            "polozky": [
-                {
-                    "nazev":                   p.get("nazev", ""),
-                    "mnozstvi":                float(p.get("mnozstvi", 1) or 1),
-                    "jednotka":                p.get("jednotka", "ks"),
-                    "cena_za_jednotku_s_dph":  float(p.get("cena_za_jednotku_s_dph", 0) or 0),
-                    "celkem_s_dph":            float(p.get("celkem_s_dph", 0) or 0),
-                }
-                for p in parsed.get("polozky", [])
-                if p.get("nazev", "").strip()
-            ]
-        }
-        return result, None
-
-    except Exception as e:
-        return None, str(e)
-
-
-def parse_makro_image(filepath):
-    if not OCR_SUPPORT:
-        return None, "pytesseract/Pillow není nainstalován"
-    try:
-        img = Image.open(filepath)
-        img = img.convert("L")
-        w, h = img.size
-        needs_rotation_check = (w > h * 1.2) or (h > w * 1.2)
-        if w < 1200:
-            scale = 1200 / w
-            img = img.resize((int(w*scale), int(h*scale)), Image.LANCZOS)
-
-        if needs_rotation_check:
-            text = _ocr_best_orientation(img)
-        else:
-            for lang in ["ces+eng", "ces", "eng"]:
-                try:
-                    text = pytesseract.image_to_string(img, lang=lang, config="--psm 6 --oem 3")
-                    break
-                except Exception:
-                    continue
-
-        lines = text.splitlines()
-        result = {
-            "cislo_faktury":   "",
-            "datum_vystaveni": "",
-            "datum_splatnosti":"",
-            "zpusob_uhrady":   "Hotovost",
-            "stav":            "zaplaceno",
-            "dodavatel":       "MAKRO Cash & Carry ČR s.r.o.",
-            "celkem_s_dph":    0,
-            "firma_zkratka":   "",
-            "polozky":         []
-        }
-
-        for line in lines:
-            ls = line.strip()
-            if not result["cislo_faktury"]:
-                m = re.search(r"Faktura.*?[Vv][Ss]\s*[;:,.]?\s*([\d\s]{7,15})", ls, re.IGNORECASE)
-                if m:
-                    vs = re.sub(r"\s+", "", m.group(1))[:12]
-                    if vs.isdigit() and len(vs) >= 7: result["cislo_faktury"] = vs
-            m = re.search(r"(\d{2})[.\-](\d{2})[.\-](\d{4})", ls)
-            if m:
-                den, mes, rok = m.group(1), m.group(2), m.group(3)
-                if int(mes) > 12:
-                    mes = mes.replace("8", "0")
-                try:
-                    from datetime import datetime
-                    datetime(int(rok), int(mes), int(den))
-                    d = f"{rok}-{mes}-{den}"
-                    if not result["datum_vystaveni"]: result["datum_vystaveni"] = d
-                    elif not result["datum_splatnosti"]: result["datum_splatnosti"] = d
-                except Exception:
-                    pass
-            if not result["zpusob_uhrady"] or result["zpusob_uhrady"] == "Hotovost":
-                if "Platba kartou" in ls or "platba kartou" in ls:
-                    result["zpusob_uhrady"] = "Platba kartou"
-            if not result["firma_zkratka"]:
-                m = re.search(r"IČ\s*:\s*(\d{8})", ls)
-                if m: result["firma_zkratka"] = _ico_na_firmu(m.group(1))
-            m = re.search(r"Celkov[aá]\s+[čc][aá]stka\s+([\d\s]{1,10}[,.]\d{2})", ls, re.IGNORECASE)
-            if m: result["celkem_s_dph"] = _parse_money(m.group(1))
-            m2 = re.search(r"[Ss]trana.{0,10}celkem.{0,10}bez.{0,5}DPH.{0,5}([\d\s]+[,.]\d{2})", ls, re.IGNORECASE)
-            if m2 and not result.get("ocr_strana_celkem_bez_dph"):
-                result["ocr_strana_celkem_bez_dph"] = _parse_money(m2.group(1))
-            m3 = re.search(r"celkem\s+bez\s+DPH\s+([\d\s]+[,.]\d{2})", ls, re.IGNORECASE)
-            if m3 and not result.get("ocr_strana_celkem_bez_dph"):
-                result["ocr_strana_celkem_bez_dph"] = _parse_money(m3.group(1))
-
-        result["polozky"] = _parse_ocr_items(lines)
-        suma_polozek = round(sum(p["celkem_s_dph"] for p in result["polozky"]), 2)
-        if result["celkem_s_dph"] == 0:
-            result["celkem_s_dph"] = suma_polozek
-
-        ocr_bez = result.get("ocr_strana_celkem_bez_dph", 0)
-        podezrele = [i for i, p in enumerate(result["polozky"])
-                     if p["celkem_s_dph"] == 0 or p["mnozstvi"] > 500]
-        result["ocr_kontrola"] = {
-            "suma_polozek": suma_polozek,
-            "ocr_bez_dph": ocr_bez,
-            "ma_celkem": ocr_bez > 0,
-            "podezrele_indexy": podezrele,
-        }
-
-        return result, None
-    except Exception as e:
-        return None, str(e)
-
-
-def _parse_ocr_items(lines):
-    items = []
-    sleva_kw = ["urceno pro konecnou", "určeno pro konečnou", "kup vice", "kup více"]
-    jednotky = {"PC", "KG", "BG", "KS", "BX", "CA", "SW", "BT",
-                "B6", "86", "PG", "6G", "BQ", "BC", "2B", "CA"}
-    jednotka_map = {"B6": "BG", "86": "BG", "PG": "PC", "6G": "BG",
-                    "BQ": "BG", "BC": "BX", "2B": "BG"}
-
-    for line in lines:
-        ls = line.strip()
-        if not ls: continue
-        ll = ls.lower()
-
-        is_sleva = any(kw in ll for kw in sleva_kw)
-        if is_sleva and items:
-            nums = re.findall(r"-\s*(\d[\d\s]*[,.]\d{2})", ls)
-            if nums:
-                sleva = _parse_money(nums[-1])
-                items[-1]["celkem_s_dph"] = round(max(0, items[-1]["celkem_s_dph"] - sleva), 2)
-                mn = items[-1]["mnozstvi"]
-                if mn: items[-1]["cena_za_jednotku_s_dph"] = round(items[-1]["celkem_s_dph"] / mn, 4)
-            continue
-
-        ls_clean = re.sub(r"^[Ss|lIG]+(?=\d)", "", ls)
-        ls_clean = re.sub(r"^[|l]\s+", "", ls_clean)
-        m = re.match(r"^(\d{6,14})\s+[\*\-—–|]*\s*(.+)", ls_clean)
-        if not m: continue
-
-        rest_after_mm = m.group(2).strip().lstrip("*").strip()
-
-        jednotka = ""
-        nazev = rest_after_mm
-        cisla_str = ""
-
-        for jed in jednotky:
-            pat = r"^(.+?)\s+" + jed + r"\s+(.+)$"
-            mj = re.match(pat, rest_after_mm, re.IGNORECASE)
-            if mj:
-                nazev    = mj.group(1).strip().rstrip("*").strip()
-                jednotka = jednotka_map.get(jed, jed)
-                cisla_str = mj.group(2)
-                break
-
-        if not jednotka:
-            mj = re.search(r"\s(PC|KG|BG|KS|BX|CA|SW|BT)\s", rest_after_mm, re.IGNORECASE)
-            if mj:
-                jednotka = mj.group(1).upper()
-                nazev    = rest_after_mm[:mj.start()].strip().rstrip("*")
-                cisla_str = rest_after_mm[mj.end():]
-
-        if not cisla_str:
-            cisla_str = rest_after_mm
-
-        cisla_str = re.sub(r"(\d+)[,\.](\s+)(\d+)", r"\1.\3", cisla_str)
-        cisla_raw = re.findall(r"\d+[,.]\d+|\d+", cisla_str)
-        cf = []
-        for c in cisla_raw:
-            try:
-                val = float(c.replace(",", "."))
-                if val == int(val) and val >= 10000:
-                    continue
-                cf.append(val)
-            except:
-                pass
-
-        if len(cf) < 2: continue
-
-        idx_dph = None
-        for i in range(len(cf)-1, -1, -1):
-            if cf[i] in (6.0, 10.0, 15.0, 23.0):
-                idx_dph = i
-                break
-        if idx_dph is None: idx_dph = len(cf)
-
-        if (idx_dph >= 2 and
-                cf[idx_dph-1] >= 100 and
-                cf[idx_dph-2] == int(cf[idx_dph-2]) and
-                1 <= cf[idx_dph-2] <= 9):
-            celkem = round(cf[idx_dph-2] * 1000 + cf[idx_dph-1], 2)
-            pocet  = cf[idx_dph-5] if idx_dph >= 5 else 1.0
-        else:
-            celkem = cf[idx_dph-1] if idx_dph >= 1 else 0
-            pocet  = cf[idx_dph-3] if idx_dph >= 3 else 1.0
-
-        if pocet <= 0 or pocet > 10000: pocet = 1.0
-        cena_j = round(celkem / pocet, 4) if pocet else celkem
-
-        nazev = re.sub(r"^[|\-—–\s]+", "", nazev).strip()
-        if not nazev or celkem <= 0: continue
-
-        items.append({
-            "nazev":                  _format_nazev(nazev),
-            "mnozstvi":               pocet,
-            "jednotka":               _map_unit(jednotka) if jednotka else "ks",
-            "cena_za_jednotku_s_dph": cena_j,
-            "celkem_s_dph":           round(celkem, 2)
-        })
-    return items
-
-
-def _cz_date(s):
-    try:
-        return datetime.strptime(s, "%d.%m.%Y").strftime("%Y-%m-%d")
-    except Exception:
-        return s
-
-def _parse_money(s):
-    s = str(s).replace(" ", "").replace(".", "").replace(",", ".")
-    try:
-        return float(s)
-    except Exception:
-        return 0.0
-
-def _map_unit(u):
-    mapping = {"PC": "ks", "KS": "ks", "KG": "kg", "BG": "bal", "BX": "bal", "CA": "bal", "SW": "bal", "L": "l"}
-    return mapping.get(u.upper(), u.lower())
-
-
-JMENA_MAP = {
-    "rada": "Ráďa", "radek": "Ráďa", "ráďa": "Ráďa", "radi": "Ráďa",
-    "verka": "Věrka", "vera": "Věrka", "věra": "Věrka", "věrka": "Věrka",
-    "renča": "Renča", "renata": "Renča", "renca": "Renča",
-    "vendy": "Vendy", "wendy": "Vendy",
-    "vali": "Vali",
+// ═══════════════════════════════════════════════════════════════
+//  Navigace
+// ═══════════════════════════════════════════════════════════════
+function setupNav() {
+  document.querySelectorAll(".nav-item").forEach(a => {
+    a.addEventListener("click", e => {
+      e.preventDefault();
+      navigateTo(a.dataset.page);
+      document.getElementById("sidebar").classList.remove("open");
+    });
+  });
 }
 
-def normalize_jmena(text):
-    if not text:
-        return ""
-    parts = re.split(r"[,/\s]+", text.strip())
-    result = []
-    for p in parts:
-        p = p.strip().lower().rstrip(".,")
-        if not p:
-            continue
-        canonical = JMENA_MAP.get(p, p.capitalize())
-        result.append(canonical)
-    return ", ".join(result)
-
-
-def parse_report_image_claude(filepath):
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return None, "ANTHROPIC_API_KEY není nastaven"
-
-    try:
-        with open(filepath, "rb") as f:
-            img_data = base64.standard_b64encode(f.read()).decode("utf-8")
-
-        ext = filepath.rsplit(".", 1)[-1].lower()
-        media_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-                     "bmp": "image/bmp", "tiff": "image/tiff"}
-        media_type = media_map.get(ext, "image/jpeg")
-
-        client = anthropic.Anthropic(api_key=api_key)
-
-        _t = date.today()
-        today = f"{_t.day}.{_t.month}"
-        prompt = f"""Jsi expert na čtení ručně psaných restauračních reportů. Přečti tento denní report VELMI PEČLIVĚ.
-Odpověz POUZE platným JSON objektem, žádný jiný text, žádné backticky.
-
-Formát odpovědi:
-{{
-  "datum": "D.M" nebo null,
-  "den": "název dne česky" nebo null,
-  "smena": "jména oddělená čárkou" nebo null,
-  "karty": číslo nebo 0,
-  "kov": číslo nebo 0,
-  "papir": číslo nebo 0,
-  "vydaje": číslo nebo 0,
-  "pk50_ks": celé číslo nebo 0,
-  "pk100_ks": celé číslo nebo 0,
-  "pizza_cela": celé číslo nebo 0,
-  "pizza_ctvrt": celé číslo nebo 0,
-  "burger": celé číslo nebo 0,
-  "talire": celé číslo nebo 0,
-  "burtgulas": celé číslo nebo 0
-}}
-
-PRAVIDLA PRO ČÍSLA:
-- Tečka nebo čárka UVNITŘ čísla = VŽDY oddělovač tisíců, NIKDY desetinná čárka
-- Příklady: 6.888 = 6888, 6.600 = 6600, 13.541 = 13541, 5.100 = 5100
-- Čísla zapisuj jako celá čísla bez teček a čárek
-- Pomlčka nebo lomítko za číslem (6.888,- nebo 6.888/) = ignoruj, je to jen styl zápisu
-- Číslo před "x" nebo "X" = počet kusů (6x = 6, 5X = 5) — "x" NENÍ číslice!
-- PK zápis: "6x/600" nebo "6x 100" znamená 6 kusů poukazek — zapiš jako pk50_ks nebo pk100_ks podle hodnoty
-- POZOR na záměnu číslic: "5" a "3" jsou si podobné při ručním psaní — čti kontext (53 je reálná hodnota KOV)
-- Pokud číslo vypadá jako "33" ale kontext říká KOV nebo KARTY → přečti znovu, může být "53" nebo "83"
-- BURGER: hledej slovo BURGER nebo BURGR na reportu a číslo za ním nebo před ním — nezapisuj 0 pokud tam číslo je
-
-PRAVIDLA PRO JMÉNA (SMĚNA):
-- Jména jsou oddělena čárkou nebo mezerou
-- Ráďa, Rádá, Rada, Rado, Radi → "Ráďa"
-- Věrka, Verka, Věra, Vera → "Věrka" — POUZE pokud jméno začíná VĚ nebo VE a druhé písmeno je E nebo Ě
-- Renča, Renata, Renca → "Renča"
-- Vendy, Wendy, Vendi, Vendu, Vendy → "Vendy" — jméno začíná VEN nebo WEN
-- Vali, Valy → "Vali"
-- KRITICKÉ: "VENDY" a "Věrka" jsou RŮZNÉ osoby! Pokud vidíš VEN → VENDY. Pokud vidíš VĚR nebo VER → Věrka.
-- Na směně mohou být najednou: Ráďa, Vendy, Vali, Věrka, Renča — přečti KAŽDÉ jméno samostatně
-
-PRAVIDLA PRO DATUM:
-- Hledej datum ve formátu "D.M" nebo "D/M" nahoře na lístku
-- Pokud chybí, vrať dnešní datum: "{today}"
-
-PRAVIDLA PRO PIZZU A BURGERY:
-- "CELÁ" nebo "CELÉ" u pizzy = pizza_cela
-- "ČTVRT" nebo "1/4" u pizzy = pizza_ctvrt  
-- Číslo za názvem s "x" = počet kusů (5x = 5)
-- BURTGULÁŠ, BURTGULAS, BURGULÁŠ → burtgulas
-- BURGER, BURGR → burger
-- TALÍŘ, TALIRE, POČET TALÍŘŮ → talire
-"""
-
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1000,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": img_data
-                        }
-                    },
-                    {"type": "text", "text": prompt}
-                ]
-            }]
-        )
-
-        text = message.content[0].text.strip()
-        text = re.sub(r"^```json\s*", "", text)
-        text = re.sub(r"```$", "", text).strip()
-
-        parsed = json.loads(text)
-        return parsed, None
-
-    except Exception as e:
-        return None, str(e)
-
-
-def parse_report_text(text):
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return None, "ANTHROPIC_API_KEY není nastaven"
-
-    try:
-        client = anthropic.Anthropic(api_key=api_key)
-
-        prompt = f"""Přečti tento text denního reportu z restaurace a extrahuj údaje.
-Odpověz POUZE platným JSON objektem, žádný jiný text.
-
-Text reportu:
-{text}
-
-Formát odpovědi:
-{{
-  "datum": "DD.M" nebo null,
-  "den": "název dne česky" nebo null,
-  "smena": "jména oddělená čárkou" nebo null,
-  "karty": číslo nebo 0,
-  "kov": číslo nebo 0,
-  "papir": číslo nebo 0,
-  "vydaje": číslo nebo 0,
-  "trzba": číslo nebo 0,
-  "pk50_ks": počet kusů PK50 nebo 0,
-  "pk100_ks": počet kusů PK100 nebo 0,
-  "pizza_cela": číslo nebo 0,
-  "pizza_ctvrt": číslo nebo 0,
-  "burger": číslo nebo 0,
-  "talire": číslo nebo 0,
-  "burtgulas": číslo nebo 0
-}}
-"""
-
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1000,
-            messages=[{"role": "user", "content": prompt}]
-        )
-
-        text_resp = message.content[0].text.strip()
-        text_resp = re.sub(r"^```json\s*", "", text_resp)
-        text_resp = re.sub(r"```$", "", text_resp).strip()
-        parsed = json.loads(text_resp)
-        return parsed, None
-
-    except Exception as e:
-        return None, str(e)
-
-
-def datum_to_iso(datum_str, year=None):
-    if not datum_str:
-        return None
-    datum_str = str(datum_str).strip()
-    for sep in ["/", ".", "-"]:
-        parts = datum_str.split(sep)
-        if len(parts) == 2:
-            try:
-                d, m = int(parts[0]), int(parts[1])
-                if year is None:
-                    year = date.today().year
-                return date(year, m, d).isoformat()
-            except Exception:
-                pass
-    return None
-
-
-def build_report_from_parsed(parsed, year=None):
-    datum_iso = datum_to_iso(parsed.get("datum"), year)
-
-    karty   = float(parsed.get("karty", 0) or 0)
-    kov     = float(parsed.get("kov", 0) or 0)
-    papir   = float(parsed.get("papir", 0) or 0)
-    vydaje  = float(parsed.get("vydaje", 0) or 0)
-    hotovost = kov + papir
-    trzba    = karty + hotovost + vydaje
-
-    pk50_ks  = int(parsed.get("pk50_ks", 0) or 0)
-    pk100_ks = int(parsed.get("pk100_ks", 0) or 0)
-    pk_celkem = pk50_ks * 50 + pk100_ks * 100
-    trzba_vcpk = trzba + pk_celkem
-
-    if parsed.get("trzba") and float(parsed.get("trzba")) > 0:
-        trzba = float(parsed["trzba"])
-        trzba_vcpk = trzba + pk_celkem
-
-    smena = normalize_jmena(parsed.get("smena", ""))
-
-    return {
-        "datum":       datum_iso,
-        "den":         parsed.get("den", ""),
-        "smena":       smena,
-        "karty":       karty,
-        "kov":         kov,
-        "papir":       papir,
-        "hotovost":    hotovost,
-        "vydaje":      vydaje,
-        "trzba":       trzba,
-        "trzba_vcpk":  trzba_vcpk,
-        "pk50_ks":     pk50_ks,
-        "pk100_ks":    pk100_ks,
-        "pk_celkem":   pk_celkem,
-        "pizza_cela":  int(parsed.get("pizza_cela", 0) or 0),
-        "pizza_ctvrt": int(parsed.get("pizza_ctvrt", 0) or 0),
-        "burger":      int(parsed.get("burger", 0) or 0),
-        "talire":      int(parsed.get("talire", 0) or 0),
-        "burtgulas":   int(parsed.get("burtgulas", 0) or 0),
-    }
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  ROUTES
-# ═══════════════════════════════════════════════════════════════════════════════
-
-@app.route("/")
-def index():
-    update_stav_po_splatnosti()
-    return render_template("index.html", config=load_config())
-
-@app.route("/api/config", methods=["GET", "POST"])
-def api_config():
-    if request.method == "GET":
-        return jsonify(load_config())
-    data = request.json
-    cfg = load_config()
-    if "firmy" in data:
-        cfg["firmy"] = [f.strip().upper() for f in data["firmy"] if f.strip()]
-    if "ico_map" in data:
-        cfg["ico_map"] = data["ico_map"]
-    if "app_nazev" in data:
-        cfg["app_nazev"] = data["app_nazev"]
-    save_config(cfg)
-    return jsonify({"ok": True})
-
-@app.route("/api/dashboard")
-def api_dashboard():
-    update_stav_po_splatnosti()
-    firma = request.args.get("firma", "")
-    with get_db() as conn:
-        mesic = date.today().strftime("%Y-%m")
-        where_firma = "AND firma_zkratka=?" if firma else ""
-        params_base = (firma,) if firma else ()
-
-        # ── OPRAVA: pojmenované sloupce místo indexů [0],[1]
-        # ── OPRAVA2: PostgreSQL potřebuje cast pro LIKE na textovém sloupci
-        like_cond = "AND datum_vystaveni::text LIKE ?" if _USE_PG else "AND datum_vystaveni LIKE ?"
-        row = conn.execute(f"""
-            SELECT COUNT(*) as pocet, COALESCE(SUM(celkem_s_dph),0) as vydaje
-            FROM faktury
-            WHERE 1=1 {like_cond} {where_firma}
-        """, (mesic + "%",) + params_base).fetchone()
-        pocet_mesic  = row["pocet"]  if isinstance(row, dict) else row[0]
-        vydaje_mesic = row["vydaje"] if isinstance(row, dict) else row[1]
-
-        row2 = conn.execute(f"""
-            SELECT COUNT(*) as pocet, COALESCE(SUM(celkem_s_dph),0) as castka
-            FROM faktury WHERE stav='po_splatnosti' {where_firma}
-        """, params_base).fetchone()
-        pocet_po_spl  = row2["pocet"]  if isinstance(row2, dict) else row2[0]
-        castka_po_spl = row2["castka"] if isinstance(row2, dict) else row2[1]
-
-        datum_filter = "AND datum_vystaveni::date >= CURRENT_DATE - INTERVAL '12 months'" if _USE_PG else "AND datum_vystaveni >= date('now','-12 months')"
-        graf = conn.execute(f"""
-            SELECT strftime('%Y-%m', datum_vystaveni) as m, COALESCE(SUM(celkem_s_dph),0) as castka
-            FROM faktury
-            WHERE datum_vystaveni IS NOT NULL AND datum_vystaveni != '' {datum_filter} {where_firma}
-            GROUP BY m ORDER BY m
-        """, params_base).fetchall()
-
-        posledni = conn.execute(f"""
-            SELECT id, dodavatel, cislo_faktury, firma_zkratka, datum_vystaveni,
-                   datum_splatnosti, celkem_s_dph, stav
-            FROM faktury {('WHERE firma_zkratka=?' if firma else '')}
-            ORDER BY created_at DESC LIMIT 5
-        """, params_base).fetchall()
-
-        karty_row = conn.execute("""
-            SELECT COALESCE(SUM(karty),0) as karty
-            FROM reporty
-            WHERE datum >= date('now','-12 months')
-        """).fetchone()
-        karty_12m = karty_row["karty"] if isinstance(karty_row, dict) else karty_row[0]
-
-    def graf_row(r):
-        if isinstance(r, dict):
-            return {"mesic": r["m"], "castka": round(r["castka"], 2)}
-        return {"mesic": r[0], "castka": round(r[1], 2)}
-
-    return jsonify({
-        "vydaje_mesic": round(vydaje_mesic, 2),
-        "pocet_mesic": pocet_mesic,
-        "pocet_po_splatnosti": pocet_po_spl,
-        "castka_po_splatnosti": round(castka_po_spl, 2),
-        "graf": [graf_row(r) for r in graf],
-        "posledni_faktury": [dict(r) for r in posledni],
-        "karty_12m": round(karty_12m, 2),
-        "karty_limit": 1500000,
-    })
-
-@app.route("/api/faktury")
-def api_faktury():
-    firma   = request.args.get("firma", "")
-    stav    = request.args.get("stav", "")
-    od      = request.args.get("od", "")
-    do_     = request.args.get("do", "")
-    hledat  = request.args.get("q", "")
-
-    clauses = []
-    params  = []
-    if firma:
-        clauses.append("firma_zkratka=?"); params.append(firma)
-    if stav:
-        clauses.append("stav=?"); params.append(stav)
-    if od:
-        clauses.append("datum_vystaveni>=?"); params.append(od)
-    if do_:
-        clauses.append("datum_vystaveni<=?"); params.append(do_)
-    if hledat:
-        clauses.append("(dodavatel LIKE ? OR cislo_faktury LIKE ?)")
-        params += [f"%{hledat}%", f"%{hledat}%"]
-
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-
-    with get_db() as conn:
-        rows = conn.execute(f"""
-            SELECT id, firma_zkratka, dodavatel, cislo_faktury,
-                   datum_vystaveni, datum_splatnosti, celkem_s_dph, stav, zdroj, duplicita_id
-            FROM faktury {where}
-            ORDER BY datum_vystaveni DESC, created_at DESC
-        """, params).fetchall()
-        total_row = conn.execute(f"SELECT COALESCE(SUM(celkem_s_dph),0) as total FROM faktury {where}", params).fetchone()
-        total = _first_val(total_row)
-
-    return jsonify({
-        "faktury": [dict(r) for r in rows],
-        "celkem": round(total, 2)
-    })
-
-@app.route("/api/faktury/<int:fid>")
-def api_faktura_detail(fid):
-    with get_db() as conn:
-        f = conn.execute("SELECT * FROM faktury WHERE id=?", (fid,)).fetchone()
-        if not f:
-            return jsonify({"error": "Nenalezeno"}), 404
-        polozky = conn.execute("""
-            SELECT p.*, z.nazev_canonical as zbozi_nazev
-            FROM polozky p
-            LEFT JOIN zbozi z ON z.id = p.zbozi_id
-            WHERE p.faktura_id=?
-        """, (fid,)).fetchall()
-    faktura_dict = dict(f)
-    # Pokud nemáme uloženou URL, vygeneruj čerstvou GCS URL
-    if not faktura_dict.get("soubor_url") and faktura_dict.get("soubor_cesta"):
-        gcs_url = get_gcs_url(faktura_dict["soubor_cesta"])
-        if gcs_url:
-            faktura_dict["soubor_url"] = gcs_url
-    return jsonify({"faktura": faktura_dict, "polozky": [dict(p) for p in polozky]})
-
-@app.route("/api/faktury/<int:fid>/stav", methods=["POST"])
-def api_faktura_stav(fid):
-    stav = request.json.get("stav")
-    if stav not in ("ceka", "zaplaceno", "po_splatnosti"):
-        return jsonify({"error": "Neplatný stav"}), 400
-    with get_db() as conn:
-        conn.execute("UPDATE faktury SET stav=? WHERE id=?", (stav, fid))
-    return jsonify({"ok": True})
-
-@app.route("/api/faktury/<int:fid>", methods=["DELETE"])
-def api_faktura_delete(fid):
-    with get_db() as conn:
-        row = conn.execute("SELECT soubor_cesta FROM faktury WHERE id=?", (fid,)).fetchone()
-        conn.execute("DELETE FROM faktury WHERE id=?", (fid,))
-    if row and row["soubor_cesta"]:
-        path = os.path.join(UPLOAD_DIR, row["soubor_cesta"])
-        if os.path.exists(path):
-            os.remove(path)
-    return jsonify({"ok": True})
-
-@app.route("/api/faktury/<int:fid>", methods=["PUT"])
-def api_faktura_update(fid):
-    data = request.json
-    fields = ["firma_zkratka","dodavatel","cislo_faktury","datum_vystaveni",
-              "datum_splatnosti","zpusob_uhrady","stav","celkem_s_dph"]
-    set_parts = [f"{f}=?" for f in fields if f in data]
-    vals = [data[f] for f in fields if f in data]
-    if set_parts:
-        vals.append(fid)
-        with get_db() as conn:
-            conn.execute(f"UPDATE faktury SET {','.join(set_parts)} WHERE id=?", vals)
-
-    # Zpracovat položky pokud jsou v datech
-    polozky = data.get("polozky")
-    if polozky is not None:
-        with get_db() as conn:
-            # Smazat staré položky a vložit nové
-            conn.execute("DELETE FROM polozky WHERE faktura_id=?", (fid,))
-            for p in polozky:
-                nazev = (p.get("nazev") or "").strip()
-                if not nazev: continue
-                mnozstvi = float(p.get("mnozstvi") or 1)
-                celkem   = float(p.get("celkem_s_dph") or 0)
-                cena_j   = float(p.get("cena_za_jednotku_s_dph") or 0)
-                if cena_j == 0 and mnozstvi:
-                    cena_j = celkem / mnozstvi
-                jed = (p.get("jednotka") or "").strip()
-                zbozi_id = _get_or_create_zbozi(conn, nazev)
-                conn.execute("""
-                    INSERT INTO polozky (faktura_id, nazev, mnozstvi, jednotka,
-                        cena_za_jednotku_s_dph, celkem_s_dph, zbozi_id)
-                    VALUES (?,?,?,?,?,?,?)
-                """, (fid, nazev, mnozstvi, jed, round(cena_j,4), round(celkem,2), zbozi_id))
-            recalc_faktura_total(conn, fid)
-    return jsonify({"ok": True})
-
-# ── API: výplaty ──────────────────────────────────────────────────────────────
-@app.route("/api/vyplaty/zamestnanci", methods=["GET"])
-def api_vyplaty_zamestnanci():
-    with get_db() as conn:
-        rows = conn.execute("SELECT DISTINCT jmeno FROM vyplaty ORDER BY jmeno").fetchall()
-    return jsonify({"jmena": [r["jmeno"] for r in rows]})
-
-@app.route("/api/vyplaty", methods=["GET"])
-def api_vyplaty():
-    try:
-        firma = request.args.get("firma", "")
-        jmeno = request.args.get("jmeno", "")
-        od    = request.args.get("od", "")
-        do_   = request.args.get("do", "")
-        clauses, params = [], []
-        if firma: clauses.append("firma_zkratka=?"); params.append(firma)
-        if jmeno: clauses.append("jmeno=?"); params.append(jmeno)
-        if od:    clauses.append("datum>=?"); params.append(od)
-        if do_:   clauses.append("datum<=?"); params.append(do_)
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        with get_db() as conn:
-            rows = conn.execute(f"""
-                SELECT * FROM vyplaty {where} ORDER BY datum DESC, created_at DESC
-            """, params).fetchall()
-            # ── OPRAVA: pojmenovaný sloupec – funguje v PG i SQLite
-            total_row = conn.execute(
-                f"SELECT COALESCE(SUM(castka),0) as total FROM vyplaty {where}", params
-            ).fetchone()
-            total = _first_val(total_row)
-        return jsonify({"vyplaty": [dict(r) for r in rows], "celkem": round(total, 2)})
-    except Exception as e:
-        import traceback
-        app.logger.error(f"api_vyplaty GET error: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/vyplaty", methods=["POST"])
-def api_vyplata_ulozit():
-    try:
-        data = request.json
-        if not data.get("jmeno") or not data.get("datum") or data.get("castka") is None:
-            return jsonify({"error": "Chybí povinná pole"}), 400
-        with get_db() as conn:
-            cur = conn.execute("""
-                INSERT INTO vyplaty (jmeno, datum, castka, poznamka, firma_zkratka, obdobi_od, obdobi_do)
-                VALUES (?,?,?,?,?,?,?)
-            """, (
-                data["jmeno"],
-                data["datum"],
-                float(data["castka"]),
-                data.get("poznamka", ""),
-                data.get("firma_zkratka", ""),
-                data.get("obdobi_od") or None,
-                data.get("obdobi_do") or None,
-            ))
-        return jsonify({"ok": True, "id": cur.lastrowid})
-    except Exception as e:
-        import traceback
-        app.logger.error(f"api_vyplata_ulozit error: {traceback.format_exc()}")
-        return jsonify({"error": str(e)}), 500
-
-@app.route("/api/vyplaty/<int:vid>", methods=["DELETE"])
-def api_vyplata_delete(vid):
-    with get_db() as conn:
-        conn.execute("DELETE FROM vyplaty WHERE id=?", (vid,))
-    return jsonify({"ok": True})
-
-@app.route("/api/vyplaty/<int:vid>", methods=["PUT"])
-def api_vyplata_update(vid):
-    data = request.json
-    fields = ["jmeno", "datum", "castka", "poznamka", "firma_zkratka", "obdobi_od", "obdobi_do"]
-    set_parts = [f"{f}=?" for f in fields if f in data]
-    vals = [data[f] for f in fields if f in data]
-    if not set_parts:
-        return jsonify({"ok": True})
-    vals.append(vid)
-    with get_db() as conn:
-        conn.execute(f"UPDATE vyplaty SET {','.join(set_parts)} WHERE id=?", vals)
-    return jsonify({"ok": True})
-
-
-# ── API: REPORTY ──────────────────────────────────────────────────────────────
-@app.route("/api/reporty/nahrat-foto", methods=["POST"])
-def api_report_nahrat_foto():
-    if "soubor" not in request.files:
-        return jsonify({"error": "Žádný soubor"}), 400
-    f = request.files["soubor"]
-    if not f.filename:
-        return jsonify({"error": "Prázdný soubor"}), 400
-
-    fname = secure_filename(f.filename)
-    ts    = datetime.now().strftime("%Y%m%d_%H%M%S_")
-    fname = "report_" + ts + fname
-    fpath = os.path.join(UPLOAD_DIR, fname)
-    f.save(fpath)
-
-    parsed, err = parse_report_image_claude(fpath)
-    if err:
-        return jsonify({"error": err}), 200
-
-    report = build_report_from_parsed(parsed)
-    return jsonify(report)
-
-
-@app.route("/api/reporty/nahrat-text", methods=["POST"])
-def api_report_nahrat_text():
-    text = request.json.get("text", "").strip()
-    if not text:
-        return jsonify({"error": "Prázdný text"}), 400
-
-    parsed, err = parse_report_text(text)
-    if err:
-        return jsonify({"error": err}), 200
-
-    report = build_report_from_parsed(parsed)
-    return jsonify(report)
-
-
-@app.route("/api/reporty", methods=["GET"])
-def api_reporty_list():
-    od  = request.args.get("od", "")
-    do_ = request.args.get("do", "")
-    clauses, params = [], []
-    if od:  clauses.append("datum>=?"); params.append(od)
-    if do_: clauses.append("datum<=?"); params.append(do_)
-    else:
-        clauses.append("datum<=?"); params.append(date.today().isoformat())
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-    with get_db() as conn:
-        rows = conn.execute(f"""
-            SELECT * FROM reporty {where} ORDER BY datum DESC
-        """, params).fetchall()
-    return jsonify([dict(r) for r in rows])
-
-
-@app.route("/api/reporty", methods=["POST"])
-def api_report_ulozit():
-    data = request.json
-    if not data.get("datum"):
-        return jsonify({"error": "Chybí datum"}), 400
-
-    karty    = float(data.get("karty", 0) or 0)
-    kov      = float(data.get("kov", 0) or 0)
-    papir    = float(data.get("papir", 0) or 0)
-    vydaje   = float(data.get("vydaje", 0) or 0)
-    hotovost = kov + papir
-    trzba    = karty + hotovost + vydaje
-    pk50_ks  = int(data.get("pk50_ks", 0) or 0)
-    pk100_ks = int(data.get("pk100_ks", 0) or 0)
-    pk_celkem  = pk50_ks * 50 + pk100_ks * 100
-    trzba_vcpk = trzba + pk_celkem
-
-    firma = data.get("firma_zkratka", "")
-    with get_db() as conn:
-        existing = conn.execute("SELECT id FROM reporty WHERE datum=?", (data["datum"],)).fetchone()
-        if existing:
-            conn.execute("""
-                UPDATE reporty SET den=?,smena=?,karty=?,kov=?,papir=?,hotovost=?,
-                vydaje=?,trzba=?,trzba_vcpk=?,pk50_ks=?,pk100_ks=?,pk_celkem=?,
-                pizza_cela=?,pizza_ctvrt=?,burger=?,talire=?,burtgulas=?,poznamka=?,firma_zkratka=?
-                WHERE datum=?
-            """, (
-                data.get("den",""), data.get("smena",""),
-                karty, kov, papir, hotovost, vydaje, trzba, trzba_vcpk,
-                pk50_ks, pk100_ks, pk_celkem,
-                int(data.get("pizza_cela",0) or 0), int(data.get("pizza_ctvrt",0) or 0),
-                int(data.get("burger",0) or 0), int(data.get("talire",0) or 0),
-                int(data.get("burtgulas",0) or 0),
-                data.get("poznamka",""), firma,
-                data["datum"]
-            ))
-            rid = existing["id"]
-        else:
-            cur = conn.execute("""
-                INSERT INTO reporty (datum,den,smena,karty,kov,papir,hotovost,vydaje,
-                trzba,trzba_vcpk,pk50_ks,pk100_ks,pk_celkem,
-                pizza_cela,pizza_ctvrt,burger,talire,burtgulas,poznamka,firma_zkratka)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, (
-                data["datum"], data.get("den",""), data.get("smena",""),
-                karty, kov, papir, hotovost, vydaje, trzba, trzba_vcpk,
-                pk50_ks, pk100_ks, pk_celkem,
-                int(data.get("pizza_cela",0) or 0), int(data.get("pizza_ctvrt",0) or 0),
-                int(data.get("burger",0) or 0), int(data.get("talire",0) or 0),
-                int(data.get("burtgulas",0) or 0),
-                data.get("poznamka",""), firma
-            ))
-            rid = cur.lastrowid
-
-    return jsonify({"ok": True, "id": rid})
-
-
-@app.route("/api/reporty/<int:rid>", methods=["DELETE"])
-def api_report_delete(rid):
-    with get_db() as conn:
-        conn.execute("DELETE FROM reporty WHERE id=?", (rid,))
-    return jsonify({"ok": True})
-
-
-@app.route("/api/reporty/smaz-budouci", methods=["POST"])
-def api_reporty_smaz_budouci():
-    dnes = date.today().isoformat()
-    with get_db() as conn:
-        cur = conn.execute("DELETE FROM reporty WHERE datum > ?", (dnes,))
-        smazano = cur.rowcount
-    return jsonify({"ok": True, "smazano": smazano})
-
-
-@app.route("/api/reporty/import-xlsx", methods=["POST"])
-def api_report_import_xlsx():
-    if "soubor" not in request.files:
-        return jsonify({"error": "Žádný soubor"}), 400
-    f = request.files["soubor"]
-    fname = secure_filename(f.filename)
-    fpath = os.path.join(UPLOAD_DIR, "import_" + fname)
-    f.save(fpath)
-
-    try:
-        wb = openpyxl.load_workbook(fpath, data_only=True)
-        imported = 0
-        skipped  = 0
-        errors   = []
-
-        den_map = {
-            "po": "Pondělí", "út": "Úterý", "st": "Středa",
-            "čt": "Čtvrtek", "pá": "Pátek", "so": "Sobota", "ne": "Neděle"
+function navigateTo(page) {
+  App.currentPage = page;
+  document.querySelectorAll(".nav-item").forEach(a => {
+    a.classList.toggle("active", a.dataset.page === page);
+  });
+  const pages = {
+    dashboard:  renderDashboard,
+    faktury:    renderFaktury,
+    nahrat:     renderNahrat,
+    rucni:      renderRucni,
+    polozky:    renderPolozky,
+    vyplaty:    renderVyplaty,
+    reporty:    renderReporty,
+    statistiky: renderStatistiky,
+    nastaveni:  renderNastaveni,
+  };
+  if (pages[page]) pages[page]();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Téma
+// ═══════════════════════════════════════════════════════════════
+function loadTheme() {
+  const t = localStorage.getItem("theme") || "light";
+  document.documentElement.setAttribute("data-theme", t);
+}
+function setupThemeSwitch() {
+  const sw = document.getElementById("themeSwitch");
+  sw.checked = (document.documentElement.getAttribute("data-theme") === "dark");
+  sw.addEventListener("change", () => {
+    const t = sw.checked ? "dark" : "light";
+    document.documentElement.setAttribute("data-theme", t);
+    localStorage.setItem("theme", t);
+    Object.values(App.chartInstances).forEach(c => { if (c) c.destroy(); });
+    App.chartInstances = {};
+    navigateTo(App.currentPage);
+  });
+}
+function setupMobileMenu() {
+  document.getElementById("menuBtn").addEventListener("click", () => {
+    document.getElementById("sidebar").classList.toggle("open");
+  });
+}
+function showDate() {
+  document.getElementById("todayDate").textContent =
+    new Date().toLocaleDateString("cs-CZ", { day:"2-digit", month:"long", year:"numeric" });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  API helper
+// ═══════════════════════════════════════════════════════════════
+async function api(url, opts = {}) {
+  try {
+    const r = await fetch(url, opts);
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || r.statusText); }
+    return r.json();
+  } catch (e) {
+    toast("Chyba: " + e.message, true);
+    throw e;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Toast notifikace
+// ═══════════════════════════════════════════════════════════════
+function toast(msg, error = false) {
+  const el = document.createElement("div");
+  el.className = "toast" + (error ? " error" : "");
+  el.textContent = msg;
+  document.getElementById("toastContainer").appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Modal
+// ═══════════════════════════════════════════════════════════════
+function openModal(title, bodyHtml) {
+  document.getElementById("modalTitle").textContent = title;
+  document.getElementById("modalBody").innerHTML = bodyHtml;
+  document.getElementById("modalOverlay").style.display = "flex";
+}
+function closeModal() {
+  document.getElementById("modalOverlay").style.display = "none";
+}
+document.getElementById("modalClose").addEventListener("click", closeModal);
+document.getElementById("modalOverlay").addEventListener("click", e => {
+  if (e.target === document.getElementById("modalOverlay")) closeModal();
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  Formátování
+// ═══════════════════════════════════════════════════════════════
+function czMoney(v) {
+  return Number(v).toLocaleString("cs-CZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " Kč";
+}
+// Celé číslo bez desetinné čárky a bez "Kč" – pro tabulku reportů
+function czInt(v) {
+  return Math.round(Number(v)).toLocaleString("cs-CZ");
+}
+function czDate(s) {
+  if (!s) return "—";
+  const d = new Date(s);
+  if (isNaN(d)) return s;
+  return d.toLocaleDateString("cs-CZ");
+}
+// Kompaktní datum – den.měsíc. (bez roku) pro tabulku reportů
+function czDateShort(s) {
+  if (!s) return "—";
+  const d = new Date(s);
+  if (isNaN(d)) return s;
+  const rok = String(d.getFullYear()).slice(-2);
+  return d.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" }) + rok;
+}
+function stavBadge(s) {
+  const m = { zaplaceno: "Zaplaceno", ceka: "Čeká", po_splatnosti: "Po splatnosti" };
+  return `<span class="badge badge-${s}">${m[s] || s}</span>`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Grafy
+// ═══════════════════════════════════════════════════════════════
+function drawBarChart(canvasId, labels, values, color) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width  = canvas.offsetWidth;
+  const H = canvas.height = canvas.offsetHeight || 260;
+  ctx.clearRect(0, 0, W, H);
+
+  if (!values.length) {
+    ctx.fillStyle = "#aaa";
+    ctx.font = "14px DM Sans";
+    ctx.textAlign = "center";
+    ctx.fillText("Žádná data", W/2, H/2);
+    return;
+  }
+
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const txtColor = isDark ? "#A8C4A2" : "#6B6255";
+  const gridColor = isDark ? "#2F3D34" : "#E0D8CC";
+
+  const pad = { top: 20, right: 20, bottom: 50, left: 70 };
+  const maxVal = Math.max(...values, 1);
+  const bw = (W - pad.left - pad.right) / values.length;
+
+  ctx.strokeStyle = gridColor;
+  ctx.lineWidth = 1;
+  const steps = 5;
+  for (let i = 0; i <= steps; i++) {
+    const y = pad.top + (H - pad.top - pad.bottom) * (1 - i/steps);
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+    ctx.fillStyle = txtColor;
+    ctx.font = "11px DM Sans";
+    ctx.textAlign = "right";
+    const v = (maxVal * i / steps);
+    ctx.fillText(v >= 1000 ? Math.round(v/1000)+"k" : Math.round(v), pad.left - 6, y + 4);
+  }
+
+  values.forEach((v, i) => {
+    const barH = ((v / maxVal) * (H - pad.top - pad.bottom));
+    const x = pad.left + i * bw + bw * .1;
+    const y = pad.top + (H - pad.top - pad.bottom) - barH;
+    const grad = ctx.createLinearGradient(0, y, 0, y + barH);
+    grad.addColorStop(0, color || "#52B788");
+    grad.addColorStop(1, color ? color + "99" : "#2D6A4F");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.roundRect(x, y, bw * .8, barH, [4, 4, 0, 0]);
+    ctx.fill();
+
+    ctx.fillStyle = txtColor;
+    ctx.font = "10px DM Sans";
+    ctx.textAlign = "center";
+    const lbl = labels[i] || "";
+    ctx.fillText(lbl.length > 7 ? lbl.slice(5) : lbl, pad.left + i * bw + bw/2, H - pad.bottom + 16);
+  });
+}
+
+function drawLineChart(canvasId, labels, datasets) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width  = canvas.offsetWidth;
+  const H = canvas.height = canvas.offsetHeight || 220;
+  ctx.clearRect(0, 0, W, H);
+
+  const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+  const txtColor = isDark ? "#A8C4A2" : "#6B6255";
+  const gridColor = isDark ? "#2F3D34" : "#E0D8CC";
+
+  const pad = { top: 20, right: 20, bottom: 50, left: 70 };
+  const allVals = datasets.flatMap(d => d.values);
+  const maxVal  = Math.max(...allVals, 1);
+  const minVal  = Math.min(...allVals.filter(v=>v>0), 0);
+  const range   = maxVal - minVal || 1;
+  const n       = labels.length;
+
+  const getX = i => pad.left + (i / (n-1 || 1)) * (W - pad.left - pad.right);
+  const getY = v => pad.top + (1 - (v - minVal) / range) * (H - pad.top - pad.bottom);
+
+  ctx.strokeStyle = gridColor;
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = pad.top + i/4 * (H - pad.top - pad.bottom);
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+    ctx.fillStyle = txtColor; ctx.font = "11px DM Sans"; ctx.textAlign = "right";
+    const v = maxVal - (maxVal - minVal)*i/4;
+    ctx.fillText(v.toFixed(1), pad.left - 6, y + 4);
+  }
+
+  const colors = ["#2D6A4F", "#E9C46A", "#C44D58", "#52B788"];
+  datasets.forEach((ds, di) => {
+    if (!ds.values.length) return;
+    ctx.strokeStyle = colors[di % colors.length];
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ds.values.forEach((v, i) => {
+      const x = getX(i), y = getY(v);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.fillStyle = colors[di % colors.length];
+    ds.values.forEach((v, i) => {
+      ctx.beginPath();
+      ctx.arc(getX(i), getY(v), 4, 0, 2*Math.PI);
+      ctx.fill();
+    });
+  });
+
+  ctx.fillStyle = txtColor; ctx.font = "10px DM Sans"; ctx.textAlign = "center";
+  labels.forEach((lbl, i) => {
+    ctx.fillText(lbl, getX(i), H - pad.bottom + 16);
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DASHBOARD
+// ═══════════════════════════════════════════════════════════════
+async function renderDashboard() {
+  const firma = document.getElementById("globalFirmaFilter")?.value || "";
+  const qs = firma ? `?firma=${firma}` : "";
+  document.getElementById("mainContent").innerHTML = `<div class="loading-center"><span class="spinner"></span></div>`;
+
+  let data;
+  try { data = await api(`/api/dashboard${qs}`); } catch { return; }
+
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Dashboard</h1>
+    </div>
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-label">Výdaje tento měsíc</div>
+        <div class="stat-value">${czMoney(data.vydaje_mesic)}</div>
+        <div class="stat-sub">${data.pocet_mesic} faktur</div>
+      </div>
+      <div class="stat-card ${data.pocet_po_splatnosti > 0 ? 'danger' : ''}">
+        <div class="stat-label">Po splatnosti</div>
+        <div class="stat-value">${data.pocet_po_splatnosti}</div>
+        <div class="stat-sub">${czMoney(data.castka_po_splatnosti)}</div>
+      </div>
+    </div>
+    <div class="grid-2" style="gap:1rem; margin-bottom:1rem;">
+      <div class="card">
+        <div class="card-title">Výdaje po měsících</div>
+        <div class="chart-wrap"><canvas id="barChart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Poslední faktury</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Dodavatel</th><th>Datum</th><th>Částka</th><th>Stav</th></tr></thead>
+            <tbody>
+              ${data.posledni_faktury.map(f => `
+                <tr data-id="${f.id}" class="faktura-row">
+                  <td>${f.dodavatel}</td>
+                  <td>${czDate(f.datum_vystaveni)}</td>
+                  <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
+                  <td>${stavBadge(f.stav)}</td>
+                </tr>`).join("") || "<tr><td colspan='4' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"}
+            </tbody>
+          </table>
+        </div>
+        <div style="margin-top:.8rem;text-align:right">
+          <button class="btn btn-secondary btn-sm" onclick="navigateTo('faktury')">Všechny faktury →</button>
+        </div>
+      </div>
+    </div>`;
+
+  document.querySelectorAll(".faktura-row").forEach(r => {
+    r.addEventListener("click", () => openFakturaDetail(r.dataset.id));
+  });
+
+  const labels = data.graf.map(g => g.mesic);
+  const values = data.graf.map(g => g.castka);
+  requestAnimationFrame(() => drawBarChart("barChart", labels, values, "#2D6A4F"));
+}
+
+document.getElementById("globalFirmaFilter").addEventListener("change", () => {
+  fillFirmaSelects();
+  if (App.currentPage === "dashboard") renderDashboard();
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  FAKTURY
+// ═══════════════════════════════════════════════════════════════
+async function renderFaktury() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Faktury</h1>
+      <div class="btn-group">
+        <button class="btn btn-secondary btn-sm" onclick="exportFaktury('xlsx')">⬇ Excel</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportFaktury('csv')">⬇ CSV</button>
+      </div>
+    </div>
+    <div class="filters">
+      <label>Firma:</label>
+      <select id="fFirma" class="firma-select">
+        <option value="">Všechny</option>
+        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+      </select>
+      <label>Stav:</label>
+      <select id="fStav">
+        <option value="">Vše</option>
+        <option value="ceka">Čeká</option>
+        <option value="zaplaceno">Zaplaceno</option>
+        <option value="po_splatnosti">Po splatnosti</option>
+        <option value="duplikat">Duplikát</option>
+      </select>
+      <label>Od:</label><input type="date" id="fOd">
+      <label>Do:</label><input type="date" id="fDo">
+      <input type="text" id="fQ" placeholder="Hledat dodavatele/č. faktury..." style="min-width:200px">
+    </div>
+    <div class="card">
+      <div class="table-wrap" id="fakturyTable"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>`;
+
+  loadFaktury();
+
+  ["fFirma","fStav","fOd","fDo"].forEach(id => {
+    document.getElementById(id)?.addEventListener("change", loadFaktury);
+  });
+  let qdeb;
+  document.getElementById("fQ")?.addEventListener("input", () => {
+    clearTimeout(qdeb); qdeb = setTimeout(loadFaktury, 350);
+  });
+}
+
+// Stav řazení faktur
+let _faktSort = { col: "datum_vystaveni", dir: "desc" };
+
+function fakturySort(col) {
+  if (_faktSort.col === col) {
+    _faktSort.dir = _faktSort.dir === "asc" ? "desc" : "asc";
+  } else {
+    _faktSort.col = col;
+    _faktSort.dir = "asc";
+  }
+  loadFaktury();
+}
+
+async function loadFaktury() {
+  const params = new URLSearchParams({
+    firma: document.getElementById("fFirma")?.value || "",
+    stav:  document.getElementById("fStav")?.value  || "",
+    od:    document.getElementById("fOd")?.value    || "",
+    do:    document.getElementById("fDo")?.value    || "",
+    q:     document.getElementById("fQ")?.value     || "",
+  });
+
+  let data;
+  try { data = await api(`/api/faktury?${params}`); } catch { return; }
+
+  const tbl = document.getElementById("fakturyTable");
+  if (!tbl) return;
+
+  const sortFns = {
+    cislo_faktury:   (a,b) => (a.cislo_faktury||"").localeCompare(b.cislo_faktury||""),
+    datum_vystaveni: (a,b) => (a.datum_vystaveni||"").localeCompare(b.datum_vystaveni||""),
+    celkem_s_dph:    (a,b) => (a.celkem_s_dph||0) - (b.celkem_s_dph||0),
+  };
+  if (sortFns[_faktSort.col]) {
+    data.faktury.sort((a,b) => {
+      const r = sortFns[_faktSort.col](a,b);
+      return _faktSort.dir === "asc" ? r : -r;
+    });
+  }
+
+  const arrow = (col) => _faktSort.col === col ? (_faktSort.dir === "asc" ? " ▲" : " ▼") : " ⇅";
+  const thSort = (col, label) =>
+    `<th style="cursor:pointer;user-select:none" onclick="fakturySort('${col}')">${label}${arrow(col)}</th>`;
+
+  tbl.innerHTML = `
+    <table>
+      <thead><tr>
+        ${thSort("firma_zkratka","Firma")}
+        ${thSort("dodavatel","Dodavatel")}
+        ${thSort("cislo_faktury","Č. faktury")}
+        ${thSort("datum_vystaveni","Vystavení")}
+        ${thSort("celkem_s_dph","Celkem s DPH")}
+        <th>Stav</th>
+      </tr></thead>
+      <tbody>
+       ${data.faktury.map(f => `
+            <tr class="faktura-row" data-id="${f.id}" style="${f.duplicita_id ? 'opacity:0.55' : ''}">
+              <td><span class="badge badge-zaplaceno" style="background:var(--green-pale)">${f.firma_zkratka}</span></td>
+              <td>${escHtml(f.dodavatel)}</td>
+              <td>${escHtml(f.cislo_faktury||"–")}${f.duplicita_id ? " <small style='color:orange'>⚠️ dup #" + f.duplicita_id + "</small>" : ""}</td>
+              <td>${czDate(f.datum_vystaveni)}</td>
+              <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
+              <td>${f.duplicita_id ? '<span class="badge" style="background:#0d6efd;color:#fff;cursor:pointer" onclick="event.stopPropagation();openFakturaDetail(' + f.duplicita_id + ')">🔗 Duplikát</span>' : stavBadge(f.stav)}</td>
+              </tr>`).join("") ||
+          "<tr><td colspan='6' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"}
+      </tbody>
+      ${data.faktury.length ?`
+      <tfoot>
+        <tr class="table-footer">
+          <td colspan="4">Celkem (${data.faktury.length} faktur)</td>
+          <td colspan="2"><strong>${czMoney(data.celkem)}</strong></td>
+        </tr>
+      </tfoot>` : ""}
+    </table>`;
+
+  document.querySelectorAll(".faktura-row").forEach(r => {
+    r.addEventListener("click", () => openFakturaDetail(r.dataset.id));
+  });
+}
+
+async function openFakturaDetail(id) {
+  let data;
+  try { data = await api(`/api/faktury/${id}`); } catch { return; }
+  const f = data.faktura;
+  const polozky = data.polozky;
+
+  const body = `
+    <div class="grid-2" style="gap:1rem; margin-bottom:1rem;">
+      <div>
+        <div class="form-group">
+          <label class="form-label">Dodavatel</label>
+          <input id="editDodavatel" class="form-control" value="${escHtml(f.dodavatel)}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Číslo faktury</label>
+          <input id="editCislo" class="form-control" value="${escHtml(f.cislo_faktury||String())}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Firma</label>
+          <select id="editFirma" class="form-control">
+            ${(App.config.firmy||[]).map(f2 => '<option value="' + escHtml(f2) + '" ' + (f.firma_zkratka===f2?'selected':'') + '>' + escHtml(f2) + '</option>').join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Způsob úhrady</label>
+          <input id="editUhrada" class="form-control" value="${escHtml(f.zpusob_uhrady||String())}">
+        </div>
+      </div>
+      <div>
+        <div class="form-group">
+          <label class="form-label">Datum vystavení</label>
+          <input id="editDatumVyst" class="form-control" type="date" value="${f.datum_vystaveni||''}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Datum splatnosti</label>
+          <input id="editDatumSplat" class="form-control" type="date" value="${f.datum_splatnosti||''}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Stav</label>
+          <select id="detailStav" class="form-control">
+            <option value="ceka" ${f.stav==="ceka"?"selected":""}>Čeká na zaplacení</option>
+            <option value="zaplaceno" ${f.stav==="zaplaceno"?"selected":""}>Zaplaceno</option>
+            <option value="po_splatnosti" ${f.stav==="po_splatnosti"?"selected":""}>Po splatnosti</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Celkem s DPH (Kč)</label>
+          <input id="editCelkem" class="form-control" type="number" step="0.01" value="${f.celkem_s_dph||0}">
+        </div>
+      </div>
+    </div>
+    ${(f.soubor_url || f.soubor_cesta) ? `<div style="margin-bottom:1rem"><a href="${f.soubor_url || '/uploads/' + f.soubor_cesta}" target="_blank" class="btn btn-secondary btn-sm">📎 Zobrazit originál</a></div>` : ""}
+    <h4 style="font-family:var(--font-head);margin-bottom:.7rem">Položky</h4>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Název</th><th>Množství</th><th>Jednotka</th><th>Cena/jedn.</th><th>Celkem s DPH</th><th></th></tr></thead>
+        <tbody id="editPolozkyBody">
+          ${polozky.map((p,i) => `
+            <tr data-pid="${p.id}">
+              <td><input class="form-control ep-nazev" value="${escHtml(p.nazev)}" style="min-width:140px"></td>
+              <td><input class="form-control ep-mnozstvi" type="number" step="0.001" value="${p.mnozstvi}" style="width:80px"></td>
+              <td><input class="form-control ep-jednotka" value="${escHtml(p.jednotka||'')}" style="width:60px"></td>
+              <td><input class="form-control ep-cena" type="number" step="0.0001" value="${p.cena_za_jednotku_s_dph}" style="width:90px"></td>
+              <td><input class="form-control ep-celkem" type="number" step="0.01" value="${p.celkem_s_dph}" style="width:90px"></td>
+              <td><button class="btn btn-danger btn-sm" onclick="editPolozkaRemove(this)">✕</button></td>
+            </tr>`).join("") || "<tr><td colspan='6' style='text-align:center;color:var(--txt2)'>Žádné položky</td></tr>"}
+        </tbody>
+      </table>
+    </div>
+    <button class="btn btn-secondary btn-sm" style="margin-top:.5rem" onclick="editPolozkaAdd()">+ Přidat položku</button>
+    <div class="btn-group" style="margin-top:1rem">
+      <button class="btn btn-primary" onclick="saveFakturaEdit(${f.id})">💾 Uložit změny</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteFaktura(${f.id})">🗑 Smazat</button>
+    </div>`;
+
+  openModal(`Faktura – ${escHtml(f.dodavatel)} ${czDate(f.datum_vystaveni)}`, body);
+}
+
+function editPolozkaRemove(btn) {
+  btn.closest("tr").remove();
+}
+
+function editPolozkaAdd() {
+  const tbody = document.getElementById("editPolozkyBody");
+  const tr = document.createElement("tr");
+  tr.dataset.pid = "new";
+  tr.innerHTML = `
+    <td><input class="form-control ep-nazev" value="" style="min-width:140px"></td>
+    <td><input class="form-control ep-mnozstvi" type="number" step="0.001" value="1" style="width:80px"></td>
+    <td><input class="form-control ep-jednotka" value="PC" style="width:60px"></td>
+    <td><input class="form-control ep-cena" type="number" step="0.0001" value="0" style="width:90px"></td>
+    <td><input class="form-control ep-celkem" type="number" step="0.01" value="0" style="width:90px"></td>
+    <td><button class="btn btn-danger btn-sm" onclick="editPolozkaRemove(this)">✕</button></td>`;
+  tbody.appendChild(tr);
+}
+
+async function saveFakturaEdit(id) {
+  const hlavicka = {
+    firma_zkratka:    document.getElementById("editFirma").value,
+    dodavatel:        document.getElementById("editDodavatel").value.trim(),
+    cislo_faktury:    document.getElementById("editCislo").value.trim(),
+    datum_vystaveni:  document.getElementById("editDatumVyst").value,
+    datum_splatnosti: document.getElementById("editDatumSplat").value,
+    zpusob_uhrady:    document.getElementById("editUhrada").value.trim(),
+    stav:             document.getElementById("detailStav").value,
+    celkem_s_dph:     parseFloat(document.getElementById("editCelkem").value) || 0,
+  };
+
+  const polozky = [];
+  document.querySelectorAll("#editPolozkyBody tr").forEach(tr => {
+    const nazev = tr.querySelector(".ep-nazev")?.value.trim();
+    if (!nazev) return;
+    polozky.push({
+      id:                        tr.dataset.pid !== "new" ? parseInt(tr.dataset.pid) : null,
+      nazev,
+      mnozstvi:                  parseFloat(tr.querySelector(".ep-mnozstvi")?.value) || 1,
+      jednotka:                  tr.querySelector(".ep-jednotka")?.value.trim() || "",
+      cena_za_jednotku_s_dph:    parseFloat(tr.querySelector(".ep-cena")?.value) || 0,
+      celkem_s_dph:              parseFloat(tr.querySelector(".ep-celkem")?.value) || 0,
+    });
+  });
+
+  await api(`/api/faktury/${id}`, {
+    method: "PUT",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({...hlavicka, polozky})
+  });
+  toast("Faktura uložena ✓");
+  closeModal();
+  loadFaktury();
+}
+
+async function saveStav(id) {
+  const stav = document.getElementById("detailStav").value;
+  await api(`/api/faktury/${id}/stav`, {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ stav })
+  });
+  toast("Stav uložen");
+  closeModal();
+  loadFaktury();
+}
+
+async function deleteFaktura(id) {
+  if (!confirm("Opravdu smazat tuto fakturu?")) return;
+  await api(`/api/faktury/${id}`, { method: "DELETE" });
+  toast("Faktura smazána");
+  closeModal();
+  loadFaktury();
+}
+
+function exportFaktury(fmt) {
+  const params = new URLSearchParams({
+    format: fmt,
+    firma: document.getElementById("fFirma")?.value || "",
+    stav:  document.getElementById("fStav")?.value  || "",
+    od:    document.getElementById("fOd")?.value    || "",
+    do:    document.getElementById("fDo")?.value    || "",
+  });
+  window.location.href = `/api/export/faktury?${params}`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  NAHRÁT FAKTURU (MAKRO)
+// ═══════════════════════════════════════════════════════════════
+let uploadedFilePath = null;
+
+function renderNahrat() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header"><h1 class="page-title">Nahrát fakturu (MAKRO)</h1></div>
+    <div class="card" style="max-width:900px">
+      <div class="form-group">
+        <label class="form-label">Firma</label>
+        <select id="nahratFirma" class="form-control" style="max-width:200px">
+          ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+        </select>
+      </div>
+
+      <div style="display:flex;gap:.5rem;margin-bottom:1rem;border-bottom:2px solid var(--border);padding-bottom:0">
+        <button id="tabPdf" class="tab-btn tab-active" onclick="switchTab('pdf')">📄 PDF soubor</button>
+        <button id="tabText" class="tab-btn" onclick="switchTab('text')">📋 Vložit text</button>
+        <button id="tabHromadne" class="tab-btn" onclick="switchTab('hromadne')">📦 Hromadné nahrání</button>
+      </div>
+
+      <div id="tabPanelPdf">
+        <div class="dropzone" id="dropzone">
+          <div class="dropzone-icon">📂</div>
+          <div class="dropzone-text">
+            <strong>Přetáhněte sem soubor</strong> nebo klikněte pro výběr<br>
+            <small>PDF (digitální faktura) nebo obrázek (fotka/sken) – max 50 MB</small>
+          </div>
+          <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg,.tiff,.bmp">
+        </div>
+        <div id="uploadStatus" style="margin-top:1rem;color:var(--txt2);font-size:.9rem"></div>
+      </div>
+
+      <div id="tabPanelText" style="display:none">
+        <p style="color:var(--txt2);font-size:.9rem;margin-bottom:.7rem">
+          Zkopírujte text faktury z PDF prohlížeče nebo e-mailu a vložte ho sem (Ctrl+V):
+        </p>
+        <textarea id="textInput" class="form-control" rows="10" style="font-family:monospace;font-size:.8rem"
+          placeholder="Sem vložte zkopírovaný text faktury MAKRO (Ctrl+V)..."></textarea>
+        <button class="btn btn-primary" style="margin-top:.7rem" onclick="zpracovatText()">🔍 Zpracovat text</button>
+        <div id="textStatus" style="margin-top:.5rem;color:var(--txt2);font-size:.9rem"></div>
+      </div>
+
+      <div id="tabPanelHromadne" style="display:none">
+        <div class="dropzone" id="dropzoneHromadne">
+          <div class="dropzone-icon">📦</div>
+          <div class="dropzone-text">
+            <strong>Přetáhněte více souborů najednou</strong> nebo klikněte pro výběr<br>
+            <small>Každý soubor bude zpracován samostatně a uložen automaticky</small>
+          </div>
+          <input type="file" id="fileInputHromadne" accept=".pdf,.png,.jpg,.jpeg" multiple>
+        </div>
+        <div id="hromadneStatus" style="margin-top:1rem"></div>
+      </div>
+
+      <div id="parsedForm" style="display:none; margin-top:1.5rem;">
+        <h3 style="font-family:var(--font-head);margin-bottom:1rem">Zkontrolujte a případně opravte</h3>
+        <div class="grid-2" style="gap:1rem">
+          <div class="form-group"><label class="form-label">Dodavatel</label><input id="pDodavatel" class="form-control" value="MAKRO Cash &amp; Carry ČR s.r.o."></div>
+          <div class="form-group"><label class="form-label">Číslo faktury</label><input id="pCislo" class="form-control"></div>
+          <div class="form-group"><label class="form-label">Datum vystavení</label><input type="date" id="pDatVys" class="form-control"></div>
+          <div class="form-group"><label class="form-label">Datum splatnosti</label><input type="date" id="pDatSpl" class="form-control"></div>
+        </div>
+        <h4 style="font-family:var(--font-head);margin:1rem 0 .7rem">Položky</h4>
+        <div class="table-wrap" style="overflow-x:auto">
+          <table class="items-table" id="polozkyTable">
+            <thead><tr><th>Název</th><th>Množství</th><th>Jednotka</th><th>Cena/jedn. s DPH</th><th>Celkem s DPH</th><th></th></tr></thead>
+            <tbody id="polozkyBody"></tbody>
+          </table>
+        </div>
+        <button class="btn btn-secondary btn-sm" style="margin-top:.5rem" onclick="addPolozkaRow()">+ Přidat položku</button>
+        <div style="margin-top:1rem;font-weight:600;font-size:1.05rem" id="totalSum"></div>
+        <div class="btn-group" style="margin-top:1.2rem">
+          <button class="btn btn-primary" onclick="ulozitFakturuMakro()">💾 Uložit fakturu</button>
+        </div>
+      </div>
+    </div>`;
+
+  setupDropzone();
+  setupDropzoneHromadne();
+}
+
+function switchTab(tab) {
+  ['pdf','text','hromadne'].forEach(t => {
+    document.getElementById('tabPanel' + t.charAt(0).toUpperCase() + t.slice(1)).style.display = t === tab ? '' : 'none';
+    document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1)).classList.toggle('tab-active', t === tab);
+  });
+}
+
+async function zpracovatText() {
+  const text = document.getElementById('textInput').value.trim();
+  if (!text) { document.getElementById('textStatus').textContent = 'Vložte text faktury.'; return; }
+  document.getElementById('textStatus').innerHTML = '<span class="spinner"></span> Zpracovávám...';
+  try {
+    const r = await fetch('/api/nahrat-text', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({text})
+    });
+    const data = await r.json();
+    document.getElementById('textStatus').textContent = '✅ Zpracováno';
+    naplnFormular(data);
+  } catch(e) {
+    document.getElementById('textStatus').textContent = '❌ Chyba: ' + e.message;
+  }
+}
+
+function setupDropzoneHromadne() {
+  const dz  = document.getElementById('dropzoneHromadne');
+  const inp = document.getElementById('fileInputHromadne');
+  if (!dz) return;
+  dz.addEventListener('click', (e) => { if (e.target !== inp) inp.click(); });
+  inp.addEventListener('change', () => { if (inp.files.length) hromadneNahrat(inp.files); });
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+  dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('drag-over');
+    if (e.dataTransfer.files.length) hromadneNahrat(e.dataTransfer.files);
+  });
+}
+
+async function hromadneNahrat(files) {
+  const firma = document.getElementById('nahratFirma').value;
+  const statusEl = document.getElementById('hromadneStatus');
+  statusEl.innerHTML = `<div>Zpracovávám ${files.length} soubor(ů)...</div>`;
+  let ok = 0, err = 0;
+
+  for (const file of Array.from(files)) {
+    const row = document.createElement('div');
+    row.style.cssText = 'padding:.3rem 0;border-bottom:1px solid var(--border);font-size:.9rem';
+    row.innerHTML = `<span class="spinner"></span> ${file.name}`;
+    statusEl.appendChild(row);
+
+    try {
+      const fd = new FormData();
+      fd.append('soubor', file);
+      const r = await fetch('/api/nahrat', {method:'POST', body:fd});
+      const data = await r.json();
+
+      if (data.error && !data.soubor_cesta) {
+        if (data.error.includes("Súpis tovaru")) {
+          row.innerHTML = `<span style="color:var(--txt2)">⏭ ${file.name} – přeskočeno (Súpis tovaru)</span>`;
+        } else {
+          row.innerHTML = `❌ ${file.name} – ${data.error}`; err++;
         }
-        mesic_map = {
-            "LEDEN": 1, "ÚNOR": 2, "BŘEZEN": 3, "DUBEN": 4,
-            "KVĚTEN": 5, "ČERVEN": 6, "ČERVENEC": 7, "SRPEN": 8,
-            "ZÁŘÍ": 9, "ŘÍJEN": 10, "LISTOPAD": 11, "PROSINEC": 12
+        continue;
+      }
+
+       if (data.duplicita) {
+          row.innerHTML = `⚠️ ${file.name} – <span style="color:orange">duplikát faktury #${data.duplicita.id} (${data.duplicita.firma}, ${data.duplicita.datum}, ${czMoney(data.duplicita.celkem)} Kč) – uloženo</span>`;
+          ok++;
+          continue;
         }
 
-        rows_to_insert = []
-        for sheet_name in wb.sheetnames:
-            if sheet_name not in ("2025", "2026"):
-                continue
-            year = int(sheet_name)
-            ws = wb[sheet_name]
-
-            current_mesic = None
-            dnes = date.today()
-            konec_import = date(dnes.year, dnes.month, dnes.day)
-            for row in ws.iter_rows(min_row=2, values_only=True):
-                if not row or row[0] is None:
-                    continue
-                if str(row[0]).upper() in ("SOUČET", "DNÍ", "PRŮMĚR", "SOU\ČET"):
-                    continue
-                if row[1] and str(row[1]).upper() in mesic_map:
-                    current_mesic = mesic_map[str(row[1]).upper()]
-
-                try:
-                    den_cislo = int(row[0])
-                except (TypeError, ValueError):
-                    continue
-
-                if not current_mesic:
-                    continue
-
-                try:
-                    datum_test = date(year, current_mesic, den_cislo)
-                    if datum_test > konec_import:
-                        skipped += 1
-                        continue
-                except ValueError:
-                    continue
-
-                try:
-                    datum_iso = date(year, current_mesic, den_cislo).isoformat()
-                except ValueError:
-                    errors.append(f"Neplatné datum: {year}-{current_mesic}-{den_cislo}")
-                    continue
-
-                den_str = den_map.get(str(row[2] or "").lower(), str(row[2] or ""))
-                trzba_vcpk = float(row[3] or 0)
-                karty      = float(row[4] or 0)
-                hotovost   = float(row[5] or 0)
-                vydaje     = float(row[6] or 0)
-                trzba      = float(row[7] or 0)
-                pk50_ks    = int(row[8] or 0)
-                pk100_ks   = int(row[9] or 0)
-                pk_celkem  = float(row[10] or 0)
-                pizza_cela = int(row[11] or 0)
-                pizza_ctvrt= int(row[12] or 0)
-                burger     = int(row[13] or 0)
-                talire     = int(row[14] or 0)
-                burtgulas  = int(row[15] or 0)
-                smena      = normalize_jmena(str(row[16] or ""))
-
-                kov   = 0
-                papir = hotovost
-
-                rows_to_insert.append((
-                    datum_iso, den_str, smena, karty, kov, papir, hotovost,
-                    vydaje, trzba, trzba_vcpk, pk50_ks, pk100_ks, pk_celkem,
-                    pizza_cela, pizza_ctvrt, burger, talire, burtgulas
-                ))
-
-        with get_db() as conn:
-            for params in rows_to_insert:
-                existing = conn.execute("SELECT id FROM reporty WHERE datum=?", (params[0],)).fetchone()
-                if existing:
-                    skipped += 1
-                    continue
-                conn.execute("""
-                    INSERT INTO reporty (datum,den,smena,karty,kov,papir,hotovost,vydaje,
-                    trzba,trzba_vcpk,pk50_ks,pk100_ks,pk_celkem,
-                    pizza_cela,pizza_ctvrt,burger,talire,burtgulas)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """, params)
-                imported += 1
-
-        return jsonify({"ok": True, "imported": imported, "skipped": skipped, "errors": errors[:10]})
-
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/reporty/karty-alert")
-def api_karty_alert():
-    with get_db() as conn:
-        total_row = conn.execute("""
-            SELECT COALESCE(SUM(karty),0) as total
-            FROM reporty
-            WHERE datum >= date('now','-12 months')
-        """).fetchone()
-        total = _first_val(total_row)
-        per_firma = conn.execute("""
-            SELECT firma_zkratka, COALESCE(SUM(karty),0) as karty_12m
-            FROM reporty
-            WHERE datum >= date('now','-12 months')
-            GROUP BY firma_zkratka
-            ORDER BY karty_12m DESC
-        """).fetchall()
-    LIMIT = 1500000
-    firmy_alert = []
-    for r in per_firma:
-        firma = r["firma_zkratka"] or "—"
-        k = round(r["karty_12m"], 2)
-        firmy_alert.append({
-            "firma": firma,
-            "karty_12m": k,
-            "procent": round(k / LIMIT * 100, 1),
-            "alert": k >= LIMIT,
-            "varovani": k >= 1200000,
-        })
-    return jsonify({
-        "karty_12m": round(total, 2),
-        "limit": LIMIT,
-        "procent": round(total / LIMIT * 100, 1),
-        "alert": total >= LIMIT,
-        "varovani": total >= 1200000,
-        "per_firma": firmy_alert,
-    })
-
-
-@app.route("/api/statistiky/mesice")
-def api_statistiky_mesice():
-    firma = request.args.get("firma", "")
-    clauses = ["datum <= ?"]
-    params  = [date.today().isoformat()]
-    if firma:
-        clauses.append("firma_zkratka=?")
-        params.append(firma)
-    where = "WHERE " + " AND ".join(clauses)
-    with get_db() as conn:
-        rows = conn.execute(f"""
-            SELECT
-                strftime('%Y', datum) as rok,
-                strftime('%m', datum) as mesic,
-                COUNT(*) as dni,
-                ROUND((SUM(trzba_vcpk))::numeric,2)  as trzba_vcpk_sum,
-                ROUND((AVG(trzba_vcpk))::numeric,2)  as trzba_vcpk_avg,
-                ROUND((SUM(karty))::numeric,2)       as karty_sum,
-                ROUND((AVG(karty))::numeric,2)       as karty_avg,
-                ROUND((SUM(hotovost))::numeric,2)    as hotovost_sum,
-                ROUND((AVG(hotovost))::numeric,2)    as hotovost_avg,
-                ROUND((SUM(vydaje))::numeric,2)      as vydaje_sum,
-                ROUND((SUM(pk_celkem))::numeric,2)   as pk_celkem_sum,
-                SUM(pizza_cela)           as pizza_cela_sum,
-                SUM(pizza_ctvrt)          as pizza_ctvrt_sum,
-                SUM(burger)               as burger_sum,
-                SUM(talire)               as talire_sum,
-                SUM(burtgulas)            as burtgulas_sum,
-                ROUND((AVG(pizza_cela))::numeric,1)  as pizza_cela_avg,
-                ROUND((AVG(pizza_ctvrt))::numeric,1) as pizza_ctvrt_avg,
-                ROUND((AVG(burger))::numeric,1)      as burger_avg,
-                ROUND((AVG(talire))::numeric,1)      as talire_avg,
-                ROUND((AVG(burtgulas))::numeric,1)   as burtgulas_avg
-            FROM reporty {where}
-            AND trzba_vcpk > 0
-            GROUP BY rok, mesic
-            ORDER BY rok DESC, mesic DESC
-        """, params).fetchall()
-    return jsonify([dict(r) for r in rows])
-
-
-@app.route("/api/statistiky/roky")
-def api_statistiky_roky():
-    with get_db() as conn:
-        rows = conn.execute("""
-            SELECT
-                strftime('%Y', datum) as rok,
-                strftime('%m', datum) as mesic,
-                ROUND((AVG(trzba_vcpk))::numeric,0) as prumer_den,
-                firma_zkratka
-            FROM reporty
-            WHERE datum <= ? AND trzba_vcpk > 0
-            GROUP BY rok, mesic
-            ORDER BY rok, mesic
-        """, (date.today().isoformat(),)).fetchall()
-    return jsonify([dict(r) for r in rows])
-
-
-@app.route("/api/export/reporty")
-def export_reporty():
-    fmt = request.args.get("format", "xlsx")
-    od  = request.args.get("od", "")
-    do_ = request.args.get("do", "")
-    clauses, params = [], []
-    if od:  clauses.append("datum>=?"); params.append(od)
-    if do_: clauses.append("datum<=?"); params.append(do_)
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-
-    with get_db() as conn:
-        rows = conn.execute(f"""
-            SELECT datum,den,trzba_vcpk,karty,hotovost,vydaje,trzba,
-                   pk50_ks,pk100_ks,pk_celkem,pizza_cela,pizza_ctvrt,
-                   burger,talire,burtgulas,smena
-            FROM reporty {where} ORDER BY datum
-        """, params).fetchall()
-
-    headers = ["datum","měsíc","den","TRŽBA vč. PK","karty","hotovost","výdaje","tržba",
-               "pk50 ks","pk100 ks","poukaz Kč","pizza celá","čtvrt","burger","talíře","buřtguláš","KDO"]
-
-    def r_val(r, key, idx):
-        return r[key] if isinstance(r, dict) else r[idx]
-
-    if fmt == "csv":
-        buf = io.StringIO()
-        w   = csv.writer(buf, delimiter=";")
-        w.writerow(headers)
-        for r in rows:
-            d = date.fromisoformat(r_val(r,"datum",0)) if r_val(r,"datum",0) else None
-            mesic = d.strftime("%B").upper() if d else ""
-            w.writerow([d.day if d else "", mesic, r_val(r,"den",1), r_val(r,"trzba_vcpk",2),
-                        r_val(r,"karty",3), r_val(r,"hotovost",4), r_val(r,"vydaje",5),
-                        r_val(r,"trzba",6), r_val(r,"pk50_ks",7), r_val(r,"pk100_ks",8),
-                        r_val(r,"pk_celkem",9), r_val(r,"pizza_cela",10), r_val(r,"pizza_ctvrt",11),
-                        r_val(r,"burger",12), r_val(r,"talire",13), r_val(r,"burtgulas",14),
-                        r_val(r,"smena",15)])
-        buf.seek(0)
-        return send_file(io.BytesIO(buf.getvalue().encode("utf-8-sig")),
-                         mimetype="text/csv", download_name="reporty.csv", as_attachment=True)
-    else:
-        wb_out = openpyxl.Workbook()
-        ws_out = wb_out.active; ws_out.title = str(date.today().year)
-        _xlsx_header(ws_out, headers)
-        mesice_cs = ["","LEDEN","ÚNOR","BŘEZEN","DUBEN","KVĚTEN","ČERVEN",
-                     "ČERVENEC","SRPEN","ZÁŘÍ","ŘÍJEN","LISTOPAD","PROSINEC"]
-        for r in rows:
-            d = date.fromisoformat(r_val(r,"datum",0)) if r_val(r,"datum",0) else None
-            mesic = mesice_cs[d.month] if d else ""
-            ws_out.append([d.day if d else "", mesic, r_val(r,"den",1), r_val(r,"trzba_vcpk",2),
-                           r_val(r,"karty",3), r_val(r,"hotovost",4), r_val(r,"vydaje",5),
-                           r_val(r,"trzba",6), r_val(r,"pk50_ks",7), r_val(r,"pk100_ks",8),
-                           r_val(r,"pk_celkem",9), r_val(r,"pizza_cela",10), r_val(r,"pizza_ctvrt",11),
-                           r_val(r,"burger",12), r_val(r,"talire",13), r_val(r,"burtgulas",14),
-                           r_val(r,"smena",15)])
-        buf = io.BytesIO(); wb_out.save(buf); buf.seek(0)
-        return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                         download_name="reporty.xlsx", as_attachment=True)
-
-
-# ── API: nahrání souboru ──────────────────────────────────────────────────────
-@app.route("/api/nahrat-text", methods=["POST"])
-def api_nahrat_text():
-    text = request.json.get("text", "")
-    if not text.strip():
-        return jsonify({"error": "Prázdný text"}), 400
-    data = _parse_makro_text(text)
-    return jsonify(data)
-
-
-def _parse_makro_text(text):
-    lines = text.splitlines()
-    result = {
-        "cislo_faktury":   "",
-        "datum_vystaveni": "",
-        "datum_splatnosti":"",
-        "zpusob_uhrady":   "Hotovost",
-        "stav":            "zaplaceno",
-        "dodavatel":       "MAKRO Cash & Carry ČR s.r.o.",
-        "celkem_s_dph":    0,
-        "polozky":         []
+      const payload = {
+        firma_zkratka: firma,
+        dodavatel:     data.dodavatel || 'MAKRO Cash & Carry ČR s.r.o.',
+        cislo_faktury: data.cislo_faktury || '',
+        datum_vystaveni: data.datum_vystaveni || '',
+        datum_splatnosti: data.datum_splatnosti || '',
+        zpusob_uhrady: 'Hotovost',
+        stav:          'zaplaceno',
+        celkem_s_dph:  data.celkem_s_dph || 0,
+        soubor_cesta:  data.soubor_cesta || '',
+        soubor_url:    data.soubor_gcs_url || '',
+        zdroj:         'makro',
+        polozky:       data.polozky || []
+      };
+      await api('/api/faktury', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+      row.innerHTML = `✅ ${file.name} – uloženo (${(data.polozky||[]).length} položek, ${czMoney(data.celkem_s_dph)})`;
+      ok++;
+    } catch(e) {
+      row.innerHTML = `❌ ${file.name} – ${e.message}`; err++;
     }
+  }
+  statusEl.insertAdjacentHTML('afterbegin', `<div style="font-weight:600;margin-bottom:.5rem">Hotovo: ${ok} uloženo, ${err} chyb</div>`);
+}
 
-    items = []
-    sleva_kw = ["urceno pro konecnou", "kup vice", "kup více", "věrnostní"]
+function setupDropzone() {
+  const dz   = document.getElementById("dropzone");
+  const inp  = document.getElementById("fileInput");
 
-    for line in lines:
-        ls = line.strip()
-        if not ls: continue
-        ll = ls.lower()
+  dz.addEventListener("click", (e) => { if (e.target !== inp) inp.click(); });
+  inp.addEventListener("change", () => { if (inp.files[0]) uploadFile(inp.files[0]); });
 
-        m = re.search(r"Faktura\s*[čc\.]\s*/\s*VS\s*:\s*(\S+)", ls, re.IGNORECASE)
-        if m and not result["cislo_faktury"]: result["cislo_faktury"] = m.group(1)
-        m = re.search(r"Datum\s+vystavení\s*:\s*(\d{2}[-\.]\d{2}[-\.]\d{4})", ls, re.IGNORECASE)
-        if m and not result["datum_vystaveni"]: result["datum_vystaveni"] = _makro_date(m.group(1).replace(".", "-") if "." in m.group(1) else m.group(1))
-        m = re.search(r"Datum\s+splatnosti\s*:\s*(\d{2}[-\.]\d{2}[-\.]\d{4})", ls, re.IGNORECASE)
-        if m and not result["datum_splatnosti"]: result["datum_splatnosti"] = _makro_date(m.group(1).replace(".", "-") if "." in m.group(1) else m.group(1))
-        m = re.search(r"Celková\s+částka\s+([\d\s]{1,10}[,\.]\d{2})", ls, re.IGNORECASE)
-        if m: result["celkem_s_dph"] = _parse_money(m.group(1))
+  dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag-over"); });
+  dz.addEventListener("dragleave", () => dz.classList.remove("drag-over"));
+  dz.addEventListener("drop", e => {
+    e.preventDefault(); dz.classList.remove("drag-over");
+    if (e.dataTransfer.files[0]) uploadFile(e.dataTransfer.files[0]);
+  });
 
-        is_sleva = any(kw in ll for kw in sleva_kw)
-        if is_sleva and items:
-            neg = re.findall(r"-\s*(\d[\d\s]*[,\.]\d{2})", ls)
-            if neg:
-                sleva = _parse_money(neg[-1])
-                items[-1]["celkem_s_dph"] = round(max(0, items[-1]["celkem_s_dph"] - sleva), 2)
-                mn = items[-1]["mnozstvi"]
-                if mn: items[-1]["cena_za_jednotku_s_dph"] = round(items[-1]["celkem_s_dph"] / mn, 4)
-            continue
+  document.addEventListener("paste", handlePaste);
+}
 
-        mm = re.match(r"^(\d{6,14})\s+\*?(.+?)\s+(PC|KG|BG|KS|BX|CA|SW)\s+(.+)$", ls, re.IGNORECASE)
-        if not mm: continue
+function handlePaste(e) {
+  const panel = document.getElementById("tabPanelPdf");
+  if (!panel || panel.style.display === "none") return;
 
-        nazev    = mm.group(2).strip().rstrip("*")
-        jednotka = mm.group(3).upper()
-        rest     = mm.group(4)
+  const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+  for (const item of items) {
+    if (item.type.startsWith("image/")) {
+      const file = item.getAsFile();
+      if (file) {
+        document.getElementById("uploadStatus").innerHTML =
+          `<span class="spinner"></span> Zpracovávám obrázek ze schránky…`;
+        uploadFile(file);
+      }
+      break;
+    }
+  }
+}
 
-        cisla = re.findall(r"\d+[,\.]\d+|\d+", rest)
-        cf = [_parse_money(c) for c in cisla]
-        cf = [c for c in cf if c > 0]
+async function uploadFile(file) {
+  document.getElementById("uploadStatus").innerHTML = `<span class="spinner"></span> Nahrávám a zpracovávám…`;
+  const fd = new FormData();
+  fd.append("soubor", file);
+  fd.append("typ_dokladu", "doklad");
 
-        if len(cf) < 2: continue
+  let data;
+  try {
+    const r = await fetch("/api/nahrat", { method: "POST", body: fd });
+    data = await r.json();
+  } catch (e) {
+    document.getElementById("uploadStatus").textContent = "Chyba při nahrávání: " + e.message;
+    return;
+  }
 
-        if cf[-1] == int(cf[-1]) and cf[-1] <= 25:
-            idx_dph = len(cf) - 1
-        else:
-            idx_dph = len(cf)
+  if (data.error && !data.soubor_cesta) {
+    document.getElementById("uploadStatus").textContent = "❌ Chyba: " + data.error;
+    return;
+  }
 
-        idx_cs  = idx_dph - 1
-        idx_mn  = idx_dph - 3
-        celkem  = cf[idx_cs] if 0 <= idx_cs < len(cf) else 0
-        pocet   = cf[idx_mn] if 0 <= idx_mn < len(cf) else 1.0
-        if pocet <= 0 or pocet > 10000: pocet = 1.0
-        cena_j  = round(celkem / pocet, 4) if pocet else celkem
+  document.getElementById("uploadStatus").innerHTML = data.error ?
+    `⚠ Soubor nahrán, ale parsování se nepodařilo (${data.error}). Vyplňte ručně.` :
+    `✅ Soubor úspěšně zpracován`;
 
-        if not nazev or celkem <= 0: continue
-        items.append({
-            "nazev":                  _format_nazev(nazev),
-            "mnozstvi":               pocet,
-            "jednotka":               _map_unit(jednotka),
-            "cena_za_jednotku_s_dph": cena_j,
-            "celkem_s_dph":           round(celkem, 2)
-        })
+  uploadedFilePath = data.soubor_cesta || "";
+  const formVisible = document.getElementById("parsedForm") &&
+    document.getElementById("parsedForm").style.display !== "none";
+  naplnFormular(data, formVisible);
+}
 
-    result["polozky"] = items
-    if result["celkem_s_dph"] == 0 and items:
-        result["celkem_s_dph"] = round(sum(p["celkem_s_dph"] for p in items), 2)
-    return result
+function naplnFormular(data, appendMode = false) {
+  const formVisible = document.getElementById("parsedForm").style.display !== "none";
 
+  if (appendMode && formVisible) {
+    const newItems = data.polozky || [];
+    if (newItems.length === 0) {
+      toast("Na druhé stránce nebyly nalezeny žádné položky.", true);
+      return;
+    }
+    newItems.forEach(p => appendPolozkaRow(p));
+    updateTotal();
 
-@app.route("/api/nahrat", methods=["POST"])
-def api_nahrat():
-    if "soubor" not in request.files:
-        return jsonify({"error": "Žádný soubor"}), 400
-    f = request.files["soubor"]
-    if not f.filename or not allowed_file(f.filename):
-        return jsonify({"error": "Nepodporovaný formát"}), 400
+    const info = document.createElement("div");
+    info.style.cssText = "background:#d1fae5;border:1px solid #6ee7b7;border-radius:6px;padding:.5rem 1rem;margin-bottom:.5rem;font-size:.9rem;color:#065f46";
+    info.textContent = `✅ Přidáno ${newItems.length} položek z druhé strany faktury`;
+    document.getElementById("parsedForm").insertAdjacentElement("afterbegin", info);
+    setTimeout(() => info.remove(), 4000);
+    return;
+  }
 
-    fname  = secure_filename(f.filename)
-    ts     = datetime.now().strftime("%Y%m%d_%H%M%S_")
-    fname  = ts + fname
-    fpath  = os.path.join(UPLOAD_DIR, fname)
-    f.save(fpath)
+  document.getElementById("parsedForm").style.display = "block";
+  document.getElementById("pDodavatel").value = data.dodavatel || "MAKRO Cash & Carry ČR s.r.o.";
+  document.getElementById("pCislo").value     = data.cislo_faktury || "";
+  document.getElementById("pDatVys").value    = data.datum_vystaveni || "";
+  document.getElementById("pDatSpl").value    = data.datum_splatnosti || "";
 
-    # Nahrát do GCS (pokud je nakonfigurováno)
-    gcs_url = upload_to_gcs(fpath, fname)
+  if (data.firma_zkratka) {
+    const sel = document.getElementById("nahratFirma");
+    for (const opt of sel.options) {
+      if (opt.value === data.firma_zkratka) { sel.value = data.firma_zkratka; break; }
+    }
+  }
 
-    ext = fname.rsplit(".", 1)[1].lower()
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if api_key:
-        if ext == "pdf":
-            data, err = parse_makro_pdf(fpath)
-            if err or not data:
-                data, err = parse_faktura_claude(fpath)
-        else:
-            data, err = parse_faktura_claude(fpath)
-    else:
-        if ext == "pdf":
-            data, err = parse_makro_pdf(fpath)
-        else:
-            data, err = parse_makro_image(fpath)
+  const dupEl = document.getElementById("duplicitaWarning");
+  if (dupEl) dupEl.remove();
+  if (data.duplicita) {
+    const warn = document.createElement("div");
+    warn.id = "duplicitaWarning";
+    warn.style.cssText = "background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:.7rem 1rem;margin-bottom:1rem;color:#856404;font-size:.9rem";
+    warn.innerHTML = `⚠️ <strong>Tato faktura již existuje!</strong> Faktura č. ${data.cislo_faktury} byla již nahrána (firma ${data.duplicita.firma}, ${data.duplicita.datum}, ${data.duplicita.celkem} Kč). Opravdu chceš uložit znovu?`;
+    document.getElementById("parsedForm").insertAdjacentElement("afterbegin", warn);
+  }
 
-    if err:
-        return jsonify({"error": err, "soubor_cesta": fname}), 200
+  const tbody = document.getElementById("polozkyBody");
+  tbody.innerHTML = "";
+  (data.polozky || []).forEach(p => appendPolozkaRow(p, data.ocr_kontrola));
+  updateTotal();
 
-    data["soubor_cesta"] = fname
-    if gcs_url:
-        data["soubor_gcs_url"] = gcs_url
+  const kontrolaEl = document.getElementById("ocrKontrola");
+  if (kontrolaEl) kontrolaEl.remove();
+  if (data.ocr_kontrola) {
+    zobrazOcrKontrolu(data.ocr_kontrola);
+  }
+}
 
-    if data.get("cislo_faktury"):
-        with get_db() as conn:
-            row = conn.execute("""
-                SELECT id, firma_zkratka, datum_vystaveni, celkem_s_dph
-                FROM faktury
-                WHERE cislo_faktury = ?
-                AND datum_vystaveni = ?
-                AND ABS(celkem_s_dph - ?) < 0.01
-            """, (data["cislo_faktury"], data.get("datum_vystaveni",""), float(data.get("celkem_s_dph", 0)))).fetchone()
-            if row:
-                data["duplicita"] = {
-                    "id": row["id"],
-                    "firma": row["firma_zkratka"],
-                    "datum": row["datum_vystaveni"],
-                    "celkem": row["celkem_s_dph"]
-                }
+function zobrazOcrKontrolu(k) {
+  const suma = k.suma_polozek;
+  const ocr_bez = k.ocr_bez_dph || 0;
+  const maCelkem = k.ma_celkem;
+  const pocetPodezrelych = (k.podezrele_indexy || []).length;
 
-    return jsonify(data)
+  const div = document.createElement("div");
+  div.id = "ocrKontrola";
+  div.dataset.ocrBezDph = ocr_bez;
+  div.style.cssText = "border-radius:8px;padding:.8rem 1rem;margin-bottom:1rem;font-size:.9rem;";
 
-@app.route("/api/faktury", methods=["POST"])
-def api_faktura_ulozit():
-    data = request.json
-    required = ["firma_zkratka", "dodavatel"]
-    for r in required:
-        if not data.get(r):
-            return jsonify({"error": f"Chybí pole: {r}"}), 400
+  if (maCelkem) {
+    const ocekavano = ocr_bez * 1.20;
+    const rozdil = Math.abs(suma - ocekavano);
+    const ok = rozdil < ocekavano * 0.05;
+    if (ok && pocetPodezrelych === 0) {
+      div.style.cssText += "background:#d1fae5;border:1px solid #6ee7b7;color:#065f46";
+      div.innerHTML = `✅ <strong>Vše sedí!</strong> Součet ${czMoney(suma)} odpovídá faktuře (bez DPH: ${czMoney(ocr_bez)})`;
+    } else {
+      div.style.cssText += "background:#fef3c7;border:1px solid #fbbf24;color:#92400e";
+      div.innerHTML = `⚠️ <strong>Zkontroluj!</strong> Součet položek: <strong>${czMoney(suma)}</strong> &nbsp;|&nbsp; Faktura bez DPH: <strong>${czMoney(ocr_bez)}</strong>
+        ${pocetPodezrelych > 0 ? `<br><small>🔴 ${pocetPodezrelych} položka/položky označeny červeně – zkontroluj je</small>` : ""}`;
+    }
+  } else if (pocetPodezrelych > 0) {
+    div.style.cssText += "background:#fef3c7;border:1px solid #fbbf24;color:#92400e";
+    div.innerHTML = `⚠️ <strong>${pocetPodezrelych} podezřelá položka</strong> označena červeně – zkontroluj ji před uložením`;
+  } else {
+    div.style.cssText += "background:#f0fdf4;border:1px solid #86efac;color:#166534";
+    div.innerHTML = `✅ <strong>Načteno bez zjevných chyb</strong> – zkontroluj a ulož`;
+  }
 
-    polozky = data.pop("polozky", [])
+  document.getElementById("parsedForm").insertAdjacentElement("afterbegin", div);
+}
 
-    with get_db() as conn:
-        cur = conn.execute("""
-            INSERT INTO faktury (firma_zkratka, dodavatel, cislo_faktury, datum_vystaveni,
-                datum_splatnosti, zpusob_uhrady, stav, celkem_s_dph, soubor_cesta, soubor_url, zdroj, duplicita_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            data.get("firma_zkratka"),
-            data.get("dodavatel"),
-            data.get("cislo_faktury",""),
-            data.get("datum_vystaveni",""),
-            data.get("datum_splatnosti",""),
-            data.get("zpusob_uhrady",""),
-            data.get("stav","ceka"),
-            data.get("celkem_s_dph", 0),
-            data.get("soubor_cesta",""),
-            data.get("soubor_url",""),
-            data.get("zdroj","rucni"),
-            data.get("duplicita_id", None)
-        ))
-        faktura_id = cur.lastrowid
+function appendPolozkaRow(p = {}, kontrola = null) {
+  const tr = document.createElement("tr");
+  const podezrela = (p.celkem_s_dph === 0 || p.celkem_s_dph == null ||
+                     p.mnozstvi > 500 || p.mnozstvi <= 0);
+  if (podezrela) {
+    tr.style.background = "rgba(239,68,68,0.08)";
+    tr.title = "⚠️ Tato položka vypadá podezřele – zkontroluj ji";
+  }
+  tr.innerHTML = `
+    <td><input class="p-nazev" value="${escHtml(p.nazev||"")}" style="${podezrela ? "border-color:#ef4444;color:#b91c1c" : ""}"></td>
+    <td><input class="p-mnozstvi" type="number" step="0.001" value="${p.mnozstvi||1}" style="width:80px${podezrela ? ";border-color:#ef4444" : ""}" oninput="updateTotal()"></td>
+    <td><input class="p-jednotka" value="${p.jednotka||"ks"}" style="width:55px"></td>
+    <td><input class="p-cena-j" type="number" step="0.01" value="${p.cena_za_jednotku_s_dph||0}" style="width:100px${podezrela ? ";border-color:#ef4444" : ""}" oninput="updateTotal()"></td>
+    <td><input class="p-celkem" type="number" step="0.01" value="${p.celkem_s_dph||0}" style="width:110px${podezrela ? ";border-color:#ef4444" : ""}" oninput="updateTotal()"></td>
+    <td><button class="remove-row" onclick="this.closest('tr').remove();updateTotal()">✕</button></td>`;
+  document.getElementById("polozkyBody").appendChild(tr);
+}
 
-        for p in polozky:
-            nazev = p.get("nazev","").strip()
-            if not nazev: continue
-            mnozstvi = float(p.get("mnozstvi", 1) or 1)
-            celkem   = float(p.get("celkem_s_dph", 0) or 0)
-            cena_j   = float(p.get("cena_za_jednotku_s_dph", 0) or 0)
-            if cena_j == 0 and mnozstvi:
-                cena_j = celkem / mnozstvi
-            jed = p.get("jednotka","ks")
-            zbozi_id = _get_or_create_zbozi(conn, nazev)
-            conn.execute("""
-                INSERT INTO polozky (faktura_id, nazev, mnozstvi, jednotka,
-                    cena_za_jednotku_s_dph, celkem_s_dph, zbozi_id)
-                VALUES (?,?,?,?,?,?,?)
-            """, (faktura_id, nazev, mnozstvi, jed, round(cena_j,4), round(celkem,2), zbozi_id))
+function addPolozkaRow() { appendPolozkaRow(); }
 
-        recalc_faktura_total(conn, faktura_id)
+function updateTotal() {
+  let t = 0;
+  document.querySelectorAll("#polozkyBody tr").forEach(tr => {
+    t += parseFloat(tr.querySelector(".p-celkem")?.value || 0);
+  });
+  const el = document.getElementById("totalSum");
+  if (el) el.textContent = "Celkem s DPH: " + czMoney(t);
 
-    return jsonify({"ok": True, "id": faktura_id})
+  const k = document.getElementById("ocrKontrola");
+  if (k && k.dataset.ocrBezDph) {
+    const ocr_bez = parseFloat(k.dataset.ocrBezDph);
+    const ocekavano = ocr_bez * 1.20;
+    const rozdil = Math.abs(t - ocekavano);
+    const ok = rozdil < ocekavano * 0.05;
+    if (ok) {
+      k.style.background = "#d1fae5"; k.style.border = "1px solid #6ee7b7"; k.style.color = "#065f46";
+      k.innerHTML = `✅ <strong>Částka sedí</strong> – součet ${czMoney(t)} odpovídá faktuře`;
+    } else {
+      k.style.background = "#fef3c7"; k.style.border = "1px solid #fbbf24"; k.style.color = "#92400e";
+      k.innerHTML = `⚠️ <strong>Zkontroluj!</strong> Součet: <strong>${czMoney(t)}</strong> &nbsp;|&nbsp; Faktura bez DPH: <strong>${czMoney(ocr_bez)}</strong>`;
+    }
+  }
+}
 
+async function ulozitFakturuMakro() {
+  const polozky = [];
+  document.querySelectorAll("#polozkyBody tr").forEach(tr => {
+    const nazev = tr.querySelector(".p-nazev")?.value.trim();
+    if (!nazev) return;
+    polozky.push({
+      nazev,
+      mnozstvi: parseFloat(tr.querySelector(".p-mnozstvi")?.value || 1),
+      jednotka: tr.querySelector(".p-jednotka")?.value || "ks",
+      cena_za_jednotku_s_dph: parseFloat(tr.querySelector(".p-cena-j")?.value || 0),
+      celkem_s_dph: parseFloat(tr.querySelector(".p-celkem")?.value || 0),
+    });
+  });
 
-def _get_or_create_zbozi(conn, nazev):
-    row = conn.execute("SELECT zbozi_id FROM zbozi_aliasy WHERE alias=?", (nazev,)).fetchone()
-    if row: return row["zbozi_id"]
-    row = conn.execute("SELECT id FROM zbozi WHERE nazev_canonical=?", (nazev,)).fetchone()
-    if row: return row["id"]
-    cur = conn.execute("INSERT INTO zbozi (nazev_canonical) VALUES (?)", (nazev,))
-    return cur.lastrowid
+  const payload = {
+    firma_zkratka: document.getElementById("nahratFirma").value,
+    dodavatel:     document.getElementById("pDodavatel").value,
+    cislo_faktury: document.getElementById("pCislo").value,
+    datum_vystaveni: document.getElementById("pDatVys").value,
+    datum_splatnosti: document.getElementById("pDatSpl").value,
+    zpusob_uhrady: "Hotovost",
+    stav:          "zaplaceno",
+    soubor_cesta:  uploadedFilePath || "",
+    zdroj:         "makro",
+    polozky,
+  };
 
-@app.route("/api/polozky")
-def api_polozky():
-    firma = request.args.get("firma", "")
-    od    = request.args.get("od", "")
-    do_   = request.args.get("do", "")
+  const res = await api("/api/faktury", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(payload)
+  });
+  toast("Faktura uložena ✓");
+  uploadedFilePath = null;
+  navigateTo("faktury");
+}
 
-    f_cond = "AND f.firma_zkratka=?" if firma else ""
-    od_c   = "AND f.datum_vystaveni>=?" if od else ""
-    do_c   = "AND f.datum_vystaveni<=?" if do_ else ""
-    params = tuple(v for v in [firma, od, do_] if v)
+// ═══════════════════════════════════════════════════════════════
+//  RUČNÍ ZADÁNÍ
+// ═══════════════════════════════════════════════════════════════
+function renderRucni() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header"><h1 class="page-title">Ruční zadání faktury</h1></div>
+    <div class="card" style="max-width:860px">
+      <div class="grid-2" style="gap:1rem">
+        <div class="form-group"><label class="form-label">Firma *</label>
+          <select id="rFirma" class="form-control">
+            ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Dodavatel *</label><input id="rDodavatel" class="form-control" placeholder="Název firmy dodavatele"></div>
+        <div class="form-group"><label class="form-label">Číslo faktury</label><input id="rCislo" class="form-control"></div>
+        <div class="form-group"><label class="form-label">Způsob úhrady</label><input id="rUhrada" class="form-control" placeholder="převodem / hotově"></div>
+        <div class="form-group"><label class="form-label">Datum vystavení</label><input type="date" id="rDatVys" class="form-control"></div>
+        <div class="form-group"><label class="form-label">Datum splatnosti</label><input type="date" id="rDatSpl" class="form-control"></div>
+        <div class="form-group"><label class="form-label">Stav</label>
+          <select id="rStav" class="form-control">
+            <option value="ceka">Čeká na zaplacení</option>
+            <option value="zaplaceno">Zaplaceno</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">Příloha (volitelné)</label>
+          <input type="file" id="rSoubor" class="form-control" accept=".pdf,.png,.jpg,.jpeg">
+        </div>
+      </div>
+      <h4 style="font-family:var(--font-head);margin:1rem 0 .7rem">Položky</h4>
+      <div class="table-wrap">
+        <table class="items-table">
+          <thead><tr><th>Název</th><th>Množství</th><th>Jednotka</th><th>Cena/jedn. s DPH</th><th>Celkem s DPH</th><th></th></tr></thead>
+          <tbody id="rPolozkyBody">
+            <tr>
+              <td><input class="p-nazev" placeholder="Název položky"></td>
+              <td><input class="p-mnozstvi" type="number" step="0.001" value="1" style="width:80px" oninput="rUpdateTotal();rCalcCena(this)"></td>
+              <td><input class="p-jednotka" value="ks" style="width:55px"></td>
+              <td><input class="p-cena-j" type="number" step="0.01" value="0" style="width:100px" oninput="rUpdateTotal();rCalcCelkem(this)"></td>
+              <td><input class="p-celkem" type="number" step="0.01" value="0" style="width:110px" oninput="rUpdateTotal()"></td>
+              <td><button class="remove-row" onclick="this.closest('tr').remove();rUpdateTotal()">✕</button></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <button class="btn btn-secondary btn-sm" style="margin-top:.5rem" onclick="rAddRow()">+ Přidat položku</button>
+      <div style="margin-top:1rem;font-weight:600" id="rTotal"></div>
+      <div class="btn-group" style="margin-top:1.2rem">
+        <button class="btn btn-primary" onclick="ulozitRucni()">💾 Uložit fakturu</button>
+        <button class="btn btn-secondary" onclick="navigateTo('faktury')">Zrušit</button>
+      </div>
+    </div>`;
+  rUpdateTotal();
+}
 
-    with get_db() as conn:
-        rows = conn.execute(f"""
-            SELECT
-                COALESCE(z.nazev_canonical, p.nazev) AS zbozi_nazev,
-                z.id AS zbozi_id,
-                p.jednotka,
-                ROUND(CAST(SUM(p.mnozstvi) AS NUMERIC), 3)            AS celkove_mnozstvi,
-                ROUND(CAST(SUM(p.celkem_s_dph) AS NUMERIC), 2)        AS celkem_utraceno,
-                ROUND(CAST(AVG(p.cena_za_jednotku_s_dph) AS NUMERIC), 4) AS prumerna_cena,
-                COUNT(DISTINCT p.faktura_id)        AS pocet_nakupu,
-                STRING_AGG(DISTINCT f.dodavatel, ', ')  AS dodavatele
-            FROM polozky p
-            JOIN faktury f ON f.id = p.faktura_id
-            LEFT JOIN zbozi z ON z.id = p.zbozi_id
-            WHERE 1=1 {f_cond} {od_c} {do_c}
-            GROUP BY z.id, COALESCE(z.nazev_canonical, p.nazev), p.jednotka
-            ORDER BY celkem_utraceno DESC
-        """, params).fetchall()
-    return jsonify([dict(r) for r in rows])
+function rAddRow() {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input class="p-nazev" placeholder="Název položky"></td>
+    <td><input class="p-mnozstvi" type="number" step="0.001" value="1" style="width:80px" oninput="rUpdateTotal();rCalcCelkem(this)"></td>
+    <td><input class="p-jednotka" value="ks" style="width:55px"></td>
+    <td><input class="p-cena-j" type="number" step="0.01" value="0" style="width:100px" oninput="rUpdateTotal();rCalcCelkem(this)"></td>
+    <td><input class="p-celkem" type="number" step="0.01" value="0" style="width:110px" oninput="rUpdateTotal()"></td>
+    <td><button class="remove-row" onclick="this.closest('tr').remove();rUpdateTotal()">✕</button></td>`;
+  document.getElementById("rPolozkyBody").appendChild(tr);
+}
 
-@app.route("/api/polozky/detail/<int:zbozi_id>")
-def api_zbozi_detail(zbozi_id):
-    with get_db() as conn:
-        zbozi = conn.execute("SELECT * FROM zbozi WHERE id=?", (zbozi_id,)).fetchone()
-        if not zbozi:
-            return jsonify({"error": "Nenalezeno"}), 404
-        aliasy = conn.execute("SELECT alias FROM zbozi_aliasy WHERE zbozi_id=?", (zbozi_id,)).fetchall()
-        nakupy = conn.execute("""
-            SELECT p.*, f.dodavatel, f.datum_vystaveni, f.firma_zkratka, f.id as faktura_id
-            FROM polozky p
-            JOIN faktury f ON f.id = p.faktura_id
-            WHERE p.zbozi_id=?
-            ORDER BY f.datum_vystaveni DESC
-        """, (zbozi_id,)).fetchall()
-    return jsonify({
-        "zbozi": dict(zbozi),
-        "aliasy": [r["alias"] for r in aliasy],
-        "nakupy": [dict(r) for r in nakupy]
+function rCalcCelkem(inp) {
+  const tr = inp.closest("tr");
+  const mn = parseFloat(tr.querySelector(".p-mnozstvi").value||1);
+  const cj = parseFloat(tr.querySelector(".p-cena-j").value||0);
+  tr.querySelector(".p-celkem").value = (mn*cj).toFixed(2);
+  rUpdateTotal();
+}
+function rCalcCena(inp) {
+  const tr = inp.closest("tr");
+  const mn = parseFloat(tr.querySelector(".p-mnozstvi").value||1);
+  const ce = parseFloat(tr.querySelector(".p-celkem").value||0);
+  if (mn) tr.querySelector(".p-cena-j").value = (ce/mn).toFixed(4);
+  rUpdateTotal();
+}
+
+function rUpdateTotal() {
+  let t = 0;
+  document.querySelectorAll("#rPolozkyBody tr").forEach(tr => {
+    t += parseFloat(tr.querySelector(".p-celkem")?.value || 0);
+  });
+  const el = document.getElementById("rTotal");
+  if (el) el.textContent = "Celkem s DPH: " + czMoney(t);
+}
+
+async function ulozitRucni() {
+  const dodavatel = document.getElementById("rDodavatel").value.trim();
+  if (!dodavatel) { toast("Vyplňte dodavatele", true); return; }
+
+  let soubor_cesta = "";
+  const soubFile = document.getElementById("rSoubor").files[0];
+  if (soubFile) {
+    const fd = new FormData(); fd.append("soubor", soubFile);
+    try {
+      const r = await fetch("/api/nahrat", { method:"POST", body:fd });
+      const d = await r.json();
+      soubor_cesta = d.soubor_cesta || "";
+    } catch(e) { toast("Chyba nahrávání přílohy: " + e.message, true); }
+  }
+
+  const polozky = [];
+  document.querySelectorAll("#rPolozkyBody tr").forEach(tr => {
+    const nazev = tr.querySelector(".p-nazev")?.value.trim();
+    if (!nazev) return;
+    polozky.push({
+      nazev,
+      mnozstvi: parseFloat(tr.querySelector(".p-mnozstvi")?.value||1),
+      jednotka: tr.querySelector(".p-jednotka")?.value||"ks",
+      cena_za_jednotku_s_dph: parseFloat(tr.querySelector(".p-cena-j")?.value||0),
+      celkem_s_dph: parseFloat(tr.querySelector(".p-celkem")?.value||0),
+    });
+  });
+
+  const payload = {
+    firma_zkratka: document.getElementById("rFirma").value,
+    dodavatel,
+    cislo_faktury: document.getElementById("rCislo").value,
+    datum_vystaveni: document.getElementById("rDatVys").value,
+    datum_splatnosti: document.getElementById("rDatSpl").value,
+    zpusob_uhrady: document.getElementById("rUhrada").value,
+    stav: document.getElementById("rStav").value,
+    soubor_cesta,
+    zdroj: "rucni",
+    polozky,
+  };
+
+  await api("/api/faktury", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify(payload)
+  });
+  toast("Faktura uložena ✓");
+  navigateTo("faktury");
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ZBOŽÍ / POLOŽKY
+// ═══════════════════════════════════════════════════════════════
+async function renderPolozky() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Přehled zboží</h1>
+      <div class="btn-group">
+        <button class="btn btn-secondary btn-sm" onclick="exportPolozky('xlsx')">⬇ Excel</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportPolozky('csv')">⬇ CSV</button>
+      </div>
+    </div>
+    <div class="filters">
+      <label>Firma:</label>
+      <select id="pFirma" class="firma-select">
+        <option value="">Všechny</option>
+        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+      </select>
+      <label>Od:</label><input type="date" id="pOd">
+      <label>Do:</label><input type="date" id="pDo">
+    </div>
+    <div class="card">
+      <div class="table-wrap" id="polozkyList"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>`;
+
+  loadPolozky();
+  ["pFirma","pOd","pDo"].forEach(id => {
+    document.getElementById(id)?.addEventListener("change", loadPolozky);
+  });
+}
+
+async function loadPolozky() {
+  const params = new URLSearchParams({
+    firma: document.getElementById("pFirma")?.value||"",
+    od:    document.getElementById("pOd")?.value||"",
+    do:    document.getElementById("pDo")?.value||"",
+  });
+  let rows;
+  try { rows = await api(`/api/polozky?${params}`); } catch { return; }
+  App.polozkyData = rows;
+  renderPolozkyTable();
+}
+
+function sortPolozky(col) {
+  if (App.polozkySort.col === col) {
+    App.polozkySort.asc = !App.polozkySort.asc;
+  } else {
+    App.polozkySort.col = col;
+    App.polozkySort.asc = false;
+  }
+  renderPolozkyTable();
+}
+
+function renderPolozkyTable() {
+  const el = document.getElementById("polozkyList");
+  if (!el) return;
+
+  const { col, asc } = App.polozkySort;
+  const numCols = ["celkove_mnozstvi","celkem_utraceno","prumerna_cena","pocet_nakupu"];
+  const sorted = [...App.polozkyData].sort((a, b) => {
+    let va = a[col], vb = b[col];
+    if (numCols.includes(col)) {
+      va = parseFloat(va) || 0;
+      vb = parseFloat(vb) || 0;
+    } else {
+      if (typeof va === "string") va = va.toLowerCase();
+      if (typeof vb === "string") vb = vb.toLowerCase();
+    }
+    if (va < vb) return asc ? -1 : 1;
+    if (va > vb) return asc ? 1 : -1;
+    return 0;
+  });
+
+  const arrow = (c) => col === c ? (asc ? " ▲" : " ▼") : " ⇅";
+  const th = (c, label) =>
+    `<th style="cursor:pointer;user-select:none" onclick="sortPolozky('${c}')">${label}${arrow(c)}</th>`;
+
+  el.innerHTML = `
+    <table>
+      <thead><tr>
+        ${th("zbozi_nazev","Název")}
+        ${th("pocet_nakupu","Počet nákupů")}
+        ${th("celkove_mnozstvi","Celkem ks/kg")}
+        ${th("jednotka","Jednotka")}
+        ${th("prumerna_cena","Průměrná cena/jedn.")}
+        ${th("celkem_utraceno","Celkem s DPH")}
+        <th>Dodavatelé</th>
+      </tr></thead>
+      <tbody>
+        ${sorted.map(r => `
+          <tr class="zbozi-row" data-id="${r.zbozi_id||""}" data-nazev="${escHtml(r.zbozi_nazev)}">
+            <td><strong>${escHtml(r.zbozi_nazev)}</strong></td>
+            <td style="text-align:center">${r.pocet_nakupu}</td>
+            <td>${Number(r.celkove_mnozstvi).toLocaleString("cs-CZ")}</td>
+            <td>${r.jednotka}</td>
+            <td>${czMoney(r.prumerna_cena)}</td>
+            <td><strong>${czMoney(r.celkem_utraceno)}</strong></td>
+            <td style="font-size:.82rem;color:var(--txt2)">${escHtml(r.dodavatele||"")}</td>
+          </tr>`).join("") ||
+          "<tr><td colspan='7' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné položky</td></tr>"}
+      </tbody>
+    </table>`;
+
+  document.querySelectorAll(".zbozi-row").forEach(r => {
+    r.addEventListener("click", () => {
+      if (r.dataset.id) openZboziDetail(r.dataset.id, r.dataset.nazev);
+    });
+  });
+}
+
+async function openZboziDetail(zbozi_id, nazev) {
+  let data;
+  try { data = await api(`/api/polozky/detail/${zbozi_id}`); } catch { return; }
+
+  const body = `
+    <h4 style="margin-bottom:.5rem">${escHtml(data.zbozi.nazev_canonical)}</h4>
+    <div class="alias-list" id="aliasContainer">
+      ${data.aliasy.map(a => `<span class="alias-tag">${escHtml(a)}</span>`).join("")}
+    </div>
+    <div style="margin-top:1rem; display:flex; gap:.5rem; flex-wrap:wrap;">
+      <input id="newAlias" class="form-control" style="max-width:250px" placeholder="Nový alias (alternativní název)">
+      <button class="btn btn-secondary btn-sm" onclick="addAlias(${zbozi_id})">+ Přidat alias</button>
+    </div>
+    <hr style="margin:1rem 0; border-color:var(--border)">
+    <h4 style="font-family:var(--font-head);margin-bottom:.7rem">Historie nákupů</h4>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Datum</th><th>Dodavatel</th><th>Firma</th><th>Množství</th><th>Cena/jedn.</th><th>Celkem</th></tr></thead>
+        <tbody>
+          ${data.nakupy.map(n => `
+            <tr style="cursor:pointer" onclick="closeModal();openFakturaDetail(${n.faktura_id})" title="Zobrazit fakturu">
+              <td>${czDate(n.datum_vystaveni)}</td>
+              <td>${escHtml(n.dodavatel)}</td>
+              <td>${n.firma_zkratka}</td>
+              <td>${Number(n.mnozstvi).toLocaleString("cs-CZ")} ${n.jednotka}</td>
+              <td>${czMoney(n.cena_za_jednotku_s_dph)}</td>
+              <td><strong>${czMoney(n.celkem_s_dph)}</strong> <span style="color:var(--txt2);font-size:.8rem">→</span></td>
+            </tr>`).join("") || "<tr><td colspan='6' style='text-align:center;color:var(--txt2)'>Žádné nákupy</td></tr>"}
+        </tbody>
+      </table>
+    </div>`;
+
+  openModal(`Detail zboží: ${escHtml(nazev)}`, body);
+}
+
+async function addAlias(zbozi_id) {
+  const alias = document.getElementById("newAlias").value.trim();
+  if (!alias) { toast("Vyplňte alias", true); return; }
+  await api("/api/zbozi/alias", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ zbozi_id, alias })
+  });
+  toast("Alias přidán");
+  const el = document.getElementById("aliasContainer");
+  el.innerHTML += `<span class="alias-tag">${escHtml(alias)}</span>`;
+  document.getElementById("newAlias").value = "";
+}
+
+function exportPolozky(fmt) {
+  const params = new URLSearchParams({
+    format: fmt,
+    firma: document.getElementById("pFirma")?.value||"",
+    od:    document.getElementById("pOd")?.value||"",
+    do:    document.getElementById("pDo")?.value||"",
+  });
+  window.location.href = `/api/export/polozky?${params}`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  VÝPLATY
+// ═══════════════════════════════════════════════════════════════
+async function renderVyplaty() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Výplaty</h1>
+      <div class="btn-group">
+        <button class="btn btn-primary btn-sm" onclick="openNovVyplata()">+ Nová výplata</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportVyplaty('xlsx')">⬇ Excel</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportVyplaty('csv')">⬇ CSV</button>
+      </div>
+    </div>
+    <div class="filters">
+      <label>Firma:</label>
+      <select id="vFirma" class="firma-select">
+        <option value="">Všechny</option>
+        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+      </select>
+      <label>Zaměstnanec:</label>
+      <select id="vJmeno">
+        <option value="">Všichni</option>
+      </select>
+      <label>Od:</label><input type="date" id="vOd">
+      <label>Do:</label><input type="date" id="vDo">
+    </div>
+    <div class="card">
+      <div class="table-wrap" id="vyplatyList"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>`;
+
+  await nacistZamestnance();
+  loadVyplaty();
+  ["vFirma","vJmeno","vOd","vDo"].forEach(id => {
+    document.getElementById(id)?.addEventListener("change", loadVyplaty);
+  });
+}
+
+async function nacistZamestnance() {
+  try {
+    const data = await api("/api/vyplaty/zamestnanci");
+    const sel = document.getElementById("vJmeno");
+    if (!sel) return;
+    data.jmena.forEach(j => {
+      const o = document.createElement("option");
+      o.value = j; o.textContent = j;
+      sel.appendChild(o);
+    });
+  } catch {}
+}
+
+async function loadVyplaty() {
+  const params = new URLSearchParams({
+    firma: document.getElementById("vFirma")?.value||"",
+    jmeno: document.getElementById("vJmeno")?.value||"",
+    od:    document.getElementById("vOd")?.value||"",
+    do:    document.getElementById("vDo")?.value||"",
+  });
+  let data;
+  try { data = await api(`/api/vyplaty?${params}`); } catch { return; }
+
+  const el = document.getElementById("vyplatyList");
+  if (!el) return;
+
+  el.innerHTML = `
+    <table>
+      <thead><tr><th>Firma</th><th>Jméno</th><th>Datum</th><th>Období</th><th>Částka</th><th>Poznámka</th><th></th></tr></thead>
+      <tbody>
+        ${data.vyplaty.map(v => `
+          <tr>
+            <td><span class="badge badge-zaplaceno" style="background:var(--green-pale)">${escHtml(v.firma_zkratka||"—")}</span></td>
+            <td><strong>${escHtml(v.jmeno)}</strong></td>
+            <td>${czDate(v.datum)}</td>
+            <td><strong>${czMoney(v.castka)}</strong></td>
+            <td style="color:var(--txt2);font-size:.88rem">${v.obdobi_od||v.obdobi_do ? (czDate(v.obdobi_od)||"—") + " – " + (czDate(v.obdobi_do)||"—") : "—"}</td>
+            <td style="color:var(--txt2);font-size:.88rem">${escHtml(v.poznamka||"")}</td>
+            <td>
+              <button class="btn btn-secondary btn-sm" onclick="editVyplata(${v.id},'${escHtml(v.jmeno)}','${v.datum}',${v.castka},'${escHtml(v.poznamka||"")}','${escHtml(v.firma_zkratka||"")}','${v.obdobi_od||""}','${v.obdobi_do||""}')">✏️</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteVyplata(${v.id})">🗑</button>
+            </td>
+          </tr>`).join("") ||
+          "<tr><td colspan='6' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné výplaty</td></tr>"}
+      </tbody>
+      ${data.vyplaty.length ? `
+      <tfoot>
+        <tr class="table-footer">
+          <td colspan="4">Celkem (${data.vyplaty.length} výplat)</td>
+          <td colspan="3"><strong>${czMoney(data.celkem)}</strong></td>
+        </tr>
+      </tfoot>` : ""}
+    </table>`;
+}
+
+function vyplataFormHtml(v = {}) {
+  return `
+    <div class="grid-2" style="gap:1rem">
+      <div class="form-group"><label class="form-label">Firma</label>
+        <select id="vFirmaF" class="form-control">
+          <option value="">—</option>
+          ${App.config.firmy.map(f=>`<option value="${f}" ${v.firma_zkratka===f?"selected":""}>${f}</option>`).join("")}
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Jméno *</label>
+        <input id="vJmeno" class="form-control" value="${escHtml(v.jmeno||"")}" placeholder="Jméno zaměstnance">
+      </div>
+      <div class="form-group"><label class="form-label">Datum *</label>
+        <input type="date" id="vDatum" class="form-control" value="${v.datum||new Date().toISOString().split('T')[0]}">
+      </div>
+      <div class="form-group"><label class="form-label">Částka (Kč) *</label>
+        <input type="number" step="0.01" id="vCastka" class="form-control" value="${v.castka||""}">
+      </div>
+    </div>
+    <div class="grid-2" style="gap:1rem">
+      <div class="form-group"><label class="form-label">Období od</label>
+        <input type="date" id="vObdobiOd" class="form-control" value="${v.obdobi_od||""}">
+      </div>
+      <div class="form-group"><label class="form-label">Období do</label>
+        <input type="date" id="vObdobiDo" class="form-control" value="${v.obdobi_do||""}">
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">Poznámka</label>
+      <input id="vPoznamka" class="form-control" value="${escHtml(v.poznamka||"")}" placeholder="Volitelná poznámka">
+    </div>`;
+}
+
+function openNovVyplata() {
+  openModal("Nová výplata", `
+    ${vyplataFormHtml()}
+    <div class="btn-group" style="margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitVyplatu()">💾 Uložit</button>
+    </div>`);
+}
+
+function editVyplata(id, jmeno, datum, castka, poznamka, firma_zkratka, obdobi_od='', obdobi_do='') {
+  openModal("Upravit výplatu", `
+    ${vyplataFormHtml({jmeno, datum, castka, poznamka, firma_zkratka, obdobi_od, obdobi_do})}
+    <div class="btn-group" style="margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitVyplatuEdit(${id})">💾 Uložit změny</button>
+    </div>`);
+}
+
+async function ulozitVyplatu() {
+  const jmeno  = document.getElementById("vJmeno").value.trim();
+  let datum    = document.getElementById("vDatum").value;
+  const castka = parseFloat(document.getElementById("vCastka").value);
+  if (!jmeno || !datum || isNaN(castka)) { toast("Vyplnte jmeno, datum a castku", true); return; }
+  if (/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(datum)) {
+    const [d, m, y] = datum.split(".");
+    datum = `${y}-${m.padStart(2,"0")}-${d.padStart(2,"0")}`;
+  }
+  try {
+    await api("/api/vyplaty", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        jmeno, datum, castka,
+        poznamka: document.getElementById("vPoznamka").value,
+        firma_zkratka: document.getElementById("vFirmaF").value,
+        obdobi_od: document.getElementById("vObdobiOd").value || null,
+        obdobi_do: document.getElementById("vObdobiDo").value || null,
+      })
+    });
+    toast("Výplata uložena ✓");
+    closeModal();
+    loadVyplaty();
+  } catch(e) {
+    toast("Chyba: " + e.message, true);
+  }
+}
+
+async function ulozitVyplatuEdit(id) {
+  const jmeno  = document.getElementById("vJmeno").value.trim();
+  const datum  = document.getElementById("vDatum").value;
+  const castka = parseFloat(document.getElementById("vCastka").value);
+  if (!jmeno || !datum || isNaN(castka)) { toast("Vyplňte jméno, datum a částku", true); return; }
+
+  await api(`/api/vyplaty/${id}`, {
+    method:"PUT", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({
+      jmeno, datum, castka,
+      poznamka: document.getElementById("vPoznamka").value,
+      firma_zkratka: document.getElementById("vFirmaF").value,
+      obdobi_od: document.getElementById("vObdobiOd").value || null,
+      obdobi_do: document.getElementById("vObdobiDo").value || null,
     })
+  });
+  toast("Výplata upravena ✓");
+  closeModal();
+  loadVyplaty();
+}
 
-@app.route("/api/zbozi")
-def api_zbozi_list():
-    with get_db() as conn:
-        rows = conn.execute("SELECT id, nazev_canonical FROM zbozi ORDER BY nazev_canonical").fetchall()
-    return jsonify([dict(r) for r in rows])
+async function deleteVyplata(id) {
+  if (!confirm("Opravdu smazat tuto výplatu?")) return;
+  await api(`/api/vyplaty/${id}`, { method: "DELETE" });
+  toast("Výplata smazána");
+  loadVyplaty();
+}
 
-@app.route("/api/zbozi/alias", methods=["POST"])
-def api_zbozi_alias():
-    data = request.json
-    zbozi_id   = data.get("zbozi_id")
-    alias_text = data.get("alias", "").strip()
-    polozka_id = data.get("polozka_id")
-    if not zbozi_id or not alias_text:
-        return jsonify({"error": "Chybí zbozi_id nebo alias"}), 400
-    with get_db() as conn:
-        try:
-            conn.execute("INSERT INTO zbozi_aliasy (zbozi_id, alias) VALUES (?,?)", (zbozi_id, alias_text))
-        except Exception:
-            conn.execute("UPDATE zbozi_aliasy SET zbozi_id=? WHERE alias=?", (zbozi_id, alias_text))
-        conn.execute("UPDATE polozky SET zbozi_id=? WHERE nazev=?", (zbozi_id, alias_text))
-        if polozka_id:
-            conn.execute("UPDATE polozky SET zbozi_id=? WHERE id=?", (zbozi_id, polozka_id))
-    return jsonify({"ok": True})
+function exportVyplaty(fmt) {
+  const params = new URLSearchParams({
+    format: fmt,
+    firma: document.getElementById("vFirma")?.value||"",
+    od:    document.getElementById("vOd")?.value||"",
+    do:    document.getElementById("vDo")?.value||"",
+  });
+  window.location.href = `/api/export/vyplaty?${params}`;
+}
 
-@app.route("/api/zbozi", methods=["POST"])
-def api_zbozi_create():
-    nazev = request.json.get("nazev_canonical", "").strip()
-    if not nazev:
-        return jsonify({"error": "Chybí název"}), 400
-    with get_db() as conn:
-        try:
-            cur = conn.execute("INSERT INTO zbozi (nazev_canonical) VALUES (?)", (nazev,))
-            return jsonify({"ok": True, "id": cur.lastrowid})
-        except Exception:
-            row = conn.execute("SELECT id FROM zbozi WHERE nazev_canonical=?", (nazev,)).fetchone()
-            return jsonify({"ok": True, "id": row["id"]})
+// ═══════════════════════════════════════════════════════════════
+//  STATISTIKY
+// ═══════════════════════════════════════════════════════════════
+async function renderStatistiky() {
+  const od = new Date(); od.setFullYear(od.getFullYear()-1);
+  const odStr = od.toISOString().split("T")[0];
+  const doStr = new Date().toISOString().split("T")[0];
 
-@app.route("/api/statistiky")
-def api_statistiky():
-    firma = request.args.get("firma", "")
-    od    = request.args.get("od", date.today().replace(day=1).isoformat())
-    do_   = request.args.get("do", date.today().isoformat())
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header"><h1 class="page-title">Statistiky</h1></div>
+    <div class="filters" style="margin-bottom:1rem">
+      <label>Firma:</label>
+      <select id="sFirma" class="firma-select">
+        <option value="">Všechny</option>
+        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+      </select>
+      <label>Od:</label><input type="date" id="sOd" value="${odStr}">
+      <label>Do:</label><input type="date" id="sDo" value="${doStr}">
+      <button class="btn btn-primary btn-sm" onclick="loadStatistiky()">Zobrazit</button>
+    </div>
+    <div id="statContent"><div class="loading-center"><span class="spinner"></span></div></div>
+    <div id="statReporty" style="margin-top:1.5rem"></div>`;
 
-    f_cond  = "AND firma_zkratka=?" if firma else ""
-    f_params = (firma,) if firma else ()
+  loadStatistiky();
+  loadMesicniStatistiky();
+}
 
-    with get_db() as conn:
-        mesice = conn.execute(f"""
-            SELECT strftime('%Y-%m', datum_vystaveni) m, ROUND((SUM(celkem_s_dph))::numeric,2) castka
-            FROM faktury
-            WHERE datum_vystaveni>=? AND datum_vystaveni<=? {f_cond}
-            GROUP BY m ORDER BY m
-        """, (od, do_) + f_params).fetchall()
+async function loadStatistiky() {
+  const params = new URLSearchParams({
+    firma: document.getElementById("sFirma")?.value||"",
+    od:    document.getElementById("sOd")?.value||"",
+    do:    document.getElementById("sDo")?.value||"",
+  });
+  let data;
+  try { data = await api(`/api/statistiky?${params}`); } catch { return; }
 
-        dodavatele = conn.execute(f"""
-            SELECT dodavatel, ROUND((SUM(celkem_s_dph))::numeric,2) castka, COUNT(*) pocet
-            FROM faktury
-            WHERE datum_vystaveni>=? AND datum_vystaveni<=? {f_cond}
-            GROUP BY dodavatel ORDER BY castka DESC LIMIT 10
-        """, (od, do_) + f_params).fetchall()
+  const el = document.getElementById("statContent");
+  if (!el) return;
 
-        zbozi_top = conn.execute(f"""
-            SELECT COALESCE(z.nazev_canonical, p.nazev) zbozi, ROUND((SUM(p.celkem_s_dph))::numeric,2) castka,
-                   ROUND((SUM(p.mnozstvi))::numeric,2) mnozstvi, p.jednotka
-            FROM polozky p
-            JOIN faktury f ON f.id=p.faktura_id
-            LEFT JOIN zbozi z ON z.id=p.zbozi_id
-            WHERE f.datum_vystaveni>=? AND f.datum_vystaveni<=? {f_cond}
-            GROUP BY COALESCE(z.id::text, p.nazev) ORDER BY castka DESC LIMIT 20
-        """, (od, do_) + f_params).fetchall()
+  el.innerHTML = `
+    <div class="grid-2" style="gap:1rem; margin-bottom:1rem">
+      <div class="card">
+        <div class="card-title">Výdaje po měsících</div>
+        <div class="chart-wrap"><canvas id="sBarChart" style="width:100%;height:100%"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Top dodavatelé</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Dodavatel</th><th>Faktur</th><th>Celkem</th></tr></thead>
+            <tbody>
+              ${data.dodavatele.map(d=>`
+                <tr><td>${escHtml(d.dodavatel)}</td><td>${d.pocet}</td><td><strong>${czMoney(d.castka)}</strong></td></tr>
+              `).join("") || "<tr><td colspan='3' style='text-align:center;color:var(--txt2)'>Žádná data</td></tr>"}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Nejnakupovanější zboží (dle výdajů)</div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Zboží</th><th>Celkem s DPH</th><th>Množství</th><th>Jedn.</th></tr></thead>
+          <tbody>
+            ${data.zbozi_top.map(z=>`
+              <tr>
+                <td>${escHtml(z.zbozi)}</td>
+                <td><strong>${czMoney(z.castka)}</strong></td>
+                <td>${Number(z.mnozstvi).toLocaleString("cs-CZ")}</td>
+                <td>${z.jednotka}</td>
+              </tr>`).join("") || "<tr><td colspan='4' style='text-align:center;color:var(--txt2)'>Žádná data</td></tr>"}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
 
-        zbozi_id = request.args.get("zbozi_id")
-        cena_vyvoj = []
-        if zbozi_id:
-            cena_vyvoj = conn.execute(f"""
-                SELECT f.datum_vystaveni dat, ROUND(p.cena_za_jednotku_s_dph,4) cena, f.dodavatel
-                FROM polozky p JOIN faktury f ON f.id=p.faktura_id
-                WHERE p.zbozi_id=? AND f.datum_vystaveni>=? AND f.datum_vystaveni<=? {f_cond}
-                ORDER BY f.datum_vystaveni
-            """, (zbozi_id, od, do_) + f_params).fetchall()
+  requestAnimationFrame(() => {
+    drawBarChart("sBarChart", data.mesice.map(m=>m.mesic), data.mesice.map(m=>m.castka));
+  });
+}
 
-    return jsonify({
-        "mesice": [dict(r) for r in mesice],
-        "dodavatele": [dict(r) for r in dodavatele],
-        "zbozi_top": [dict(r) for r in zbozi_top],
-        "cena_vyvoj": [dict(r) for r in cena_vyvoj]
-    })
+// ═══════════════════════════════════════════════════════════════
+//  NASTAVENÍ
+// ═══════════════════════════════════════════════════════════════
+async function renderNastaveni() {
+  const cfg = await api("/api/config").catch(()=>App.config);
+  const icoMap = cfg.ico_map || {};
+  const firmy  = cfg.firmy || [];
 
-@app.route("/api/export/faktury")
-def export_faktury():
-    fmt   = request.args.get("format", "xlsx")
-    firma = request.args.get("firma", "")
-    stav  = request.args.get("stav", "")
-    od    = request.args.get("od", "")
-    do_   = request.args.get("do", "")
+  const icoRows = firmy.map(f => `
+    <tr>
+      <td style="padding:.4rem .5rem;font-weight:600">${escHtml(f)}</td>
+      <td style="padding:.4rem .5rem">
+        <input class="form-control ico-input" data-firma="${escHtml(f)}"
+          value="${escHtml(icoMap[Object.keys(icoMap).find(k=>icoMap[k]===f)||'']||'')}"
+          placeholder="IČO firmy (8 číslic)" style="max-width:180px">
+      </td>
+    </tr>`).join("");
 
-    clauses, params = [], []
-    if firma: clauses.append("firma_zkratka=?"); params.append(firma)
-    if stav:  clauses.append("stav=?"); params.append(stav)
-    if od:    clauses.append("datum_vystaveni>=?"); params.append(od)
-    if do_:   clauses.append("datum_vystaveni<=?"); params.append(do_)
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header"><h1 class="page-title">Nastavení</h1></div>
+    <div class="card" style="max-width:560px">
+      <div class="form-group">
+        <label class="form-label">Název aplikace</label>
+        <input id="cfgNazev" class="form-control" value="${escHtml(cfg.app_nazev)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Zkratky firem (oddělte čárkou)</label>
+        <input id="cfgFirmy" class="form-control" value="${escHtml(firmy.join(", "))}">
+        <small style="color:var(--txt2)">Příklad: FP, MR, CFF</small>
+      </div>
+      <div class="form-group">
+        <label class="form-label">IČO firem <small style="color:var(--txt2)">(pro automatické rozpoznání při nahrání faktury)</small></label>
+        <table style="width:100%">
+          <thead><tr>
+            <th style="padding:.4rem .5rem;text-align:left">Firma</th>
+            <th style="padding:.4rem .5rem;text-align:left">IČO</th>
+          </tr></thead>
+          <tbody>${icoRows}</tbody>
+        </table>
+      </div>
+      <button class="btn btn-primary" onclick="saveConfig()">💾 Uložit nastavení</button>
+      <button class="btn" style="background:var(--accent);color:#fff;margin-left:.5rem" onclick="opravDuplicity()">🔍 Zkontrolovat duplicity</button>
+      <button class="btn" style="background:#6c757d;color:#fff;margin-left:.5rem" onclick="normalizujNazvy()">🧹 Odstranit ARO/MC/FL prefixy</button>
+      <hr style="margin:1.5rem 0">
+      <div style="border:1px solid #e55;border-radius:8px;padding:1rem;background:#fff5f5">
+        <div style="font-weight:600;color:#c00;margin-bottom:.5rem">⚠️ Nebezpečná zóna</div>
+        <div style="color:var(--txt2);font-size:.9rem;margin-bottom:.75rem">Smaže všechny faktury a položky. Akce je nevratná!</div>
+        <button class="btn" style="background:#c00;color:#fff" onclick="smazatVseFaktury()">🗑️ Smazat všechny faktury</button>
+      </div>
+    </div>`;
+}
 
-    with get_db() as conn:
-        rows = conn.execute(f"""
-            SELECT firma_zkratka, dodavatel, cislo_faktury, datum_vystaveni,
-                   datum_splatnosti, zpusob_uhrady, stav, celkem_s_dph
-            FROM faktury {where} ORDER BY datum_vystaveni DESC
-        """, params).fetchall()
+async function opravDuplicity() {
+  try {
+    const res = await api("/api/oprav-duplicity", { method: "POST" });
+    if (res.ok) {
+      toast(`Hotovo – označeno ${res.opraveno} duplikát${res.opraveno === 1 ? "" : res.opraveno < 5 ? "y" : "ů"} ✓`);
+    } else {
+      toast("Chyba: " + (res.chyba || "neznámá"), true);
+    }
+  } catch (e) {
+    toast("Chyba při kontrole duplicit", true);
+  }
+}
 
-    headers = ["Firma", "Dodavatel", "Číslo faktury", "Datum vystavení",
-               "Datum splatnosti", "Způsob úhrady", "Stav", "Celkem s DPH"]
+async function smazatVseFaktury() {
+  if (!confirm("Opravdu smazat VŠECHNY faktury? Tato akce je nevratná!")) return;
+  if (!confirm("Jste si 100% jistý? Smažou se všechny faktury a položky.")) return;
+  try {
+    const res = await api("/api/smazat-vse-faktury", { method: "POST" });
+    if (res.ok) {
+      toast(`Smazáno ${res.smazano} faktur ✓`);
+      navigate("faktury");
+    } else {
+      toast("Chyba při mazání", true);
+    }
+  } catch (e) {
+    toast("Chyba při mazání", true);
+  }
+}
 
-    if fmt == "csv":
-        buf = io.StringIO()
-        w   = csv.writer(buf, delimiter=";")
-        w.writerow(headers)
-        for r in rows: w.writerow(list(r))
-        buf.seek(0)
-        return send_file(io.BytesIO(buf.getvalue().encode("utf-8-sig")),
-                         mimetype="text/csv", download_name="faktury.csv", as_attachment=True)
-    else:
-        wb_out = openpyxl.Workbook()
-        ws_out = wb_out.active; ws_out.title = "Faktury"
-        _xlsx_header(ws_out, headers)
-        for r in rows: ws_out.append(list(r))
-        buf = io.BytesIO(); wb_out.save(buf); buf.seek(0)
-        return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                         download_name="faktury.xlsx", as_attachment=True)
+async function normalizujNazvy() {
+  if (!confirm("Odstranit prefixy ARO, MC, FL z názvů všech položek? Akce je nevratná.")) return;
+  try {
+    const res = await api("/api/normalizuj-nazvy", { method: "POST" });
+    if (res.ok) {
+      toast(`Hotovo – upraveno ${res.opraveno} názvů ✓`);
+    } else {
+      toast("Chyba", true);
+    }
+  } catch (e) {
+    toast("Chyba při normalizaci", true);
+  }
+}
 
-@app.route("/api/export/polozky")
-def export_polozky():
-    fmt   = request.args.get("format", "xlsx")
-    firma = request.args.get("firma", "")
-    od    = request.args.get("od", "")
-    do_   = request.args.get("do", "")
+async function saveConfig() {
+  const nazev = document.getElementById("cfgNazev").value.trim();
+  const firmy = document.getElementById("cfgFirmy").value.split(",").map(s=>s.trim()).filter(Boolean);
+  if (!firmy.length) { toast("Zadejte alespoň jednu firmu", true); return; }
 
-    f_cond = "AND f.firma_zkratka=?" if firma else ""
-    od_c   = "AND f.datum_vystaveni>=?" if od else ""
-    do_c   = "AND f.datum_vystaveni<=?" if do_ else ""
-    params = tuple(v for v in [firma, od, do_] if v)
+  const ico_map = {};
+  document.querySelectorAll(".ico-input").forEach(inp => {
+    const ico = inp.value.trim().replace(/\s/g,"");
+    const firma = inp.dataset.firma;
+    if (ico && firma) ico_map[ico] = firma;
+  });
 
-    with get_db() as conn:
-        rows = conn.execute(f"""
-            SELECT COALESCE(z.nazev_canonical, p.nazev), p.jednotka,
-                   ROUND((SUM(p.mnozstvi))::numeric,3), ROUND((SUM(p.celkem_s_dph))::numeric,2),
-                   ROUND((AVG(p.cena_za_jednotku_s_dph))::numeric,4),
-                   COUNT(DISTINCT p.faktura_id),
-                   STRING_AGG(DISTINCT f.dodavatel, ', ')
-            FROM polozky p JOIN faktury f ON f.id=p.faktura_id
-            LEFT JOIN zbozi z ON z.id=p.zbozi_id
-            WHERE 1=1 {f_cond} {od_c} {do_c}
-            GROUP BY COALESCE(z.id::text, p.nazev)
-            ORDER BY SUM(p.celkem_s_dph) DESC
-        """, params).fetchall()
+  await api("/api/config", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({ app_nazev: nazev, firmy, ico_map })
+  });
+  await loadConfig();
+  toast("Nastavení uloženo ✓");
+}
 
-    headers = ["Zboží", "Jednotka", "Celkové množství", "Celkem s DPH",
-               "Průměrná cena/jedn.", "Počet nákupů", "Dodavatelé"]
+// ═══════════════════════════════════════════════════════════════
+//  Util
+// ═══════════════════════════════════════════════════════════════
+async function loadMesicniStatistiky() {
+  const firma = document.getElementById("sFirma")?.value || "";
+  let mesice, roky;
+  try {
+    mesice = await api("/api/statistiky/mesice?firma=" + encodeURIComponent(firma));
+    roky   = await api("/api/statistiky/roky");
+  } catch { return; }
+  const el = document.getElementById("statReporty");
+  if (!el) return;
+  const MCZ = ["","Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
+  const rd = {}; const rs = new Set();
+  roky.forEach(r => { rs.add(r.rok); if(!rd[r.mesic]) rd[r.mesic]={}; rd[r.mesic][r.rok]=r.prumer_den; });
+  const ra = [...rs].sort();
+  const srovRows = Object.entries(rd).sort((a,b)=>a[0].localeCompare(b[0])).map(([m,v])=>
+    `<tr><td><strong>${MCZ[parseInt(m)]}</strong></td>${ra.map(r=>`<td style="text-align:right">${v[r]?czMoney(v[r]):"—"}</td>`).join("")}</tr>`).join("");
+  const mRows = mesice.map(m=>
+    `<tr>
+      <td><strong>${m.rok}/${m.mesic}</strong></td>
+      <td style="text-align:right">${m.dni}</td>
+      <td style="text-align:right"><strong>${czMoney(m.trzba_vcpk_sum)}</strong></td>
+      <td style="text-align:right">${czMoney(m.trzba_vcpk_avg)}</td>
+      <td style="text-align:right">${czMoney(m.karty_sum)}</td>
+      <td style="text-align:right">${czMoney(m.karty_avg)}</td>
+      <td style="text-align:right">${czMoney(m.hotovost_sum)}</td>
+      <td style="text-align:right">${czMoney(m.vydaje_sum)}</td>
+      <td style="text-align:center">${m.pizza_cela_sum}/${m.pizza_cela_avg}/d</td>
+      <td style="text-align:center">${m.burger_sum}/${m.burger_avg}/d</td>
+      <td style="text-align:center">${m.burtgulas_sum}/${m.burtgulas_avg}/d</td>
+      <td style="text-align:center">${m.talire_sum}/${m.talire_avg}/d</td>
+    </tr>`).join("");
+  el.innerHTML =
+    `<div class="card" style="margin-bottom:1rem">
+      <div class="card-title">📅 Průměrná denní tržba vč. PK – srovnání let</div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Měsíc</th>${ra.map(r=>`<th style="text-align:right">${r}</th>`).join("")}</tr></thead>
+        <tbody>${srovRows}</tbody>
+      </table></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📊 Měsíční statistiky (Σ součet / ø průměr na den)</div>
+      <div class="table-wrap" style="overflow-x:auto"><table style="min-width:900px">
+        <thead><tr>
+          <th>Měsíc</th><th>Dní</th>
+          <th>Tržba Σ</th><th>ø/den</th>
+          <th>Karty Σ</th><th>ø/den</th>
+          <th>Hotovost Σ</th><th>Výdaje Σ</th>
+          <th>🍕 Celá</th><th>🍔 Burger</th><th>🍲 Guláš</th><th>🍽 Talíře</th>
+        </tr></thead>
+        <tbody>${mRows}</tbody>
+      </table></div>
+    </div>`;
+}
 
-    if fmt == "csv":
-        buf = io.StringIO()
-        w   = csv.writer(buf, delimiter=";")
-        w.writerow(headers)
-        for r in rows: w.writerow(list(r))
-        buf.seek(0)
-        return send_file(io.BytesIO(buf.getvalue().encode("utf-8-sig")),
-                         mimetype="text/csv", download_name="polozky.csv", as_attachment=True)
-    else:
-        wb_out = openpyxl.Workbook()
-        ws_out = wb_out.active; ws_out.title = "Položky"
-        _xlsx_header(ws_out, headers)
-        for r in rows: ws_out.append(list(r))
-        buf = io.BytesIO(); wb_out.save(buf); buf.seek(0)
-        return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                         download_name="polozky.xlsx", as_attachment=True)
+function escHtml(s) {
+  return String(s||"")
+    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+}
 
-@app.route("/api/export/vyplaty")
-def export_vyplaty():
-    fmt   = request.args.get("format", "xlsx")
-    firma = request.args.get("firma", "")
-    od    = request.args.get("od", "")
-    do_   = request.args.get("do", "")
-    clauses, params = [], []
-    if firma: clauses.append("firma_zkratka=?"); params.append(firma)
-    if od:    clauses.append("datum>=?"); params.append(od)
-    if do_:   clauses.append("datum<=?"); params.append(do_)
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-    with get_db() as conn:
-        rows = conn.execute(f"SELECT firma_zkratka, jmeno, datum, castka, poznamka FROM vyplaty {where} ORDER BY datum DESC", params).fetchall()
-    headers = ["Firma", "Jméno", "Datum", "Částka", "Poznámka"]
-    if fmt == "csv":
-        buf = io.StringIO()
-        w = csv.writer(buf, delimiter=";")
-        w.writerow(headers)
-        for r in rows: w.writerow(list(r))
-        buf.seek(0)
-        return send_file(io.BytesIO(buf.getvalue().encode("utf-8-sig")), mimetype="text/csv", download_name="vyplaty.csv", as_attachment=True)
-    else:
-        wb_out = openpyxl.Workbook()
-        ws_out = wb_out.active; ws_out.title = "Výplaty"
-        _xlsx_header(ws_out, headers)
-        for r in rows: ws_out.append(list(r))
-        buf = io.BytesIO(); wb_out.save(buf); buf.seek(0)
-        return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", download_name="vyplaty.xlsx", as_attachment=True)
+// ═══════════════════════════════════════════════════════════════
+//  REPORTY – Denní výkazy
+// ═══════════════════════════════════════════════════════════════
 
-def _xlsx_header(ws, headers):
-    green = "2D6A4F"
-    ws.append(headers)
-    for cell in ws[1]:
-        cell.font = Font(bold=True, color="FFFFFF")
-        cell.fill = PatternFill("solid", fgColor=green)
-        cell.alignment = Alignment(horizontal="center")
+const KARTY_LIMIT = 1500000;
 
-@app.route("/uploads/<path:filename>")
-def uploaded_file(filename):
-    return send_from_directory(UPLOAD_DIR, filename)
+async function renderReporty() {
+  let alert_data = { karty_12m: 0, procent: 0, alert: false, varovani: false };
+  try { alert_data = await api("/api/reporty/karty-alert"); } catch {}
 
+  const alertHtml = alert_data.alert
+    ? `<div style="background:#fee2e2;border:2px solid #ef4444;border-radius:8px;padding:.8rem 1.2rem;margin-bottom:1rem;color:#991b1b;font-weight:600">
+        🚨 POZOR! Karty za posledních 12 měsíců: <strong>${czInt(alert_data.karty_12m)}</strong> 
+        – překročen limit 1 500 000!
+       </div>`
+    : alert_data.varovani
+    ? `<div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:8px;padding:.8rem 1.2rem;margin-bottom:1rem;color:#92400e;font-weight:600">
+        ⚠️ Karty za posledních 12 měsíců: <strong>${czInt(alert_data.karty_12m)}</strong>
+        (${alert_data.procent}% z limitu 1 500 000) – blíží se limit!
+       </div>`
+    : `<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:.6rem 1.2rem;margin-bottom:1rem;color:#166534;font-size:.9rem">
+        💳 Karty celkem (12 měs.): <strong>${czInt(alert_data.karty_12m)}</strong>
+        &nbsp;|&nbsp; ${alert_data.procent}% z limitu 1,5M
+        ${(alert_data.per_firma||[]).map(f=>`
+          <span style="margin-left:1rem;padding:.2rem .6rem;border-radius:4px;background:${f.alert?"#fee2e2":f.varovani?"#fef3c7":"#dcfce7"};color:${f.alert?"#991b1b":f.varovani?"#92400e":"#166534"}">
+            ${escHtml(f.firma)}: <strong>${czInt(f.karty_12m)}</strong> (${f.procent}%)
+          </span>`).join("")}
+        <div style="background:#dcfce7;border-radius:4px;height:6px;margin-top:.4rem">
+          <div style="background:#16a34a;height:6px;border-radius:4px;width:${Math.min(alert_data.procent,100)}%"></div>
+        </div>
+       </div>`;
 
-init_db()
-migrate_db()
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Denní reporty</h1>
+      <div class="btn-group">
+        <button class="btn btn-primary btn-sm" onclick="openNovyReport()">+ Nový report</button>
+        <button class="btn btn-secondary btn-sm" onclick="openImportXlsx()">📥 Import xlsx</button>
+        <button class="btn btn-secondary btn-sm" onclick="smazBudouciReporty()">🗑 Smazat budoucí</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportReporty('xlsx')">⬇ Excel</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportReporty('csv')">⬇ CSV</button>
+      </div>
+    </div>
+    ${alertHtml}
+    <div class="filters">
+      <label>Rok:</label>
+      <select id="rRok" onchange="nastavRokFiltr()">
+        <option value="">Vše</option>
+        <option value="2025">2025</option>
+        <option value="2026" selected>2026</option>
+      </select>
+      <label>Od:</label><input type="date" id="rOd">
+      <label>Do:</label><input type="date" id="rDo">
+      <button class="btn btn-primary btn-sm" onclick="loadReporty()">Zobrazit</button>
+    </div>
+    <div class="card">
+      <div class="table-wrap" id="reportyList"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>`;
 
+  nastavRokFiltr();
+  setTimeout(loadReporty, 50);}
 
-@app.route("/api/smazat-vse-faktury", methods=["POST"])
-def api_smazat_vse_faktury():
-    with get_db() as conn:
-        conn.execute("DELETE FROM polozky")
-        cur = conn.execute("DELETE FROM faktury")
-        smazano = cur.rowcount if hasattr(cur, 'rowcount') else 0
-    return jsonify({"ok": True, "smazano": smazano})
+function nastavRokFiltr() {
+  const rok = document.getElementById("rRok")?.value;
+  const rOd = document.getElementById("rOd");
+  const rDo = document.getElementById("rDo");
+  if (rok) {
+    rOd.value = `${rok}-01-01`;
+    rDo.value = `${rok}-12-31`;
+  } else {
+    rOd.value = "";
+    rDo.value = "";
+  }
+  loadReporty();
+}
 
-@app.route("/api/normalizuj-nazvy", methods=["POST"])
-def api_normalizuj_nazvy():
-    """Odstraní prefixy ARO, MC, FL z názvů položek a sjednotí zbozi."""
-    import re as _re
-    prefix_re = _re.compile(r'^(ARO|MC|FL)\s+', _re.IGNORECASE)
-    with get_db() as conn:
-        polozky = conn.execute("SELECT id, nazev FROM polozky").fetchall()
-        opraveno = 0
-        for p in polozky:
-            nazev = p["nazev"] or ""
-            novy = prefix_re.sub("", nazev).strip()
-            if novy != nazev:
-                conn.execute("UPDATE polozky SET nazev=? WHERE id=?", (novy, p["id"]))
-                opraveno += 1
-    return jsonify({"ok": True, "opraveno": opraveno})
+async function loadReporty() {
+  const params = new URLSearchParams({
+    od: document.getElementById("rOd")?.value || "",
+    do: document.getElementById("rDo")?.value || "",
+  });
+  let rows;
+  try { rows = await api(`/api/reporty?${params}`); } catch { return; }
+  App._reportyData = rows;
+  if (!App._reportySort) App._reportySort = { col: "datum", asc: false };
+  renderReportyTable(rows);
+}
 
-@app.route("/api/oprav-duplicity", methods=["POST"])
-def api_oprav_duplicity():
-    """Jednorázový endpoint – doplní duplicita_id zpětně pro existující duplicitní faktury."""
-    try:
-        with get_db() as conn:
-            faktury = conn.execute(
-                "SELECT id, cislo_faktury, datum_vystaveni, celkem_s_dph FROM faktury ORDER BY id ASC"
-            ).fetchall()
+function sortReporty(col) {
+  const s = App._reportySort;
+  if (s.col === col) s.asc = !s.asc;
+  else { s.col = col; s.asc = false; }
+  const rows = [...(App._reportyData || [])];
+  rows.sort((a, b) => {
+    const va = a[col] ?? "", vb = b[col] ?? "";
+    if (va < vb) return s.asc ? -1 : 1;
+    if (va > vb) return s.asc ? 1 : -1;
+    return 0;
+  });
+  renderReportyTable(rows);
+  loadReporty();
+}
 
-        opraveno = 0
-        with get_db() as conn:
-            for f in faktury:
-                # Hledáme starší fakturu se stejným VS + datum + částka
-                original = conn.execute(
-                    """SELECT id FROM faktury
-                       WHERE cislo_faktury = ? AND datum_vystaveni = ? AND celkem_s_dph = ?
-                       AND id < ? AND (duplicita_id IS NULL OR duplicita_id = 0)
-                       ORDER BY id ASC LIMIT 1""",
-                    (f["cislo_faktury"], f["datum_vystaveni"], f["celkem_s_dph"], f["id"])
-                ).fetchone()
+async function smazBudouciReporty() {
+  if (!confirm("Smazat všechny záznamy s datem v budoucnosti?")) return;
+  const r = await api("/api/reporty/smaz-budouci", { method: "POST" });
+  toast(`Smazáno ${r.smazano} záznamů`);
+  loadReporty();
+}
 
-                if original:
-                    conn.execute(
-                        "UPDATE faktury SET duplicita_id = ? WHERE id = ? AND (duplicita_id IS NULL OR duplicita_id = 0)",
-                        (original["id"], f["id"])
-                    )
-                    opraveno += 1
+function renderReportyTable(rows) {
+  const el = document.getElementById("reportyList");
+  if (!el) return;
+  const s = App._reportySort || { col: "datum", asc: false };
+  const arr = col => s.col === col ? (s.asc ? " ▲" : " ▼") : "";
+  const th = (col, label) => `<th style="cursor:pointer;user-select:none" onclick="sortReporty('${col}')">${label}${arr(col)}</th>`;
 
-        return jsonify({"ok": True, "opraveno": opraveno})
-    except Exception as e:
-        return jsonify({"ok": False, "chyba": str(e)}), 500
+  if (!rows.length) {
+    el.innerHTML = `<div style="text-align:center;color:var(--txt2);padding:3rem">
+      Žádné reporty. <button class="btn btn-primary btn-sm" onclick="openNovyReport()">+ Přidat první</button>
+    </div>`;
+    return;
+  }
 
+  // Součty
+  const sumy = rows.reduce((s, r) => {
+    s.trzba_vcpk += r.trzba_vcpk || 0;
+    s.karty      += r.karty || 0;
+    s.hotovost   += r.hotovost || 0;
+    s.vydaje     += r.vydaje || 0;
+    s.pk_celkem  += r.pk_celkem || 0;
+    s.pizza_cela += r.pizza_cela || 0;
+    s.pizza_ctvrt+= r.pizza_ctvrt || 0;
+    s.burger     += r.burger || 0;
+    s.talire     += r.talire || 0;
+    s.burtgulas  += r.burtgulas || 0;
+    return s;
+  }, {trzba_vcpk:0,karty:0,hotovost:0,vydaje:0,pk_celkem:0,pizza_cela:0,pizza_ctvrt:0,burger:0,talire:0,burtgulas:0});
 
-if __name__ == "__main__":
-    print("=" * 55)
-    print("  Správa faktur – spouštím server")
-    print("  Otevři prohlížeč na: http://localhost:5000")
-    print("=" * 55)
-    app.run(host="0.0.0.0", port=5000, debug=False)
+  el.innerHTML = `
+    <div style="overflow-x:auto">
+    <table style="min-width:900px">
+      <thead><tr>
+        ${th("datum","Datum")}${th("den","Den")}
+        ${th("trzba_vcpk","Tržba vč.PK")}${th("karty","Karty")}${th("hotovost","Hotovost")}${th("vydaje","Výdaje")}
+        ${th("pk_celkem","PK")}
+        ${th("pizza_cela","🍕")}${th("pizza_ctvrt","🍕/4")}${th("burger","🍔")}${th("burtgulas","🍲")}${th("talire","🍽")}
+        <th>Firma</th><th>Směna</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr>
+            <td style="white-space:nowrap"><strong>${czDateShort(r.datum)}</strong></td>
+            <td style="color:var(--txt2);font-size:.82rem">${escHtml(r.den||"")}</td>
+            <td style="text-align:right"><strong>${czInt(r.trzba_vcpk)}</strong></td>
+            <td style="text-align:right">${czInt(r.karty)}</td>
+            <td style="text-align:right">${czInt(r.hotovost)}</td>
+            <td style="text-align:right">${r.vydaje ? czInt(r.vydaje) : "—"}</td>
+            <td style="text-align:right">${r.pk_celkem ? czInt(r.pk_celkem) : "—"}</td>
+            <td style="text-align:center">${r.pizza_cela || "—"}</td>
+            <td style="text-align:center">${r.pizza_ctvrt || "—"}</td>
+            <td style="text-align:center">${r.burger || "—"}</td>
+            <td style="text-align:center">${r.burtgulas || "—"}</td>
+            <td style="text-align:center">${r.talire || "—"}</td>
+            <td style="font-size:.82rem"><strong>${escHtml(r.firma_zkratka||"")}</strong></td>
+            <td style="font-size:.82rem;color:var(--txt2)">${escHtml(r.smena||"")}</td>
+            <td style="white-space:nowrap">
+              <button class="btn btn-secondary btn-sm" onclick="editReport(${r.id})" title="Upravit">✏️</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteReport(${r.id})" title="Smazat">🗑</button>
+            </td>
+          </tr>`).join("")}
+      </tbody>
+      <tfoot>
+        <tr class="table-footer">
+          <td colspan="2">Celkem (${rows.length} dní)</td>
+          <td style="text-align:right"><strong>${czInt(sumy.trzba_vcpk)}</strong></td>
+          <td style="text-align:right"><strong>${czInt(sumy.karty)}</strong></td>
+          <td style="text-align:right"><strong>${czInt(sumy.hotovost)}</strong></td>
+          <td style="text-align:right"><strong>${czInt(sumy.vydaje)}</strong></td>
+          <td style="text-align:right"><strong>${czInt(sumy.pk_celkem)}</strong></td>
+          <td style="text-align:center"><strong>${sumy.pizza_cela}</strong></td>
+          <td style="text-align:center"><strong>${sumy.pizza_ctvrt}</strong></td>
+          <td style="text-align:center"><strong>${sumy.burger}</strong></td>
+          <td style="text-align:center"><strong>${sumy.burtgulas}</strong></td>
+          <td style="text-align:center"><strong>${sumy.talire}</strong></td>
+          <td colspan="3"></td>
+        </tr>
+      </tfoot>
+    </table>
+    </div>`;
+}
+
+// ── Formulář reportu ────────────────────────────────────────────
+function reportFormHtml(r = {}) {
+  const dnes = r.datum || new Date().toISOString().split("T")[0];
+  return `
+    <div class="form-group" style="margin-bottom:.8rem">
+      <label class="form-label">Firma</label>
+      <select id="rfFirma" class="form-control">
+        <option value="">— bez firmy —</option>
+        ${App.config.firmy.map(f=>`<option value="${f}" ${(r.firma_zkratka||App._lastReportFirma||"")==f?"selected":""}>${f}</option>`).join("")}
+      </select>
+    </div>
+    <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:2px solid var(--border);padding-bottom:0">
+      <button id="rtabFoto"  class="tab-btn tab-active" onclick="switchRTab('foto')">📷 Fotka</button>
+      <button id="rtabText"  class="tab-btn" onclick="switchRTab('text')">📋 Vložit text</button>
+      <button id="rtabRucni" class="tab-btn" onclick="switchRTab('rucni')">✏️ Ruční</button>
+    </div>
+
+    <div id="rtabPanelFoto">
+      <div class="dropzone" id="reportDropzone" style="padding:1rem">
+        <div class="dropzone-icon" style="font-size:2rem">📷</div>
+        <div class="dropzone-text">
+          <strong>Přetáhněte fotku lístku</strong> nebo klikněte<br>
+          <small>Claude přečte rukopis automaticky</small>
+        </div>
+        <input type="file" id="reportFileInput" accept="image/*">
+      </div>
+      <div id="reportFotoStatus" style="margin-top:.5rem;font-size:.9rem;color:var(--txt2)"></div>
+    </div>
+
+    <div id="rtabPanelText" style="display:none">
+      <p style="color:var(--txt2);font-size:.88rem;margin-bottom:.5rem">
+        Zkopírujte text ze zprávy (WhatsApp, SMS) a vložte sem (Ctrl+V):
+      </p>
+      <textarea id="reportTextInput" class="form-control" rows="6"
+        placeholder="Např: Datum: 1.3, Den: neděle, Směna: Vali/Renata&#10;Karty: 5500, KOV: 211, Papír: 3800&#10;Tržba: 9664, Pizza celá: 6x, čtvrt: 4x..."></textarea>
+      <button class="btn btn-primary btn-sm" style="margin-top:.5rem" onclick="zpracovatReportText()">
+        🔍 Zpracovat
+      </button>
+      <div id="reportTextStatus" style="margin-top:.4rem;font-size:.9rem;color:var(--txt2)"></div>
+    </div>
+
+    <div id="rtabPanelRucni" style="display:none">
+      <p style="color:var(--txt2);font-size:.88rem">Vyplňte hodnoty ručně nebo opravte načtené.</p>
+    </div>
+
+    <div id="reportFormFields" style="margin-top:1rem">
+      <div class="grid-2" style="gap:.8rem">
+        <div class="form-group">
+          <label class="form-label">Datum *</label>
+          <input type="date" id="rfDatum" class="form-control" value="${dnes}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Den</label>
+          <input id="rfDen" class="form-control" value="${escHtml(r.den||'')}" placeholder="Pondělí...">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Směna (jména)</label>
+          <input id="rfSmena" class="form-control" value="${escHtml(r.smena||'')}" placeholder="Radek, Věrka">
+        </div>
+        <div class="form-group" style="grid-column:span 1"></div>
+      </div>
+      <hr style="margin:.8rem 0;border-color:var(--border)">
+      <div class="grid-2" style="gap:.8rem">
+        <div class="form-group">
+          <label class="form-label">💳 Karty</label>
+          <input type="number" id="rfKarty" class="form-control" value="${r.karty||0}" oninput="rfRecalc()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🔩 KOV (cash registr)</label>
+          <input type="number" id="rfKov" class="form-control" value="${r.kov||0}" oninput="rfRecalc()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">💵 Papír</label>
+          <input type="number" id="rfPapir" class="form-control" value="${r.papir||0}" oninput="rfRecalc()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">📦 Výdaje</label>
+          <input type="number" id="rfVydaje" class="form-control" value="${r.vydaje||0}" oninput="rfRecalc()">
+        </div>
+      </div>
+      <div class="grid-2" style="gap:.8rem;margin-top:.5rem">
+        <div class="form-group">
+          <label class="form-label">🎟 PK 50 Kč (kusů)</label>
+          <input type="number" id="rfPk50" class="form-control" value="${r.pk50_ks||0}" oninput="rfRecalc()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🎟 PK 100 Kč (kusů)</label>
+          <input type="number" id="rfPk100" class="form-control" value="${r.pk100_ks||0}" oninput="rfRecalc()">
+        </div>
+      </div>
+      <div id="rfVypocty" style="background:var(--green-pale);border-radius:8px;padding:.6rem 1rem;margin:.8rem 0;font-size:.9rem">
+        <span id="rfHotovostDisp">Hotovost: 0 Kč</span> &nbsp;|&nbsp;
+        <span id="rfTrzbaDisp">Tržba: 0 Kč</span> &nbsp;|&nbsp;
+        <span id="rfPkDisp">PK: 0 Kč</span> &nbsp;|&nbsp;
+        <strong id="rfTrzbaVcPkDisp">Tržba vč. PK: 0 Kč</strong>
+      </div>
+      <hr style="margin:.8rem 0;border-color:var(--border)">
+      <div class="grid-2" style="gap:.8rem">
+        <div class="form-group">
+          <label class="form-label">🍕 Pizza celá</label>
+          <input type="number" id="rfPizzaCela" class="form-control" value="${r.pizza_cela||0}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🍕 Pizza čtvrt</label>
+          <input type="number" id="rfPizzaCtvrt" class="form-control" value="${r.pizza_ctvrt||0}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🍔 Burger</label>
+          <input type="number" id="rfBurger" class="form-control" value="${r.burger||0}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🍲 Buřtguláš</label>
+          <input type="number" id="rfBurtgulas" class="form-control" value="${r.burtgulas||0}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🍽 Počet talířů</label>
+          <input type="number" id="rfTalire" class="form-control" value="${r.talire||0}">
+        </div>
+      </div>
+    </div>
+
+    <div class="btn-group" style="margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitReport()">💾 Uložit report</button>
+    </div>`;
+}
+
+function switchRTab(tab) {
+  ["foto","text","rucni"].forEach(t => {
+    const panel = document.getElementById("rtabPanel" + t.charAt(0).toUpperCase() + t.slice(1));
+    const btn   = document.getElementById("rtab" + t.charAt(0).toUpperCase() + t.slice(1));
+    if (panel) panel.style.display = t === tab ? "" : "none";
+    if (btn)   btn.classList.toggle("tab-active", t === tab);
+  });
+}
+
+function rfRecalc() {
+  const karty   = parseFloat(document.getElementById("rfKarty")?.value  || 0);
+  const kov     = parseFloat(document.getElementById("rfKov")?.value    || 0);
+  const papir   = parseFloat(document.getElementById("rfPapir")?.value  || 0);
+  const vydaje  = parseFloat(document.getElementById("rfVydaje")?.value || 0);
+  const pk50    = parseInt(document.getElementById("rfPk50")?.value     || 0);
+  const pk100   = parseInt(document.getElementById("rfPk100")?.value    || 0);
+  const hotovost  = kov + papir;
+  const trzba     = karty + hotovost + vydaje;
+  const pkKc      = pk50 * 50 + pk100 * 100;
+  const trzbaVcPk = trzba + pkKc;
+  const el = (id) => document.getElementById(id);
+  if (el("rfHotovostDisp"))  el("rfHotovostDisp").textContent  = "Hotovost: " + czMoney(hotovost);
+  if (el("rfTrzbaDisp"))     el("rfTrzbaDisp").textContent     = "Tržba: " + czMoney(trzba);
+  if (el("rfPkDisp"))        el("rfPkDisp").textContent        = "PK: " + czMoney(pkKc);
+  if (el("rfTrzbaVcPkDisp")) el("rfTrzbaVcPkDisp").textContent = "Tržba vč. PK: " + czMoney(trzbaVcPk);
+}
+
+function naplnReportFormular(data) {
+  const fields = {
+    rfDatum: data.datum || "", rfDen: data.den || "", rfSmena: data.smena || "",
+    rfKarty: data.karty || 0, rfKov: data.kov || 0, rfPapir: data.papir || 0,
+    rfVydaje: data.vydaje || 0, rfPk50: data.pk50_ks || 0, rfPk100: data.pk100_ks || 0,
+    rfPizzaCela: data.pizza_cela || 0, rfPizzaCtvrt: data.pizza_ctvrt || 0,
+    rfBurger: data.burger || 0, rfTalire: data.talire || 0, rfBurtgulas: data.burtgulas || 0,
+  };
+  Object.entries(fields).forEach(([id, val]) => {
+    const el = document.getElementById(id);
+    if (el) el.value = val;
+  });
+  rfRecalc();
+}
+
+function openNovyReport() {
+  openModal("Nový denní report", reportFormHtml());
+  setupReportDropzone();
+  rfRecalc();
+}
+
+async function editReport(id) {
+  let rows;
+  try { rows = await api("/api/reporty"); } catch { return; }
+  const r = rows.find(x => x.id === id);
+  if (!r) { toast("Report nenalezen", true); return; }
+  openModal("Upravit report – " + czDate(r.datum), reportFormHtml(r));
+  setupReportDropzone();
+  rfRecalc();
+}
+
+async function deleteReport(id) {
+  if (!confirm("Opravdu smazat tento report?")) return;
+  await api(`/api/reporty/${id}`, { method: "DELETE" });
+  toast("Report smazán");
+  loadReporty();
+}
+
+function setupReportDropzone() {
+  const dz  = document.getElementById("reportDropzone");
+  const inp = document.getElementById("reportFileInput");
+  if (!dz) return;
+  dz.addEventListener("click", () => inp.click());
+  inp.addEventListener("change", () => { if (inp.files[0]) uploadReportFoto(inp.files[0]); });
+  dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag-over"); });
+  dz.addEventListener("dragleave", () => dz.classList.remove("drag-over"));
+  dz.addEventListener("drop", e => {
+    e.preventDefault(); dz.classList.remove("drag-over");
+    if (e.dataTransfer.files[0]) uploadReportFoto(e.dataTransfer.files[0]);
+  });
+
+  document.addEventListener("paste", function reportPasteHandler(e) {
+    const modal = document.getElementById("modalOverlay");
+    if (!modal || modal.style.display === "none") return;
+    const fotaPanel = document.getElementById("rtabPanelFoto");
+    if (!fotaPanel || fotaPanel.style.display === "none") return;
+    const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) {
+          const statusEl = document.getElementById("reportFotoStatus");
+          if (statusEl) statusEl.innerHTML = `<span class="spinner"></span> Načítám obrázek ze schránky...`;
+          uploadReportFoto(file);
+        }
+        break;
+      }
+    }
+  });
+}
+
+async function uploadReportFoto(file) {
+  const statusEl = document.getElementById("reportFotoStatus");
+  statusEl.innerHTML = `<span class="spinner"></span> Čtu lístek přes AI...`;
+  const fd = new FormData();
+  fd.append("soubor", file);
+  try {
+    const r = await fetch("/api/reporty/nahrat-foto", { method: "POST", body: fd });
+    const data = await r.json();
+    if (data.error) {
+      statusEl.textContent = "❌ " + data.error;
+      return;
+    }
+    statusEl.textContent = "✅ Lístek přečten – zkontrolujte a uložte";
+    naplnReportFormular(data);
+    switchRTab("rucni");
+  } catch (e) {
+    statusEl.textContent = "❌ Chyba: " + e.message;
+  }
+}
+
+async function zpracovatReportText() {
+  const text = document.getElementById("reportTextInput")?.value.trim();
+  if (!text) return;
+  const statusEl = document.getElementById("reportTextStatus");
+  statusEl.innerHTML = `<span class="spinner"></span> Zpracovávám...`;
+  try {
+    const r = await fetch("/api/reporty/nahrat-text", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({text})
+    });
+    const data = await r.json();
+    if (data.error) { statusEl.textContent = "❌ " + data.error; return; }
+    statusEl.textContent = "✅ Zpracováno";
+    naplnReportFormular(data);
+    switchRTab("rucni");
+  } catch(e) {
+    statusEl.textContent = "❌ " + e.message;
+  }
+}
+
+async function ulozitReport() {
+  const datum = document.getElementById("rfDatum")?.value;
+  if (!datum) { toast("Vyplňte datum", true); return; }
+  const payload = {
+    datum,
+    den:         document.getElementById("rfDen")?.value || "",
+    smena:       document.getElementById("rfSmena")?.value || "",
+    karty:       parseFloat(document.getElementById("rfKarty")?.value || 0),
+    kov:         parseFloat(document.getElementById("rfKov")?.value || 0),
+    papir:       parseFloat(document.getElementById("rfPapir")?.value || 0),
+    vydaje:      parseFloat(document.getElementById("rfVydaje")?.value || 0),
+    pk50_ks:     parseInt(document.getElementById("rfPk50")?.value || 0),
+    pk100_ks:    parseInt(document.getElementById("rfPk100")?.value || 0),
+    pizza_cela:  parseInt(document.getElementById("rfPizzaCela")?.value || 0),
+    pizza_ctvrt: parseInt(document.getElementById("rfPizzaCtvrt")?.value || 0),
+    burger:      parseInt(document.getElementById("rfBurger")?.value || 0),
+    talire:      parseInt(document.getElementById("rfTalire")?.value || 0),
+    burtgulas:   parseInt(document.getElementById("rfBurtgulas")?.value || 0),
+    firma_zkratka: document.getElementById("rfFirma")?.value || "",
+  };
+  App._lastReportFirma = document.getElementById("rfFirma")?.value || "";
+  await api("/api/reporty", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify(payload)
+  });
+  toast("Report uložen ✓");
+  closeModal();
+  renderReporty();
+}
+
+// ── Import xlsx ─────────────────────────────────────────────────
+function openImportXlsx() {
+  openModal("Import historických dat (xlsx)", `
+    <p style="color:var(--txt2);font-size:.9rem;margin-bottom:1rem">
+      Nahrajte soubor <strong>CLAUDE_vykaz_2025_2026.xlsx</strong> nebo libovolný soubor
+      ve stejném formátu. Data budou importována do databáze.<br>
+      <small>Záznamy, které již existují (stejné datum), budou přeskočeny.</small>
+    </p>
+    <div class="dropzone" id="importDropzone" style="padding:1rem">
+      <div class="dropzone-icon">📥</div>
+      <div class="dropzone-text"><strong>Přetáhněte xlsx soubor</strong> nebo klikněte</div>
+      <input type="file" id="importFileInput" accept=".xlsx,.xls">
+    </div>
+    <div id="importStatus" style="margin-top:1rem;font-size:.9rem"></div>
+  `);
+
+  const dz  = document.getElementById("importDropzone");
+  const inp = document.getElementById("importFileInput");
+  inp.style.display = "none";
+  dz.addEventListener("click", () => inp.click());
+  inp.addEventListener("change", () => { if (inp.files[0]) doImportXlsx(inp.files[0]); });
+  dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag-over"); });
+  dz.addEventListener("dragleave", () => dz.classList.remove("drag-over"));
+  dz.addEventListener("drop", e => {
+    e.preventDefault(); dz.classList.remove("drag-over");
+    if (e.dataTransfer.files[0]) doImportXlsx(e.dataTransfer.files[0]);
+  });
+}
+
+async function doImportXlsx(file) {
+  const statusEl = document.getElementById("importStatus");
+  statusEl.innerHTML = `<span class="spinner"></span> Importuji data...`;
+  const fd = new FormData();
+  fd.append("soubor", file);
+  try {
+    const r = await fetch("/api/reporty/import-xlsx", { method: "POST", body: fd });
+    const data = await r.json();
+    if (data.error) {
+      statusEl.innerHTML = `❌ Chyba: ${escHtml(data.error)}`;
+      return;
+    }
+    statusEl.innerHTML = `
+      <div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:6px;padding:.7rem 1rem;color:#065f46">
+        ✅ Import dokončen!<br>
+        <strong>${data.imported}</strong> záznamů importováno,
+        <strong>${data.skipped}</strong> přeskočeno (prázdné nebo existující)
+        ${data.errors?.length ? `<br><small style="color:#991b1b">⚠ ${data.errors.join("; ")}</small>` : ""}
+      </div>`;
+    setTimeout(() => { closeModal(); renderReporty(); }, 2000);
+  } catch(e) {
+    statusEl.innerHTML = `❌ ${e.message}`;
+  }
+}
+
+function exportReporty(fmt) {
+  const params = new URLSearchParams({
+    format: fmt,
+    od: document.getElementById("rOd")?.value || "",
+    do: document.getElementById("rDo")?.value || "",
+  });
+  window.location.href = `/api/export/reporty?${params}`;
+}
