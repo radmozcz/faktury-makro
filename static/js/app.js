@@ -1440,6 +1440,10 @@ function exportPolozky(fmt) {
 //  VÝPLATY
 // ═══════════════════════════════════════════════════════════════
 async function renderVyplaty() {
+  // Zjistit aktuální měsíc
+  const dnes = new Date();
+  const mesicOd = `${dnes.getFullYear()}-${String(dnes.getMonth()+1).padStart(2,"0")}-01`;
+
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
       <h1 class="page-title">Výplaty</h1>
@@ -1448,6 +1452,12 @@ async function renderVyplaty() {
         <button class="btn btn-secondary btn-sm" onclick="exportVyplaty('xlsx')">⬇ Excel</button>
         <button class="btn btn-secondary btn-sm" onclick="exportVyplaty('csv')">⬇ CSV</button>
       </div>
+    </div>
+    <div class="card" style="margin-bottom:1rem">
+      <div class="table-wrap" id="vyplatyPrehled"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>
+    <div class="page-header" style="margin-top:1.5rem">
+      <h2 style="font-family:var(--font-head);font-size:1.1rem">Historie výplat</h2>
     </div>
     <div class="filters">
       <label>Firma:</label>
@@ -1466,11 +1476,77 @@ async function renderVyplaty() {
       <div class="table-wrap" id="vyplatyList"><div class="loading-center"><span class="spinner"></span></div></div>
     </div>`;
 
+  await loadVyplatyPrehled(mesicOd);
   await nacistZamestnance();
   loadVyplaty();
   ["vFirma","vJmeno","vOd","vDo"].forEach(id => {
     document.getElementById(id)?.addEventListener("change", loadVyplaty);
   });
+}
+
+async function loadVyplatyPrehled(mesicOd) {
+  const el = document.getElementById("vyplatyPrehled");
+  if (!el) return;
+  // Načíst výplaty za aktuální měsíc
+  let data;
+  try { data = await api(`/api/vyplaty?od=${mesicOd}`); } catch { return; }
+
+  // Seskupit podle jména
+  const zamestnanci = {};
+  data.vyplaty.forEach(v => {
+    if (!zamestnanci[v.jmeno]) {
+      zamestnanci[v.jmeno] = { posledni: null, celkem_mesic: 0, pocet: 0 };
+    }
+    zamestnanci[v.jmeno].celkem_mesic += v.castka || 0;
+    zamestnanci[v.jmeno].pocet++;
+    if (!zamestnanci[v.jmeno].posledni || v.datum > zamestnanci[v.jmeno].posledni.datum) {
+      zamestnanci[v.jmeno].posledni = v;
+    }
+  });
+
+  const mesicLabel = new Date(mesicOd).toLocaleDateString("cs-CZ", {month:"long", year:"numeric"});
+  el.innerHTML = `
+    <div style="font-size:.85rem;color:var(--txt2);margin-bottom:.5rem">Přehled za <strong>${mesicLabel}</strong> — kliknutím na jméno zobrazíte celou historii</div>
+    <table>
+      <thead><tr>
+        <th>Zaměstnanec</th>
+        <th>Poslední výplata</th>
+        <th>Datum</th>
+        <th>Celkem tento měsíc</th>
+        <th>Počet výplat</th>
+      </tr></thead>
+      <tbody>
+        ${Object.entries(zamestnanci).length ? Object.entries(zamestnanci).sort((a,b)=>a[0].localeCompare(b[0],"cs")).map(([jmeno, z]) => `
+          <tr style="cursor:pointer" onclick="zobrazHistoriiZamestnance('${escHtml(jmeno)}')">
+            <td><strong>${escHtml(jmeno)}</strong></td>
+            <td>${czMoney(z.posledni?.castka)}</td>
+            <td>${czDate(z.posledni?.datum)}</td>
+            <td><strong>${czMoney(z.celkem_mesic)}</strong></td>
+            <td style="text-align:center">${z.pocet}×</td>
+          </tr>`).join("")
+          : "<tr><td colspan='5' style='text-align:center;color:var(--txt2);padding:1.5rem'>Žádné výplaty tento měsíc</td></tr>"}
+      </tbody>
+      ${Object.keys(zamestnanci).length ? `
+      <tfoot>
+        <tr class="table-footer">
+          <td colspan="3">Celkem za měsíc</td>
+          <td><strong>${czMoney(Object.values(zamestnanci).reduce((s,z)=>s+z.celkem_mesic,0))}</strong></td>
+          <td></td>
+        </tr>
+      </tfoot>` : ""}
+    </table>`;
+}
+
+function zobrazHistoriiZamestnance(jmeno) {
+  const sel = document.getElementById("vJmeno");
+  if (sel) {
+    // Najít nebo přidat option
+    let found = false;
+    for (let o of sel.options) { if (o.value === jmeno) { o.selected = true; found = true; break; } }
+    if (!found) { const o = new Option(jmeno, jmeno, true, true); sel.add(o); }
+  }
+  loadVyplaty();
+  document.getElementById("vyplatyList")?.scrollIntoView({behavior:"smooth"});
 }
 
 async function nacistZamestnance() {
@@ -1501,11 +1577,11 @@ async function loadVyplaty() {
 
   el.innerHTML = `
     <table>
-      <thead><tr><th>Firma</th><th>Jméno</th><th>Datum</th><th>Období</th><th>Částka</th><th>Poznámka</th><th></th></tr></thead>
+      <thead><tr><th>Firma</th><th>Jméno</th><th>Datum</th><th>Částka</th><th>Období</th><th>Poznámka</th><th></th></tr></thead>
       <tbody>
         ${data.vyplaty.map(v => `
           <tr>
-            <td><span class="badge badge-zaplaceno" style="background:var(--green-pale)">${escHtml(v.firma_zkratka||"—")}</span></td>
+            <td><span class="badge" style="background:var(--green-pale)">${escHtml(v.firma_zkratka||"—")}</span></td>
             <td><strong>${escHtml(v.jmeno)}</strong></td>
             <td>${czDate(v.datum)}</td>
             <td><strong>${czMoney(v.castka)}</strong></td>
@@ -1516,13 +1592,14 @@ async function loadVyplaty() {
               <button class="btn btn-danger btn-sm" onclick="deleteVyplata(${v.id})">🗑</button>
             </td>
           </tr>`).join("") ||
-          "<tr><td colspan='6' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné výplaty</td></tr>"}
+          "<tr><td colspan='7' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné výplaty</td></tr>"}
       </tbody>
       ${data.vyplaty.length ? `
       <tfoot>
         <tr class="table-footer">
-          <td colspan="4">Celkem (${data.vyplaty.length} výplat)</td>
-          <td colspan="3"><strong>${czMoney(data.celkem)}</strong></td>
+          <td colspan="3">Celkem (${data.vyplaty.length} výplat)</td>
+          <td><strong>${czMoney(data.celkem)}</strong></td>
+          <td colspan="3"></td>
         </tr>
       </tfoot>` : ""}
     </table>`;
@@ -1764,7 +1841,19 @@ async function renderNastaveni() {
           <tbody>${icoRows}</tbody>
         </table>
       </div>
-      <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+      <div class="grid-2" style="gap:.8rem;margin-top:1rem;max-width:500px">
+        <div class="form-group">
+          <label class="form-label">💳 Limit terminálu / měsíc (Kč)</label>
+          <input type="number" id="cfgTerminalLimit" class="form-control"
+            value="${App.config.terminal_limit||100000}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">📊 Roční DPH limit (Kč)</label>
+          <input type="number" id="cfgDphLimit" class="form-control"
+            value="${App.config.dph_limit||2000000}">
+        </div>
+      </div>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-top:.5rem">
         <button class="btn btn-primary" onclick="saveConfig()">💾 Uložit nastavení</button>
         <button class="btn" style="background:var(--accent);color:#fff" onclick="opravDuplicity()">🔍 Zkontrolovat duplicity</button>
         <button class="btn" style="background:#6c757d;color:#fff" onclick="normalizujNazvy()">🧹 Odstranit ARO/MC/FL prefixy</button>
@@ -1835,7 +1924,11 @@ async function saveConfig() {
 
   await api("/api/config", {
     method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({ app_nazev: nazev, firmy, ico_map })
+    body: JSON.stringify({
+      app_nazev: nazev, firmy, ico_map,
+      terminal_limit: parseInt(document.getElementById("cfgTerminalLimit")?.value)||100000,
+      dph_limit: parseInt(document.getElementById("cfgDphLimit")?.value)||2000000
+    })
   });
   await loadConfig();
   toast("Nastavení uloženo ✓");
@@ -1909,9 +2002,55 @@ function escHtml(s) {
 
 const KARTY_LIMIT = 1500000;
 
+function renderKartaStatHtml(stats) {
+  const firmy = Object.keys(stats);
+  if (!firmy.length) return "";
+  const card = (firma, d) => {
+    const mPct = Math.min(Math.round(d.mesicni / d.terminal_limit * 100), 100);
+    const rPct = Math.min(Math.round(d.rocni / d.dph_limit * 100), 100);
+    const mColor = mPct >= 100 ? "#ef4444" : mPct >= 80 ? "#f59e0b" : "#16a34a";
+    const rColor = rPct >= 100 ? "#ef4444" : rPct >= 75 ? "#f59e0b" : "#16a34a";
+    const od = d.terminal_od ? new Date(d.terminal_od).toLocaleDateString("cs-CZ") : "—";
+    return `
+      <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:1rem;flex:1;min-width:200px">
+        <div style="font-weight:700;font-size:1.1rem;margin-bottom:.6rem;font-family:var(--font-head)">${escHtml(firma)}</div>
+        <div style="font-size:.8rem;color:var(--txt2);margin-bottom:.3rem">💳 Terminál od ${od}</div>
+        <div style="display:flex;justify-content:space-between;font-size:.88rem;margin-bottom:.2rem">
+          <span>Měsíční karty</span>
+          <strong style="color:${mColor}">${czInt(d.mesicni)} / ${czInt(d.terminal_limit)} Kč</strong>
+        </div>
+        <div style="background:#e5e7eb;border-radius:4px;height:8px;margin-bottom:.7rem">
+          <div style="background:${mColor};height:8px;border-radius:4px;width:${mPct}%;transition:.3s"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:.88rem;margin-bottom:.2rem">
+          <span>DPH rok ${new Date().getFullYear()}</span>
+          <strong style="color:${rColor}">${czInt(d.rocni)} / ${czInt(d.dph_limit)} Kč</strong>
+        </div>
+        <div style="background:#e5e7eb;border-radius:4px;height:8px">
+          <div style="background:${rColor};height:8px;border-radius:4px;width:${rPct}%;transition:.3s"></div>
+        </div>
+        ${mPct >= 90 ? '<div style="margin-top:.5rem;font-size:.8rem;color:#b45309;font-weight:600">⚠️ Blíží se limit terminálu!</div>' : ''}
+        ${mPct >= 100 ? '<div style="margin-top:.5rem;font-size:.8rem;color:#991b1b;font-weight:700">🚨 Limit terminálu překročen! Přepni firmu.</div>' : ''}
+        ${rPct >= 90 ? '<div style="margin-top:.3rem;font-size:.8rem;color:#b45309;font-weight:600">⚠️ Blíží se DPH limit!</div>' : ''}
+        <button class="btn btn-secondary btn-sm" style="margin-top:.7rem;font-size:.75rem" onclick="prepnoutTerminal('${firma}')">🔄 Přepnout — nulovat měsíční</button>
+      </div>`;
+  };
+  return `<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">${firmy.map(f => card(f, stats[f])).join("")}</div>`;
+}
+
+async function prepnoutTerminal(firma) {
+  if (!confirm("Přepnout terminál pro " + firma + "? Měsíční čítač karet se vynuluje od dneška.")) return;
+  await api("/api/config", { method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ terminal_prepnout: firma }) });
+  toast("Terminál přepnut ✓");
+  renderReporty();
+}
+
 async function renderReporty() {
   let alert_data = { karty_12m: 0, procent: 0, alert: false, varovani: false };
   try { alert_data = await api("/api/reporty/karty-alert"); } catch {}
+  let karty_stats = {};
+  try { karty_stats = await api("/api/reporty/karty-stats"); } catch {}
 
   const alertHtml = alert_data.alert
     ? `<div style="background:#fee2e2;border:2px solid #ef4444;border-radius:8px;padding:.8rem 1.2rem;margin-bottom:1rem;color:#991b1b;font-weight:600">
@@ -1947,6 +2086,7 @@ async function renderReporty() {
       </div>
     </div>
     ${alertHtml}
+    ${renderKartaStatHtml(karty_stats)}
     <div class="filters">
       <label>Rok:</label>
       <select id="rRok" onchange="nastavRokFiltr()">
@@ -2048,13 +2188,13 @@ function renderReportyTable(rows) {
       <thead><tr>
         ${th("datum","Datum")}${th("den","Den")}
         ${th("trzba_vcpk","Tržba vč.PK")}${th("karty","Karty")}${th("hotovost","Hotovost")}${th("vydaje","Výdaje")}
-        ${th("pk_celkem","PK")}
-        ${th("pizza_cela","🍕")}${th("pizza_ctvrt","🍕/4")}${th("burger","🍔")}${th("burtgulas","🍲")}${th("talire","🍽")}
+        ${th("pk_celkem","Poukázky")}
+        ${th("pizza_cela","Pizza")}${th("pizza_ctvrt","1/4\nPizza")}${th("burger","Burger")}${th("burtgulas","B-guláš")}${th("talire","Talíře")}
         <th>Firma</th><th>Směna</th><th></th>
       </tr></thead>
       <tbody>
         ${rows.map(r => `
-          <tr>
+          <tr style="cursor:pointer" onclick="editReport(${r.id})">
             <td style="white-space:nowrap"><strong>${czDateShort(r.datum)}</strong></td>
             <td style="color:var(--txt2);font-size:.82rem">${escHtml(r.den||"")}</td>
             <td style="text-align:right"><strong>${czInt(r.trzba_vcpk)}</strong></td>
@@ -2070,8 +2210,9 @@ function renderReportyTable(rows) {
             <td style="font-size:.82rem"><strong>${escHtml(r.firma_zkratka||"")}</strong></td>
             <td style="font-size:.82rem;color:var(--txt2)">${escHtml(r.smena||"")}</td>
             <td style="white-space:nowrap">
-              <button class="btn btn-secondary btn-sm" onclick="editReport(${r.id})" title="Upravit">✏️</button>
-              <button class="btn btn-danger btn-sm" onclick="deleteReport(${r.id})" title="Smazat">🗑</button>
+              ${r.soubor_url ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();window.open('${r.soubor_url}','_blank')" title="Originál">📎</button>` : ''}
+              <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();editReport(${r.id})" title="Upravit">✏️</button>
+              <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteReport(${r.id})" title="Smazat">🗑</button>
             </td>
           </tr>`).join("")}
       </tbody>
@@ -2270,10 +2411,9 @@ function openNovyReport() {
 }
 
 async function editReport(id) {
-  let rows;
-  try { rows = await api("/api/reporty"); } catch { return; }
-  const r = rows.find(x => x.id === id);
-  if (!r) { toast("Report nenalezen", true); return; }
+  let r;
+  try { r = await api("/api/reporty/" + id); } catch { return; }
+  if (!r || r.error) { toast("Report nenalezen", true); return; }
   openModal("Upravit report – " + czDate(r.datum), reportFormHtml(r));
   setupReportDropzone();
   rfRecalc();
@@ -2332,6 +2472,7 @@ async function uploadReportFoto(file) {
       return;
     }
     statusEl.textContent = "✅ Lístek přečten – zkontrolujte a uložte";
+    if (data.soubor_url) App._reportSouborUrl = data.soubor_url;
     naplnReportFormular(data);
     switchRTab("rucni");
   } catch (e) {
@@ -2381,6 +2522,11 @@ async function ulozitReport() {
     firma_zkratka: document.getElementById("rfFirma")?.value || "",
   };
   App._lastReportFirma = document.getElementById("rfFirma")?.value || "";
+  // Přidat soubor_url pokud bylo nahráno foto
+  if (App._reportSouborUrl) {
+    payload.soubor_url = App._reportSouborUrl;
+    App._reportSouborUrl = null;
+  }
   await api("/api/reporty", {
     method: "POST",
     headers: {"Content-Type":"application/json"},
