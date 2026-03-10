@@ -16,6 +16,15 @@ import io
 import re
 import base64
 import anthropic
+
+# Google Cloud Storage
+try:
+    from google.cloud import storage as gcs_storage
+    from google.oauth2 import service_account
+    GCS_SUPPORT = True
+except ImportError:
+    GCS_SUPPORT = False
+    print("⚠  google-cloud-storage není nainstalován – GCS nebude fungovat")
 from datetime import datetime, date, timedelta
 from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, send_from_directory
 from werkzeug.utils import secure_filename
@@ -48,6 +57,60 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 ALLOWED_EXT = {"pdf", "png", "jpg", "jpeg", "tiff", "bmp"}
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+def get_gcs_client():
+    """Vrátí GCS bucket nebo None pokud není nakonfigurováno."""
+    if not GCS_SUPPORT:
+        return None
+    creds_json = os.environ.get("GCS_CREDENTIALS_JSON", "")
+    bucket_name = os.environ.get("GCS_BUCKET_NAME", "")
+    if not creds_json or not bucket_name:
+        return None
+    try:
+        creds_info = json.loads(creds_json)
+        creds = service_account.Credentials.from_service_account_info(creds_info)
+        client = gcs_storage.Client(credentials=creds, project=creds_info.get("project_id"))
+        return client.bucket(bucket_name)
+    except Exception as e:
+        print(f"⚠  GCS init error: {e}")
+        return None
+
+def upload_to_gcs(local_path, filename):
+    """Nahraje soubor do GCS a vrátí signed URL (platné 7 dní) nebo None."""
+    bucket = get_gcs_client()
+    if not bucket:
+        return None
+    try:
+        blob = bucket.blob(f"faktury/{filename}")
+        blob.upload_from_filename(local_path)
+        # Signed URL platné 7 dní
+        url = blob.generate_signed_url(
+            expiration=timedelta(days=7),
+            method="GET",
+            version="v4"
+        )
+        return url
+    except Exception as e:
+        print(f"⚠  GCS upload error: {e}")
+        return None
+
+def get_gcs_url(filename):
+    """Vrátí čerstvé signed URL pro existující soubor v GCS."""
+    bucket = get_gcs_client()
+    if not bucket:
+        return None
+    try:
+        blob = bucket.blob(f"faktury/{filename}")
+        if not blob.exists():
+            return None
+        return blob.generate_signed_url(
+            expiration=timedelta(days=7),
+            method="GET",
+            version="v4"
+        )
+    except Exception as e:
+        print(f"⚠  GCS url error: {e}")
+        return None
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
@@ -1268,7 +1331,13 @@ def api_faktura_detail(fid):
             LEFT JOIN zbozi z ON z.id = p.zbozi_id
             WHERE p.faktura_id=?
         """, (fid,)).fetchall()
-    return jsonify({"faktura": dict(f), "polozky": [dict(p) for p in polozky]})
+    faktura_dict = dict(f)
+    # Pokud máme soubor_cesta, vygeneruj čerstvou GCS URL
+    if faktura_dict.get("soubor_cesta"):
+        gcs_url = get_gcs_url(faktura_dict["soubor_cesta"])
+        if gcs_url:
+            faktura_dict["soubor_url"] = gcs_url
+    return jsonify({"faktura": faktura_dict, "polozky": [dict(p) for p in polozky]})
 
 @app.route("/api/faktury/<int:fid>/stav", methods=["POST"])
 def api_faktura_stav(fid):
@@ -1881,6 +1950,9 @@ def api_nahrat():
     fpath  = os.path.join(UPLOAD_DIR, fname)
     f.save(fpath)
 
+    # Nahrát do GCS (pokud je nakonfigurováno)
+    gcs_url = upload_to_gcs(fpath, fname)
+
     ext = fname.rsplit(".", 1)[1].lower()
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if api_key:
@@ -1900,6 +1972,8 @@ def api_nahrat():
         return jsonify({"error": err, "soubor_cesta": fname}), 200
 
     data["soubor_cesta"] = fname
+    if gcs_url:
+        data["soubor_gcs_url"] = gcs_url
 
     if data.get("cislo_faktury"):
         with get_db() as conn:
