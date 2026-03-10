@@ -118,7 +118,11 @@ app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
 DEFAULT_CONFIG = {
     "firmy": ["FP", "MR", "CFF"],
     "app_nazev": "Správa faktur",
-    "ico_map": {}
+    "ico_map": {},
+    "terminal_limit": 100000,
+    "dph_limit": 2000000,
+    "terminal_aktivni": {},
+    "terminal_od": {}
 }
 
 def load_config():
@@ -337,6 +341,7 @@ def migrate_db():
             ("burtgulas","INTEGER DEFAULT 0"),("hotdog","INTEGER DEFAULT 0"),
             ("snidane","INTEGER DEFAULT 0"),("nakupy","INTEGER DEFAULT 0"),
             ("foto_cesta","TEXT"),("firma_zkratka","TEXT DEFAULT ''"),
+            ("soubor_url","TEXT"),
         ]:
             if col not in existing:
                 try: conn.execute(f"ALTER TABLE reporty ADD COLUMN {col} {typ}")
@@ -1221,8 +1226,58 @@ def api_config():
         cfg["ico_map"] = data["ico_map"]
     if "app_nazev" in data:
         cfg["app_nazev"] = data["app_nazev"]
+    if "terminal_limit" in data:
+        cfg["terminal_limit"] = int(data["terminal_limit"] or 100000)
+    if "dph_limit" in data:
+        cfg["dph_limit"] = int(data["dph_limit"] or 2000000)
+    if "terminal_prepnout" in data:
+        # Přepnutí aktivní firmy - nastaví datum od
+        firma = data["terminal_prepnout"]
+        if not cfg.get("terminal_od"):
+            cfg["terminal_od"] = {}
+        from datetime import date as _date
+        cfg["terminal_od"][firma] = _date.today().isoformat()
     save_config(cfg)
     return jsonify({"ok": True})
+
+@app.route("/api/reporty/karty-stats")
+def api_karty_stats():
+    """Statistiky karet pro info panel - měsíční a roční součty per firma."""
+    import datetime as _dt
+    cfg = load_config()
+    firmy = cfg.get("firmy", [])
+    terminal_od = cfg.get("terminal_od", {})
+    terminal_limit = cfg.get("terminal_limit", 100000)
+    dph_limit = cfg.get("dph_limit", 2000000)
+    rok = str(_dt.date.today().year)
+    result = {}
+    with get_db() as conn:
+        for firma in firmy:
+            # Roční karty (od 1.1. aktuálního roku)
+            row = conn.execute("""
+                SELECT COALESCE(SUM(karty),0) as total
+                FROM reporty
+                WHERE firma_zkratka=? AND datum>=?
+            """, (firma, f"{rok}-01-01")).fetchone()
+            rocni = float((row or {}).get("total", 0))
+
+            # Měsíční karty (od data přepnutí na tuto firmu)
+            od = terminal_od.get(firma, f"{rok}-01-01")
+            row2 = conn.execute("""
+                SELECT COALESCE(SUM(karty),0) as total
+                FROM reporty
+                WHERE firma_zkratka=? AND datum>=?
+            """, (firma, od)).fetchone()
+            mesicni = float((row2 or {}).get("total", 0))
+
+            result[firma] = {
+                "rocni": rocni,
+                "mesicni": mesicni,
+                "terminal_od": od,
+                "terminal_limit": terminal_limit,
+                "dph_limit": dph_limit,
+            }
+    return jsonify(result)
 
 @app.route("/api/dashboard")
 def api_dashboard():
@@ -1504,6 +1559,15 @@ def api_report_nahrat_foto():
         return jsonify({"error": err}), 200
 
     report = build_report_from_parsed(parsed)
+
+    # Nahrát fotku do GCS
+    gcs_url = None
+    try:
+        gcs_url = upload_to_gcs(fpath, f"reporty/{fname}")
+    except Exception as e:
+        app.logger.warning(f"GCS upload reportu selhal: {e}")
+
+    report["soubor_url"] = gcs_url
     return jsonify(report)
 
 
@@ -1558,11 +1622,13 @@ def api_report_ulozit():
     firma = data.get("firma_zkratka", "")
     with get_db() as conn:
         existing = conn.execute("SELECT id FROM reporty WHERE datum=?", (data["datum"],)).fetchone()
+        soubor_url = data.get("soubor_url") or None
         if existing:
             conn.execute("""
                 UPDATE reporty SET den=?,smena=?,karty=?,kov=?,papir=?,hotovost=?,
                 vydaje=?,trzba=?,trzba_vcpk=?,pk50_ks=?,pk100_ks=?,pk_celkem=?,
-                pizza_cela=?,pizza_ctvrt=?,burger=?,talire=?,burtgulas=?,poznamka=?,firma_zkratka=?
+                pizza_cela=?,pizza_ctvrt=?,burger=?,talire=?,burtgulas=?,poznamka=?,firma_zkratka=?,
+                soubor_url=COALESCE(?,soubor_url)
                 WHERE datum=?
             """, (
                 data.get("den",""), data.get("smena",""),
@@ -1572,15 +1638,15 @@ def api_report_ulozit():
                 int(data.get("burger",0) or 0), int(data.get("talire",0) or 0),
                 int(data.get("burtgulas",0) or 0),
                 data.get("poznamka",""), firma,
-                data["datum"]
+                soubor_url, data["datum"]
             ))
             rid = existing["id"]
         else:
             cur = conn.execute("""
                 INSERT INTO reporty (datum,den,smena,karty,kov,papir,hotovost,vydaje,
                 trzba,trzba_vcpk,pk50_ks,pk100_ks,pk_celkem,
-                pizza_cela,pizza_ctvrt,burger,talire,burtgulas,poznamka,firma_zkratka)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                pizza_cela,pizza_ctvrt,burger,talire,burtgulas,poznamka,firma_zkratka,soubor_url)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, (
                 data["datum"], data.get("den",""), data.get("smena",""),
                 karty, kov, papir, hotovost, vydaje, trzba, trzba_vcpk,
@@ -1588,12 +1654,20 @@ def api_report_ulozit():
                 int(data.get("pizza_cela",0) or 0), int(data.get("pizza_ctvrt",0) or 0),
                 int(data.get("burger",0) or 0), int(data.get("talire",0) or 0),
                 int(data.get("burtgulas",0) or 0),
-                data.get("poznamka",""), firma
+                data.get("poznamka",""), firma, soubor_url
             ))
             rid = cur.lastrowid
 
     return jsonify({"ok": True, "id": rid})
 
+
+@app.route("/api/reporty/<int:rid>", methods=["GET"])
+def api_report_get(rid):
+    with get_db() as conn:
+        r = conn.execute("SELECT * FROM reporty WHERE id=?", (rid,)).fetchone()
+    if not r:
+        return jsonify({"error": "Nenalezen"}), 404
+    return jsonify(dict(r))
 
 @app.route("/api/reporty/<int:rid>", methods=["DELETE"])
 def api_report_delete(rid):
