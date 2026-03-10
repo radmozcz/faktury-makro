@@ -1620,6 +1620,12 @@ async function renderNastaveni() {
       </div>
       <button class="btn btn-primary" onclick="saveConfig()">💾 Uložit nastavení</button>
       <button class="btn" style="background:var(--accent);color:#fff;margin-left:.5rem" onclick="opravDuplicity()">🔍 Zkontrolovat duplicity</button>
+      <hr style="margin:1.5rem 0">
+      <div style="border:1px solid #e55;border-radius:8px;padding:1rem;background:#fff5f5">
+        <div style="font-weight:600;color:#c00;margin-bottom:.5rem">⚠️ Nebezpečná zóna</div>
+        <div style="color:var(--txt2);font-size:.9rem;margin-bottom:.75rem">Smaže všechny faktury a položky. Akce je nevratná!</div>
+        <button class="btn" style="background:#c00;color:#fff" onclick="smazatVseFaktury()">🗑️ Smazat všechny faktury</button>
+      </div>
     </div>`;
 }
 
@@ -1633,6 +1639,22 @@ async function opravDuplicity() {
     }
   } catch (e) {
     toast("Chyba při kontrole duplicit", true);
+  }
+}
+
+async function smazatVseFaktury() {
+  if (!confirm("Opravdu smazat VŠECHNY faktury? Tato akce je nevratná!")) return;
+  if (!confirm("Jste si 100% jistý? Smažou se všechny faktury a položky.")) return;
+  try {
+    const res = await api("/api/smazat-vse-faktury", { method: "POST" });
+    if (res.ok) {
+      toast(`Smazáno ${res.smazano} faktur ✓`);
+      navigate("faktury");
+    } else {
+      toast("Chyba při mazání", true);
+    }
+  } catch (e) {
+    toast("Chyba při mazání", true);
   }
 }
 
