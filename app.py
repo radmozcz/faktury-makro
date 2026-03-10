@@ -253,6 +253,7 @@ def init_db():
             stav            TEXT    DEFAULT 'ceka',
             celkem_s_dph    REAL    DEFAULT 0,
             soubor_cesta    TEXT,
+            soubor_url      TEXT,
             zdroj           TEXT    DEFAULT 'rucni',
             created_at      TEXT    DEFAULT NOW()
         )"""),
@@ -347,6 +348,9 @@ def migrate_db():
             fakt_cols = [row[1] for row in conn.execute("PRAGMA table_info(faktury)").fetchall()]
         if "duplicita_id" not in fakt_cols:
             try: conn.execute("ALTER TABLE faktury ADD COLUMN duplicita_id INTEGER")
+            except Exception: pass
+        if "soubor_url" not in fakt_cols:
+            try: conn.execute("ALTER TABLE faktury ADD COLUMN soubor_url TEXT")
             except Exception: pass
     print("migrate_db OK")
 
@@ -1337,8 +1341,8 @@ def api_faktura_detail(fid):
             WHERE p.faktura_id=?
         """, (fid,)).fetchall()
     faktura_dict = dict(f)
-    # Pokud máme soubor_cesta, vygeneruj čerstvou GCS URL
-    if faktura_dict.get("soubor_cesta"):
+    # Pokud nemáme uloženou URL, vygeneruj čerstvou GCS URL
+    if not faktura_dict.get("soubor_url") and faktura_dict.get("soubor_cesta"):
         gcs_url = get_gcs_url(faktura_dict["soubor_cesta"])
         if gcs_url:
             faktura_dict["soubor_url"] = gcs_url
@@ -2012,8 +2016,8 @@ def api_faktura_ulozit():
     with get_db() as conn:
         cur = conn.execute("""
             INSERT INTO faktury (firma_zkratka, dodavatel, cislo_faktury, datum_vystaveni,
-                datum_splatnosti, zpusob_uhrady, stav, celkem_s_dph, soubor_cesta, zdroj, duplicita_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                datum_splatnosti, zpusob_uhrady, stav, celkem_s_dph, soubor_cesta, soubor_url, zdroj, duplicita_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             data.get("firma_zkratka"),
             data.get("dodavatel"),
@@ -2024,6 +2028,7 @@ def api_faktura_ulozit():
             data.get("stav","ceka"),
             data.get("celkem_s_dph", 0),
             data.get("soubor_cesta",""),
+            data.get("soubor_url",""),
             data.get("zdroj","rucni"),
             data.get("duplicita_id", None)
         ))
