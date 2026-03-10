@@ -398,6 +398,11 @@ def parse_makro_pdf(filepath):
             if "Súpistovaru" in first_despaced and "FAKTURA" not in first_despaced:
                 return None, "Tento soubor je 'Súpis tovaru' (interní doklad MAKRO) – není to daňová faktura. Soubor nebyl nahrán."
 
+            # Pokud PDF neobsahuje MAKRO text, předej rovnou Claude
+            makro_keywords = ["MAKRO", "makro", "Cash & Carry"]
+            if not any(kw in first_text for kw in makro_keywords):
+                return None, "Není MAKRO faktura"
+
             for page in pdf.pages:
                 full_text_lines += (page.extract_text() or "").splitlines()
                 words = page.extract_words(x_tolerance=1, y_tolerance=2)
