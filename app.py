@@ -433,13 +433,22 @@ def init_db():
             firma_zkratka   TEXT NOT NULL,
             dodavatel       TEXT DEFAULT '',
             datum           TEXT DEFAULT '',
+            datum_splatnosti TEXT DEFAULT '',
             castka          REAL NOT NULL DEFAULT 0,
             zpusob_uhrady   TEXT DEFAULT 'hotovost',
+            stav            TEXT DEFAULT 'nezaplaceno',
+            popis           TEXT DEFAULT '',
             poznamka        TEXT DEFAULT '',
             soubor_cesta    TEXT DEFAULT '',
             soubor_url      TEXT DEFAULT '',
             zdroj           TEXT DEFAULT 'rucni',
             created_at      TEXT DEFAULT NOW()
+        )"""),
+        ("vydaje_polozky", """CREATE TABLE IF NOT EXISTS vydaje_polozky (
+            id          SERIAL PRIMARY KEY,
+            vydaj_id    INTEGER NOT NULL,
+            nazev       TEXT NOT NULL,
+            castka      REAL NOT NULL DEFAULT 0
         )"""),
     ]
     with get_db() as conn:
@@ -489,6 +498,21 @@ def migrate_db():
             except Exception: pass
         if "soubor_url" not in fakt_cols:
             try: conn.execute("ALTER TABLE faktury ADD COLUMN soubor_url TEXT")
+            except Exception: pass
+        # Migrace vydaje
+        if _USE_PG:
+            cur2.execute("SELECT column_name FROM information_schema.columns WHERE table_name='vydaje'")
+            vydaj_cols = [r["column_name"] for r in cur2.fetchall()]
+        else:
+            vydaj_cols = [row[1] for row in conn.execute("PRAGMA table_info(vydaje)").fetchall()]
+        if "popis" not in vydaj_cols:
+            try: conn.execute("ALTER TABLE vydaje ADD COLUMN popis TEXT DEFAULT ''")
+            except Exception: pass
+        if "stav" not in vydaj_cols:
+            try: conn.execute("ALTER TABLE vydaje ADD COLUMN stav TEXT DEFAULT 'nezaplaceno'")
+            except Exception: pass
+        if "datum_splatnosti" not in vydaj_cols:
+            try: conn.execute("ALTER TABLE vydaje ADD COLUMN datum_splatnosti TEXT DEFAULT ''")
             except Exception: pass
     print("migrate_db OK")
 
@@ -1831,10 +1855,12 @@ def api_vydaje_list():
     firma = request.args.get("firma", "")
     od    = request.args.get("od", "")
     do_   = request.args.get("do", "")
+    stav  = request.args.get("stav", "")
     clauses, params = [], []
     if firma: clauses.append("firma_zkratka=?"); params.append(firma)
     if od:    clauses.append("datum>=?"); params.append(od)
     if do_:   clauses.append("datum<=?"); params.append(do_)
+    if stav:  clauses.append("stav=?"); params.append(stav)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     with get_db() as conn:
         rows = conn.execute(
@@ -1843,7 +1869,16 @@ def api_vydaje_list():
         total = conn.execute(
             f"SELECT COALESCE(SUM(castka),0) as t FROM vydaje {where}", params
         ).fetchone()
-    return jsonify({"vydaje": [dict(r) for r in rows], "celkem": round(_first_val(total), 2)})
+        # Přidat položky ke každému výdaji
+        result = []
+        for r in rows:
+            d = dict(r)
+            polozky = conn.execute(
+                "SELECT * FROM vydaje_polozky WHERE vydaj_id=? ORDER BY nazev", (d["id"],)
+            ).fetchall()
+            d["polozky"] = [dict(p) for p in polozky]
+            result.append(d)
+    return jsonify({"vydaje": result, "celkem": round(_first_val(total), 2)})
 
 @app.route("/api/vydaje", methods=["POST"])
 @vyzaduj_prihlaseni
@@ -1851,46 +1886,78 @@ def api_vydaje_ulozit():
     data = request.json
     if not data.get("firma_zkratka"):
         return jsonify({"error": "Chybí firma"}), 400
+    polozky = data.pop("polozky", [])
     with get_db() as conn:
         cur = conn.execute("""
-            INSERT INTO vydaje (firma_zkratka, dodavatel, datum, castka, zpusob_uhrady, poznamka, soubor_cesta, soubor_url, zdroj)
-            VALUES (?,?,?,?,?,?,?,?,?)
+            INSERT INTO vydaje (firma_zkratka, dodavatel, datum, datum_splatnosti, castka, zpusob_uhrady, stav, popis, poznamka, soubor_cesta, soubor_url, zdroj)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             data.get("firma_zkratka"),
             data.get("dodavatel", ""),
             data.get("datum", ""),
+            data.get("datum_splatnosti", ""),
             float(data.get("castka", 0)),
             data.get("zpusob_uhrady", "hotovost"),
+            data.get("stav", "nezaplaceno"),
+            data.get("popis", ""),
             data.get("poznamka", ""),
             data.get("soubor_cesta", ""),
             data.get("soubor_url", ""),
             data.get("zdroj", "rucni"),
         ))
-    return jsonify({"ok": True, "id": cur.lastrowid})
+        vid = cur.lastrowid
+        for p in polozky:
+            nazev = (p.get("nazev") or "").strip()
+            if not nazev: continue
+            conn.execute("INSERT INTO vydaje_polozky (vydaj_id, nazev, castka) VALUES (?,?,?)",
+                (vid, nazev, float(p.get("castka", 0))))
+    return jsonify({"ok": True, "id": vid})
 
 @app.route("/api/vydaje/<int:vid>", methods=["PUT"])
 @vyzaduj_prihlaseni
 def api_vydaje_edit(vid):
     data = request.json
+    polozky = data.pop("polozky", None)
     with get_db() as conn:
         conn.execute("""
-            UPDATE vydaje SET dodavatel=?, datum=?, castka=?, zpusob_uhrady=?, poznamka=?, firma_zkratka=?
+            UPDATE vydaje SET dodavatel=?, datum=?, datum_splatnosti=?, castka=?,
+                zpusob_uhrady=?, stav=?, popis=?, poznamka=?, firma_zkratka=?
             WHERE id=?
         """, (
             data.get("dodavatel", ""),
             data.get("datum", ""),
+            data.get("datum_splatnosti", ""),
             float(data.get("castka", 0)),
             data.get("zpusob_uhrady", "hotovost"),
+            data.get("stav", "nezaplaceno"),
+            data.get("popis", ""),
             data.get("poznamka", ""),
             data.get("firma_zkratka", ""),
             vid,
         ))
+        if polozky is not None:
+            conn.execute("DELETE FROM vydaje_polozky WHERE vydaj_id=?", (vid,))
+            for p in polozky:
+                nazev = (p.get("nazev") or "").strip()
+                if not nazev: continue
+                conn.execute("INSERT INTO vydaje_polozky (vydaj_id, nazev, castka) VALUES (?,?,?)",
+                    (vid, nazev, float(p.get("castka", 0))))
+    return jsonify({"ok": True})
+
+@app.route("/api/vydaje/<int:vid>/stav", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_vydaje_stav(vid):
+    """Rychlá změna stavu zaplaceno/nezaplaceno."""
+    stav = request.json.get("stav", "zaplaceno")
+    with get_db() as conn:
+        conn.execute("UPDATE vydaje SET stav=? WHERE id=?", (stav, vid))
     return jsonify({"ok": True})
 
 @app.route("/api/vydaje/<int:vid>", methods=["DELETE"])
 @vyzaduj_prihlaseni
 def api_vydaje_delete(vid):
     with get_db() as conn:
+        conn.execute("DELETE FROM vydaje_polozky WHERE vydaj_id=?", (vid,))
         conn.execute("DELETE FROM vydaje WHERE id=?", (vid,))
     return jsonify({"ok": True})
 
