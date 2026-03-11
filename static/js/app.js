@@ -3436,14 +3436,14 @@ async function smazatBankovniPohyb(id) {
 //  VÝDAJE
 // ═══════════════════════════════════════════════════════════════
 async function renderVydaje() {
+  const tlacitka = maPravo("vydaje_upravit")
+    ? `<button class="btn btn-primary btn-sm" onclick="openVydajNahrat()">📷 Nahrát doklad</button>
+       <button class="btn btn-sm" onclick="openVydajRucni()">✏️ Ruční zadání</button>`
+    : "";
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
       <h1 class="page-title">Výdaje</h1>
-      <div class="btn-group">
-        ${maPravo("vydaje_upravit") ? `
-        <button class="btn btn-primary btn-sm" onclick="openVydajNahrat()">📷 Nahrát doklad</button>
-        <button class="btn btn-sm" onclick="openVydajRucni()">✏️ Ruční zadání</button>` : ""}
-      </div>
+      <div class="btn-group">${tlacitka}</div>
     </div>
     <div id="vydajeNezaplacene"></div>
     <div class="filters">
@@ -3798,26 +3798,4 @@ async function smazatVydaj(id) {
   await api(`/api/vydaje/${id}`, { method:"DELETE" });
   toast("Výdaj smazán ✓"); loadVydaje(); loadVydajeNezaplacene();
 }
-  document.getElementById("mainContent").innerHTML = `
-    <div class="page-header">
-      <h1 class="page-title">Výdaje</h1>
-      <div class="btn-group">
-        ${maPravo("vydaje_upravit") ? `
-        <button class="btn btn-primary btn-sm" onclick="openVydajNahrat()">📷 Nahrát doklad</button>
-        <button class="btn btn-sm" onclick="openVydajRucni()">✏️ Ruční zadání</button>` : ""}
-      </div>
-    </div>
-    <div class="filters">
-      <label>Firma:</label>
-      <select id="vFirma" class="firma-select" onchange="loadVydaje()">
-        <option value="">Všechny firmy</option>
-        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
-      </select>
-      <label>Od:</label><input type="date" id="vOd" onchange="loadVydaje()">
-      <label>Do:</label><input type="date" id="vDo" onchange="loadVydaje()">
-    </div>
-    <div class="card">
-      <div class="table-wrap" id="vydajeList"><div class="loading-center"><span class="spinner"></span></div></div>
-    </div>`;
-  loadVydaje();
-}
+
