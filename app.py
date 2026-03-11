@@ -26,7 +26,7 @@ except ImportError:
     GCS_SUPPORT = False
     print("⚠  google-cloud-storage není nainstalován – GCS nebude fungovat")
 from datetime import datetime, date, timedelta
-from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, send_from_directory
+from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, send_from_directory, session
 from werkzeug.utils import secure_filename
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -114,6 +114,92 @@ def get_gcs_url(filename):
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
+app.secret_key = os.environ.get("SECRET_KEY", "bistro-tajny-klic-2024-zmen-me")
+
+# ── Přihlašování ────────────────────────────────────────────────────────────────
+# Role: admin, verunka, ucetni
+ROLE_NAMES = {
+    "admin":   "ADMIN",
+    "verunka": "VERUNKA",
+    "ucetni":  "UCETNI",
+}
+
+# Výchozí oprávnění (co smí kdo vidět/dělat)
+# Klíče odpovídají sekcím v aplikaci
+DEFAULT_PRAVA = {
+    "verunka": {
+        "faktury_zobrazit":  True,
+        "faktury_upravit":   True,
+        "faktury_smazat":    False,
+        "faktury_export":    True,
+        "reporty_zobrazit":  True,
+        "reporty_upravit":   True,
+        "vyplaty_zobrazit":  True,
+        "vyplaty_upravit":   False,
+        "zbozi_zobrazit":    True,
+        "naklady_zobrazit":  False,
+        "bankovni_vypisy":   False,
+        "statistiky":        False,
+        "nastaveni":         False,
+    },
+    "ucetni": {
+        "faktury_zobrazit":  True,
+        "faktury_upravit":   False,
+        "faktury_smazat":    False,
+        "faktury_export":    True,
+        "reporty_zobrazit":  False,
+        "reporty_upravit":   False,
+        "vyplaty_zobrazit":  False,
+        "vyplaty_upravit":   False,
+        "zbozi_zobrazit":    False,
+        "naklady_zobrazit":  True,
+        "bankovni_vypisy":   True,
+        "statistiky":        False,
+        "nastaveni":         False,
+    },
+}
+
+def get_prava_z_db():
+    """Načte matici oprávnění z databáze, nebo vrátí výchozí."""
+    try:
+        with get_db() as conn:
+            cur = conn.execute("SELECT role, sekce, povoleno FROM prava")
+            rows = cur.fetchall()
+        if not rows:
+            return DEFAULT_PRAVA.copy()
+        prava = {"verunka": {}, "ucetni": {}}
+        for r in rows:
+            role = r["role"] if isinstance(r, dict) else r[0]
+            sekce = r["sekce"] if isinstance(r, dict) else r[1]
+            povoleno = r["povoleno"] if isinstance(r, dict) else r[2]
+            if role in prava:
+                prava[role][sekce] = bool(povoleno)
+        # Doplnit chybějící klíče výchozími hodnotami
+        for role in ["verunka", "ucetni"]:
+            for sekce, val in DEFAULT_PRAVA[role].items():
+                if sekce not in prava[role]:
+                    prava[role][sekce] = val
+        return prava
+    except Exception:
+        return DEFAULT_PRAVA.copy()
+
+def ma_pravo(sekce):
+    """Zkontroluje zda přihlášený uživatel má právo na danou sekci."""
+    role = session.get("role", "")
+    if role == "admin":
+        return True
+    prava = get_prava_z_db()
+    return prava.get(role, {}).get(sekce, False)
+
+def vyzaduj_prihlaseni(f):
+    """Dekorátor – vrátí 401 pokud uživatel není přihlášen."""
+    from functools import wraps
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get("role"):
+            return jsonify({"error": "Nejsi přihlášen", "login_required": True}), 401
+        return f(*args, **kwargs)
+    return wrapper
 
 DEFAULT_CONFIG = {
     "firmy": ["FP", "MR", "CFF"],
@@ -307,6 +393,13 @@ def init_db():
             firma_zkratka TEXT    DEFAULT '',
             poznamka      TEXT,
             created_at    TEXT    DEFAULT NOW()
+        )"""),
+        ("prava", """CREATE TABLE IF NOT EXISTS prava (
+            id      SERIAL PRIMARY KEY,
+            role    TEXT NOT NULL,
+            sekce   TEXT NOT NULL,
+            povoleno INTEGER DEFAULT 0,
+            UNIQUE(role, sekce)
         )"""),
     ]
     with get_db() as conn:
@@ -1209,12 +1302,88 @@ def build_report_from_parsed(parsed, year=None):
 #  ROUTES
 # ═══════════════════════════════════════════════════════════════════════════════
 
+
+# ── Login / Logout ──────────────────────────────────────────────────────────────
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    heslo = (request.json or {}).get("heslo", "")
+    admin_pwd   = os.environ.get("PASSWORD_ADMIN", "")
+    verunka_pwd = os.environ.get("PASSWORD_VERUNKA", "")
+    ucetni_pwd  = os.environ.get("PASSWORD_UCETNI", "")
+
+    if heslo and heslo == admin_pwd:
+        session["role"] = "admin"
+    elif heslo and heslo == verunka_pwd:
+        session["role"] = "verunka"
+    elif heslo and heslo == ucetni_pwd:
+        session["role"] = "ucetni"
+    else:
+        return jsonify({"ok": False, "chyba": "Špatné heslo"}), 401
+
+    role = session["role"]
+    return jsonify({
+        "ok": True,
+        "role": role,
+        "jmeno": ROLE_NAMES[role],
+        "prava": get_prava_z_db().get(role, {}) if role != "admin" else "vse",
+    })
+
+@app.route("/api/logout", methods=["POST"])
+def api_logout():
+    session.clear()
+    return jsonify({"ok": True})
+
+@app.route("/api/me")
+def api_me():
+    """Vrátí info o přihlášeném uživateli."""
+    role = session.get("role")
+    if not role:
+        return jsonify({"prihlasен": False})
+    return jsonify({
+        "prihlasен": True,
+        "role": role,
+        "jmeno": ROLE_NAMES.get(role, role),
+        "prava": get_prava_z_db().get(role, {}) if role != "admin" else "vse",
+    })
+
+@app.route("/api/prava", methods=["GET"])
+@vyzaduj_prihlaseni
+def api_prava_get():
+    if session.get("role") != "admin":
+        return jsonify({"error": "Pouze admin"}), 403
+    return jsonify(get_prava_z_db())
+
+@app.route("/api/prava", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_prava_set():
+    if session.get("role") != "admin":
+        return jsonify({"error": "Pouze admin"}), 403
+    data = request.json or {}
+    # data = {"verunka": {"faktury_zobrazit": true, ...}, "ucetni": {...}}
+    try:
+        with get_db() as conn:
+            for role, sekce_dict in data.items():
+                if role not in ("verunka", "ucetni"):
+                    continue
+                for sekce, povoleno in sekce_dict.items():
+                    conn.execute("""
+                        INSERT INTO prava (role, sekce, povoleno)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT (role, sekce) DO UPDATE SET povoleno = excluded.povoleno
+                    """, (role, sekce, 1 if povoleno else 0))
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "chyba": str(e)}), 500
+
 @app.route("/")
 def index():
     update_stav_po_splatnosti()
     return render_template("index.html", config=load_config())
 
+
+
 @app.route("/api/config", methods=["GET", "POST"])
+@vyzaduj_prihlaseni
 def api_config():
     if request.method == "GET":
         return jsonify(load_config())
@@ -1243,6 +1412,7 @@ def api_config():
     return jsonify({"ok": True})
 
 @app.route("/api/reporty/karty-stats")
+@vyzaduj_prihlaseni
 def api_karty_stats():
     """Statistiky karet pro info panel - měsíční a roční součty per firma."""
     import datetime as _dt
@@ -1284,6 +1454,7 @@ def api_karty_stats():
     return jsonify(result)
 
 @app.route("/api/dashboard")
+@vyzaduj_prihlaseni
 def api_dashboard():
     update_stav_po_splatnosti()
     firma = request.args.get("firma", "")
@@ -1349,6 +1520,7 @@ def api_dashboard():
     })
 
 @app.route("/api/faktury")
+@vyzaduj_prihlaseni
 def api_faktury():
     firma   = request.args.get("firma", "")
     stav    = request.args.get("stav", "")
@@ -1388,6 +1560,7 @@ def api_faktury():
     })
 
 @app.route("/api/faktury/<int:fid>")
+@vyzaduj_prihlaseni
 def api_faktura_detail(fid):
     with get_db() as conn:
         f = conn.execute("SELECT * FROM faktury WHERE id=?", (fid,)).fetchone()
@@ -1408,6 +1581,7 @@ def api_faktura_detail(fid):
     return jsonify({"faktura": faktura_dict, "polozky": [dict(p) for p in polozky]})
 
 @app.route("/api/faktury/<int:fid>/stav", methods=["POST"])
+@vyzaduj_prihlaseni
 def api_faktura_stav(fid):
     stav = request.json.get("stav")
     if stav not in ("ceka", "zaplaceno", "po_splatnosti"):
@@ -1417,6 +1591,7 @@ def api_faktura_stav(fid):
     return jsonify({"ok": True})
 
 @app.route("/api/faktury/<int:fid>", methods=["DELETE"])
+@vyzaduj_prihlaseni
 def api_faktura_delete(fid):
     with get_db() as conn:
         row = conn.execute("SELECT soubor_cesta FROM faktury WHERE id=?", (fid,)).fetchone()
@@ -1428,6 +1603,7 @@ def api_faktura_delete(fid):
     return jsonify({"ok": True})
 
 @app.route("/api/faktury/<int:fid>", methods=["PUT"])
+@vyzaduj_prihlaseni
 def api_faktura_update(fid):
     data = request.json
     fields = ["firma_zkratka","dodavatel","cislo_faktury","datum_vystaveni",
@@ -1465,12 +1641,14 @@ def api_faktura_update(fid):
 
 # ── API: výplaty ──────────────────────────────────────────────────────────────
 @app.route("/api/vyplaty/zamestnanci", methods=["GET"])
+@vyzaduj_prihlaseni
 def api_vyplaty_zamestnanci():
     with get_db() as conn:
         rows = conn.execute("SELECT DISTINCT jmeno FROM vyplaty ORDER BY jmeno").fetchall()
     return jsonify({"jmena": [r["jmeno"] for r in rows]})
 
 @app.route("/api/vyplaty", methods=["GET"])
+@vyzaduj_prihlaseni
 def api_vyplaty():
     try:
         firma = request.args.get("firma", "")
@@ -1499,6 +1677,7 @@ def api_vyplaty():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/vyplaty", methods=["POST"])
+@vyzaduj_prihlaseni
 def api_vyplata_ulozit():
     try:
         data = request.json
@@ -1524,12 +1703,14 @@ def api_vyplata_ulozit():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/api/vyplaty/<int:vid>", methods=["DELETE"])
+@vyzaduj_prihlaseni
 def api_vyplata_delete(vid):
     with get_db() as conn:
         conn.execute("DELETE FROM vyplaty WHERE id=?", (vid,))
     return jsonify({"ok": True})
 
 @app.route("/api/vyplaty/<int:vid>", methods=["PUT"])
+@vyzaduj_prihlaseni
 def api_vyplata_update(vid):
     data = request.json
     fields = ["jmeno", "datum", "castka", "poznamka", "firma_zkratka", "obdobi_od", "obdobi_do"]
@@ -1545,6 +1726,7 @@ def api_vyplata_update(vid):
 
 # ── API: REPORTY ──────────────────────────────────────────────────────────────
 @app.route("/api/reporty/nahrat-foto", methods=["POST"])
+@vyzaduj_prihlaseni
 def api_report_nahrat_foto():
     if "soubor" not in request.files:
         return jsonify({"error": "Žádný soubor"}), 400
@@ -1576,6 +1758,7 @@ def api_report_nahrat_foto():
 
 
 @app.route("/api/reporty/nahrat-text", methods=["POST"])
+@vyzaduj_prihlaseni
 def api_report_nahrat_text():
     text = request.json.get("text", "").strip()
     if not text:
@@ -1590,6 +1773,7 @@ def api_report_nahrat_text():
 
 
 @app.route("/api/reporty", methods=["GET"])
+@vyzaduj_prihlaseni
 def api_reporty_list():
     od  = request.args.get("od", "")
     do_ = request.args.get("do", "")
@@ -1607,6 +1791,7 @@ def api_reporty_list():
 
 
 @app.route("/api/reporty", methods=["POST"])
+@vyzaduj_prihlaseni
 def api_report_ulozit():
     data = request.json
     if not data.get("datum"):
@@ -1666,6 +1851,7 @@ def api_report_ulozit():
 
 
 @app.route("/api/reporty/<int:rid>", methods=["GET"])
+@vyzaduj_prihlaseni
 def api_report_get(rid):
     with get_db() as conn:
         r = conn.execute("SELECT * FROM reporty WHERE id=?", (rid,)).fetchone()
@@ -1674,6 +1860,7 @@ def api_report_get(rid):
     return jsonify(dict(r))
 
 @app.route("/api/reporty/<int:rid>", methods=["DELETE"])
+@vyzaduj_prihlaseni
 def api_report_delete(rid):
     with get_db() as conn:
         conn.execute("DELETE FROM reporty WHERE id=?", (rid,))
@@ -1681,6 +1868,7 @@ def api_report_delete(rid):
 
 
 @app.route("/api/reporty/smaz-budouci", methods=["POST"])
+@vyzaduj_prihlaseni
 def api_reporty_smaz_budouci():
     dnes = date.today().isoformat()
     with get_db() as conn:
@@ -1690,6 +1878,7 @@ def api_reporty_smaz_budouci():
 
 
 @app.route("/api/reporty/import-xlsx", methods=["POST"])
+@vyzaduj_prihlaseni
 def api_report_import_xlsx():
     if "soubor" not in request.files:
         return jsonify({"error": "Žádný soubor"}), 400
@@ -1800,6 +1989,7 @@ def api_report_import_xlsx():
 
 
 @app.route("/api/reporty/karty-alert")
+@vyzaduj_prihlaseni
 def api_karty_alert():
     with get_db() as conn:
         total_row = conn.execute("""
@@ -1838,6 +2028,7 @@ def api_karty_alert():
 
 
 @app.route("/api/statistiky/mesice")
+@vyzaduj_prihlaseni
 def api_statistiky_mesice():
     firma = request.args.get("firma", "")
     clauses = ["datum <= ?"]
@@ -1879,6 +2070,7 @@ def api_statistiky_mesice():
 
 
 @app.route("/api/statistiky/roky")
+@vyzaduj_prihlaseni
 def api_statistiky_roky():
     with get_db() as conn:
         rows = conn.execute("""
@@ -1896,6 +2088,7 @@ def api_statistiky_roky():
 
 
 @app.route("/api/export/reporty")
+@vyzaduj_prihlaseni
 def export_reporty():
     fmt = request.args.get("format", "xlsx")
     od  = request.args.get("od", "")
@@ -1957,6 +2150,7 @@ def export_reporty():
 
 # ── API: nahrání souboru ──────────────────────────────────────────────────────
 @app.route("/api/nahrat-text", methods=["POST"])
+@vyzaduj_prihlaseni
 def api_nahrat_text():
     text = request.json.get("text", "")
     if not text.strip():
@@ -2046,6 +2240,7 @@ def _parse_makro_text(text):
 
 
 @app.route("/api/nahrat", methods=["POST"])
+@vyzaduj_prihlaseni
 def api_nahrat():
     if "soubor" not in request.files:
         return jsonify({"error": "Žádný soubor"}), 400
@@ -2104,6 +2299,7 @@ def api_nahrat():
     return jsonify(data)
 
 @app.route("/api/faktury", methods=["POST"])
+@vyzaduj_prihlaseni
 def api_faktura_ulozit():
     data = request.json
     required = ["firma_zkratka", "dodavatel"]
@@ -2164,6 +2360,7 @@ def _get_or_create_zbozi(conn, nazev):
     return cur.lastrowid
 
 @app.route("/api/polozky")
+@vyzaduj_prihlaseni
 def api_polozky():
     firma = request.args.get("firma", "")
     od    = request.args.get("od", "")
@@ -2196,6 +2393,7 @@ def api_polozky():
     return jsonify([dict(r) for r in rows])
 
 @app.route("/api/polozky/detail/<int:zbozi_id>")
+@vyzaduj_prihlaseni
 def api_zbozi_detail(zbozi_id):
     with get_db() as conn:
         zbozi = conn.execute("SELECT * FROM zbozi WHERE id=?", (zbozi_id,)).fetchone()
@@ -2216,12 +2414,14 @@ def api_zbozi_detail(zbozi_id):
     })
 
 @app.route("/api/zbozi")
+@vyzaduj_prihlaseni
 def api_zbozi_list():
     with get_db() as conn:
         rows = conn.execute("SELECT id, nazev_canonical FROM zbozi ORDER BY nazev_canonical").fetchall()
     return jsonify([dict(r) for r in rows])
 
 @app.route("/api/zbozi/alias", methods=["POST"])
+@vyzaduj_prihlaseni
 def api_zbozi_alias():
     data = request.json
     zbozi_id   = data.get("zbozi_id")
@@ -2240,6 +2440,7 @@ def api_zbozi_alias():
     return jsonify({"ok": True})
 
 @app.route("/api/zbozi", methods=["POST"])
+@vyzaduj_prihlaseni
 def api_zbozi_create():
     nazev = request.json.get("nazev_canonical", "").strip()
     if not nazev:
@@ -2253,6 +2454,7 @@ def api_zbozi_create():
             return jsonify({"ok": True, "id": row["id"]})
 
 @app.route("/api/statistiky")
+@vyzaduj_prihlaseni
 def api_statistiky():
     firma = request.args.get("firma", "")
     od    = request.args.get("od", date.today().replace(day=1).isoformat())
@@ -2304,6 +2506,7 @@ def api_statistiky():
     })
 
 @app.route("/api/export/faktury")
+@vyzaduj_prihlaseni
 def export_faktury():
     fmt   = request.args.get("format", "xlsx")
     firma = request.args.get("firma", "")
@@ -2346,6 +2549,7 @@ def export_faktury():
                          download_name="faktury.xlsx", as_attachment=True)
 
 @app.route("/api/export/polozky")
+@vyzaduj_prihlaseni
 def export_polozky():
     fmt   = request.args.get("format", "xlsx")
     firma = request.args.get("firma", "")
@@ -2392,6 +2596,7 @@ def export_polozky():
                          download_name="polozky.xlsx", as_attachment=True)
 
 @app.route("/api/export/vyplaty")
+@vyzaduj_prihlaseni
 def export_vyplaty():
     fmt   = request.args.get("format", "xlsx")
     firma = request.args.get("firma", "")
@@ -2438,6 +2643,7 @@ migrate_db()
 
 
 @app.route("/api/smazat-vse-faktury", methods=["POST"])
+@vyzaduj_prihlaseni
 def api_smazat_vse_faktury():
     with get_db() as conn:
         conn.execute("DELETE FROM polozky")
@@ -2446,6 +2652,7 @@ def api_smazat_vse_faktury():
     return jsonify({"ok": True, "smazano": smazano})
 
 @app.route("/api/normalizuj-nazvy", methods=["POST"])
+@vyzaduj_prihlaseni
 def api_normalizuj_nazvy():
     """Odstraní prefixy ARO, MC, FL z nazev_canonical v tabulce zbozi.
     Názvy položek na fakturách zůstanou nedotčeny."""
@@ -2462,6 +2669,7 @@ def api_normalizuj_nazvy():
                 opraveno += 1
     return jsonify({"ok": True, "opraveno": opraveno})
 @app.route("/api/oprav-duplicity", methods=["POST"])
+@vyzaduj_prihlaseni
 def api_oprav_duplicity():
     """Jednorázový endpoint – doplní duplicita_id zpětně pro existující duplicitní faktury."""
     try:
