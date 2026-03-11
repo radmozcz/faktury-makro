@@ -2947,50 +2947,74 @@ function exportReporty(fmt) {
 //  BANKY – Bankovní výpisy
 // ═══════════════════════════════════════════════════════════════
 
-// Hlavní stránka – výběr banky
+// Hlavní stránka – výběr firmy
 function renderBanky() {
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header"><h1 class="page-title">Bankovní výpisy</h1></div>
     <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:1rem">
-      <div class="card" style="flex:1;min-width:220px;max-width:320px;cursor:pointer;text-align:center;padding:2rem;transition:box-shadow .2s"
-           onclick="renderBankaDetail('AirBank')"
+      ${App.config.firmy.map(f => `
+      <div class="card" style="flex:1;min-width:200px;max-width:280px;cursor:pointer;text-align:center;padding:2rem;transition:box-shadow .2s"
+           onclick="renderBankyFirma('${f}')"
+           onmouseover="this.style.boxShadow='0 4px 24px rgba(0,0,0,.13)'"
+           onmouseout="this.style.boxShadow=''">
+        <div style="font-size:3rem">🏢</div>
+        <div style="font-size:1.2rem;font-weight:700;margin-top:.5rem">${f}</div>
+        <div style="color:var(--txt2);font-size:.9rem;margin-top:.3rem">Vybrat banku →</div>
+      </div>`).join("")}
+    </div>`;
+}
+
+// Výběr banky pro danou firmu
+function renderBankyFirma(firma) {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">
+        <span style="cursor:pointer;color:var(--txt2);font-weight:400" onclick="renderBanky()">Banky</span>
+        <span style="margin:0 .4rem">›</span>${firma}
+      </h1>
+    </div>
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:1rem">
+      <div class="card" style="flex:1;min-width:200px;max-width:280px;cursor:pointer;text-align:center;padding:2rem;transition:box-shadow .2s"
+           onclick="renderBankaDetail('AirBank','${firma}')"
            onmouseover="this.style.boxShadow='0 4px 24px rgba(0,0,0,.13)'"
            onmouseout="this.style.boxShadow=''">
         <div style="font-size:3rem">🏦</div>
-        <div style="font-size:1.3rem;font-weight:700;margin-top:.5rem">Air Bank</div>
+        <div style="font-size:1.2rem;font-weight:700;margin-top:.5rem">Air Bank</div>
         <div style="color:var(--txt2);font-size:.9rem;margin-top:.3rem">Zobrazit výpisy →</div>
       </div>
-      <div class="card" style="flex:1;min-width:220px;max-width:320px;cursor:pointer;text-align:center;padding:2rem;transition:box-shadow .2s"
-           onclick="renderBankaDetail('RB')"
+      <div class="card" style="flex:1;min-width:200px;max-width:280px;cursor:pointer;text-align:center;padding:2rem;transition:box-shadow .2s"
+           onclick="renderBankaDetail('RB','${firma}')"
            onmouseover="this.style.boxShadow='0 4px 24px rgba(0,0,0,.13)'"
            onmouseout="this.style.boxShadow=''">
         <div style="font-size:3rem">🏛</div>
-        <div style="font-size:1.3rem;font-weight:700;margin-top:.5rem">Raiffeisenbank</div>
+        <div style="font-size:1.2rem;font-weight:700;margin-top:.5rem">Raiffeisenbank</div>
         <div style="color:var(--txt2);font-size:.9rem;margin-top:.3rem">Zobrazit výpisy →</div>
       </div>
     </div>`;
 }
 
 // Detail banky – accordion po měsících
-async function renderBankaDetail(banka) {
-  const nazev = banka === "AirBank" ? "Air Bank" : "Raiffeisenbank";
+async function renderBankaDetail(banka, firma) {
+  const nazevBanky = banka === "AirBank" ? "Air Bank" : "Raiffeisenbank";
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
       <h1 class="page-title">
         <span style="cursor:pointer;color:var(--txt2);font-weight:400" onclick="renderBanky()">Banky</span>
-        <span style="margin:0 .4rem">›</span>${nazev}
+        <span style="margin:0 .4rem">›</span>
+        <span style="cursor:pointer;color:var(--txt2);font-weight:400" onclick="renderBankyFirma('${firma}')">${firma}</span>
+        <span style="margin:0 .4rem">›</span>${nazevBanky}
       </h1>
-      <button class="btn btn-primary btn-sm" onclick="openImportBanky('${banka}')">📥 Importovat výpis</button>
+      <button class="btn btn-primary btn-sm" onclick="openImportBanky('${banka}','${firma}')">📥 Importovat výpis</button>
     </div>
     <div id="bankaAccordion"><div class="loading-center"><span class="spinner"></span></div></div>`;
-  await loadBankaAccordion(banka);
+  await loadBankaAccordion(banka, firma);
 }
 
-async function loadBankaAccordion(banka) {
+async function loadBankaAccordion(banka, firma) {
   const el = document.getElementById("bankaAccordion");
   if (!el) return;
   let data;
-  try { data = await api(`/api/banky/pohyby?banka=${banka}`); } catch { return; }
+  try { data = await api(`/api/banky/pohyby?banka=${banka}&firma=${encodeURIComponent(firma||"")}`); } catch { return; }
 
   // Seskup po měsících
   const mesice = {};
@@ -3045,7 +3069,7 @@ async function loadBankaAccordion(banka) {
                 <td style="font-size:.85rem;color:var(--txt2)">${escHtml(p.typ_transakce||"")}</td>
                 <td style="font-size:.85rem;color:var(--txt2);max-width:180px">${escHtml(p.zprava||"")}</td>
                 <td style="text-align:right;font-weight:600;color:${p.castka>=0?'#16a34a':'#dc2626'}">${czMoney(p.castka)}</td>
-                <td><button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:.2rem .4rem;border-radius:4px" onclick="smazatBankovniPohyb(${p.id},'${banka}')">🗑</button></td>
+                <td><button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:.2rem .4rem;border-radius:4px" onclick="smazatBankovniPohyb(${p.id},'${banka}','${firma}')">🗑</button></td>
               </tr>`).join("")}
             </tbody>
           </table>
@@ -3068,20 +3092,13 @@ function exportBankaMonth(banka, mesic, fmt) {
   window.location.href = `/api/banky/export?banka=${banka}&mesic=${mesic}&format=${fmt}`;
 }
 
-function openImportBanky(banka) {
+function openImportBanky(banka, firma) {
   const nazev = banka === "AirBank" ? "Air Bank" : "Raiffeisenbank";
-  openModal(`Importovat výpis – ${nazev}`, `
+  openModal(`Importovat výpis – ${nazev} / ${firma||""}`, `
     <p style="color:var(--txt2);font-size:.85rem;margin-bottom:1rem">
       Nahraj CSV výpis z <strong>${nazev}</strong>.
       Duplicitní transakce budou automaticky přeskočeny.
     </p>
-    <div class="form-group">
-      <label class="form-label">Firma</label>
-      <select id="bImportFirma" class="form-control">
-        <option value="">— nevybráno —</option>
-        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
-      </select>
-    </div>
     <div class="dropzone" id="bankyDropzone" style="padding:1.5rem;margin-top:.5rem">
       <div class="dropzone-icon">🏦</div>
       <div class="dropzone-text"><strong>Přetáhněte CSV soubor</strong> nebo klikněte</div>
@@ -3093,21 +3110,21 @@ function openImportBanky(banka) {
   const inp = document.getElementById("bankyFileInput");
   inp.style.display = "none";
   dz.addEventListener("click", () => inp.click());
-  inp.addEventListener("change", () => { if (inp.files[0]) doImportBanky(inp.files[0], banka); });
+  inp.addEventListener("change", () => { if (inp.files[0]) doImportBanky(inp.files[0], banka, firma); });
   dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag-over"); });
   dz.addEventListener("dragleave", () => dz.classList.remove("drag-over"));
   dz.addEventListener("drop", e => {
     e.preventDefault(); dz.classList.remove("drag-over");
-    if (e.dataTransfer.files[0]) doImportBanky(e.dataTransfer.files[0], banka);
+    if (e.dataTransfer.files[0]) doImportBanky(e.dataTransfer.files[0], banka, firma);
   });
 }
 
-async function doImportBanky(file, banka) {
+async function doImportBanky(file, banka, firma) {
   const statusEl = document.getElementById("bankyImportStatus");
   statusEl.innerHTML = `<span class="spinner"></span> Importuji...`;
   const fd = new FormData();
   fd.append("soubor", file);
-  fd.append("firma_zkratka", document.getElementById("bImportFirma")?.value || "");
+  fd.append("firma_zkratka", firma || "");
   fd.append("banka_hint", banka || "");
   try {
     const data = await api("/api/banky/import", { method: "POST", body: fd });
@@ -3117,17 +3134,17 @@ async function doImportBanky(file, banka) {
         Naimportováno: <strong>${data.naimportovano}</strong> transakcí
         ${data.duplicity ? `, přeskočeno duplicit: <strong>${data.duplicity}</strong>` : ""}
       </div>`;
-    setTimeout(() => { closeModal(); loadBankaAccordion(banka); }, 2000);
+    setTimeout(() => { closeModal(); loadBankaAccordion(banka, firma); }, 2000);
   } catch(e) {
     statusEl.innerHTML = `❌ Chyba: ${e.message}`;
   }
 }
 
-async function smazatBankovniPohyb(id, banka) {
+async function smazatBankovniPohyb(id, banka, firma) {
   if (!confirm("Opravdu smazat tento pohyb?")) return;
   await api(`/api/banky/pohyby/${id}`, { method: "DELETE" });
   toast("Pohyb smazán ✓");
-  loadBankaAccordion(banka);
+  loadBankaAccordion(banka, firma);
 }
 
 // stará renderBanky (prázdná placeholder aby nedošlo k chybě při náhodném zavolání)
