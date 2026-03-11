@@ -1037,7 +1037,7 @@ async function uploadFile(file) {
   naplnFormular(data, formVisible);
 }
 
-function naplnFormular(data, appendMode = false) {
+async function naplnFormular(data, appendMode = false) {
   const formVisible = document.getElementById("parsedForm").style.display !== "none";
 
   if (appendMode && formVisible) {
