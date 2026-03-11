@@ -2120,26 +2120,87 @@ def api_banky_export():
         resp.headers["Content-Disposition"] = f'attachment; filename="{banka}_{mesic}.csv"'
         return resp
     else:
-        # PDF – jednoduchá HTML→PDF přes weasyprint nebo jen HTML
+        # Skutečné PDF přes reportlab
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.units import mm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        import io as _io
+
         nazev_banky = "Air Bank" if banka == "AirBank" else "Raiffeisenbank"
-        rows_html = "".join(f"""<tr>
-            <td>{r['datum']}</td><td>{r['nazev_protiucet'] or ''}</td>
-            <td>{r['typ_transakce'] or ''}</td><td>{r['zprava'] or ''}</td>
-            <td style="text-align:right;color:{'green' if r['castka']>=0 else 'red'}">{r['castka']:,.2f}</td>
-        </tr>""" for r in rows)
         prichozi = sum(r["castka"] for r in rows if r["castka"] > 0)
         odchozi  = sum(r["castka"] for r in rows if r["castka"] < 0)
-        html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-        <style>body{{font-family:Arial,sans-serif;font-size:12px;margin:20px}}
-        table{{width:100%;border-collapse:collapse}}th,td{{border:1px solid #ddd;padding:5px}}
-        th{{background:#f0f0f0}}h2{{margin-bottom:5px}}.summary{{margin:10px 0;font-size:13px}}</style></head>
-        <body><h2>{nazev_banky} – {mesic}</h2>
-        <div class="summary">Příchozí: <b>{prichozi:,.2f} Kč</b> | Odchozí: <b>{abs(odchozi):,.2f} Kč</b> | Saldo: <b>{(prichozi+odchozi):,.2f} Kč</b></div>
-        <table><thead><tr><th>Datum</th><th>Protistrana</th><th>Typ</th><th>Zpráva</th><th>Částka</th></tr></thead>
-        <tbody>{rows_html}</tbody></table></body></html>"""
-        resp = make_response(html.encode("utf-8"))
-        resp.headers["Content-Type"] = "text/html; charset=utf-8"
-        resp.headers["Content-Disposition"] = f'attachment; filename="{banka}_{mesic}.html"'
+        saldo    = prichozi + odchozi
+
+        buf = _io.BytesIO()
+        doc = SimpleDocTemplate(buf, pagesize=A4,
+            leftMargin=15*mm, rightMargin=15*mm,
+            topMargin=15*mm, bottomMargin=15*mm)
+        styles = getSampleStyleSheet()
+        story = []
+
+        # Nadpis
+        story.append(Paragraph(f"<b>{nazev_banky}</b> – výpis {mesic}", styles["Title"]))
+        story.append(Spacer(1, 4*mm))
+
+        # Souhrn
+        souhrn = [
+            ["Příchozí", "Odchozí", "Saldo"],
+            [f"{prichozi:,.2f} Kč", f"{abs(odchozi):,.2f} Kč", f"{saldo:,.2f} Kč"],
+        ]
+        ts = TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#f0f0f0")),
+            ("FONTNAME",   (0,0), (-1,0), "Helvetica-Bold"),
+            ("ALIGN",      (0,0), (-1,-1), "CENTER"),
+            ("GRID",       (0,0), (-1,-1), 0.5, colors.grey),
+            ("FONTSIZE",   (0,0), (-1,-1), 9),
+            ("TEXTCOLOR",  (0,1), (0,1), colors.HexColor("#16a34a")),
+            ("TEXTCOLOR",  (1,1), (1,1), colors.HexColor("#dc2626")),
+            ("FONTNAME",   (0,1), (-1,1), "Helvetica-Bold"),
+        ])
+        t = Table(souhrn, colWidths=[55*mm, 55*mm, 55*mm])
+        t.setStyle(ts)
+        story.append(t)
+        story.append(Spacer(1, 5*mm))
+
+        # Tabulka transakcí
+        hlavicka = ["Datum", "Protistrana", "Typ transakce", "Zpráva", "Částka"]
+        data_rows = [hlavicka] + [
+            [r["datum"], (r["nazev_protiucet"] or "")[:35],
+             (r["typ_transakce"] or "")[:25], (r["zprava"] or "")[:30],
+             f"{r['castka']:,.2f}"]
+            for r in rows
+        ]
+        col_w = [22*mm, 55*mm, 38*mm, 40*mm, 25*mm]
+        tbl = Table(data_rows, colWidths=col_w, repeatRows=1)
+        tbl_style = TableStyle([
+            ("BACKGROUND",  (0,0), (-1,0), colors.HexColor("#1e3a2f")),
+            ("TEXTCOLOR",   (0,0), (-1,0), colors.white),
+            ("FONTNAME",    (0,0), (-1,0), "Helvetica-Bold"),
+            ("FONTSIZE",    (0,0), (-1,-1), 8),
+            ("ALIGN",       (4,0), (4,-1), "RIGHT"),
+            ("GRID",        (0,0), (-1,-1), 0.3, colors.HexColor("#dddddd")),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#f9f9f9")]),
+            ("TOPPADDING",  (0,0), (-1,-1), 3),
+            ("BOTTOMPADDING",(0,0), (-1,-1), 3),
+        ])
+        # Obarvit záporné částky červeně
+        for i, r in enumerate(rows, start=1):
+            if r["castka"] < 0:
+                tbl_style.add("TEXTCOLOR", (4,i), (4,i), colors.HexColor("#dc2626"))
+            else:
+                tbl_style.add("TEXTCOLOR", (4,i), (4,i), colors.HexColor("#16a34a"))
+        tbl.setStyle(tbl_style)
+        story.append(tbl)
+
+        doc.build(story)
+        buf.seek(0)
+        resp = make_response(buf.read())
+        resp.headers["Content-Type"] = "application/pdf"
+        resp.headers["Content-Disposition"] = f'attachment; filename="{banka}_{mesic}.pdf"'
         return resp
 
 @app.route("/api/banky/pohyby/<int:pid>", methods=["DELETE"])
