@@ -2215,7 +2215,7 @@ function renderKartaStatHtml(stats) {
       <div style="background:var(--card-bg);border:${d.aktivni ? '2px solid #16a34a' : '1px solid var(--border)'};border-radius:10px;padding:1rem;flex:1;min-width:200px">
         <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem">
           <span style="font-weight:700;font-size:1.1rem;font-family:var(--font-head)">${escHtml(firma)}</span>
-          ${d.aktivni ? '<span style="background:#16a34a;color:#fff;font-size:.7rem;padding:.1rem .5rem;border-radius:99px;font-weight:600">● AKTIVNÍ</span>' : '<span style="background:#9ca3af;color:#fff;font-size:.7rem;padding:.1rem .5rem;border-radius:99px">○ neaktivní</span>'}
+          ${d.aktivni ? '<span style="background:#16a34a;color:#fff;font-size:.7rem;padding:.1rem .5rem;border-radius:99px;font-weight:600">● aktivní</span>' : ''}
         </div>
         <div style="font-size:.8rem;color:var(--txt2);margin-bottom:.3rem">💳 Terminál od ${od}</div>
         <div style="display:flex;justify-content:space-between;font-size:.88rem;margin-bottom:.2rem">
@@ -2250,32 +2250,8 @@ async function prepnoutTerminal(firma) {
 }
 
 async function renderReporty() {
-  let alert_data = { karty_12m: 0, procent: 0, alert: false, varovani: false };
-  try { alert_data = await api("/api/reporty/karty-alert"); } catch {}
   let karty_stats = {};
   try { karty_stats = await api("/api/reporty/karty-stats"); } catch {}
-
-  const alertHtml = alert_data.alert
-    ? `<div style="background:#fee2e2;border:2px solid #ef4444;border-radius:8px;padding:.8rem 1.2rem;margin-bottom:1rem;color:#991b1b;font-weight:600">
-        🚨 POZOR! Karty za posledních 12 měsíců: <strong>${czInt(alert_data.karty_12m)}</strong> 
-        – překročen limit 1 500 000!
-       </div>`
-    : alert_data.varovani
-    ? `<div style="background:#fef3c7;border:2px solid #f59e0b;border-radius:8px;padding:.8rem 1.2rem;margin-bottom:1rem;color:#92400e;font-weight:600">
-        ⚠️ Karty za posledních 12 měsíců: <strong>${czInt(alert_data.karty_12m)}</strong>
-        (${alert_data.procent}% z limitu 1 500 000) – blíží se limit!
-       </div>`
-    : `<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:.6rem 1.2rem;margin-bottom:1rem;color:#166534;font-size:.9rem">
-        💳 Karty celkem (12 měs.): <strong>${czInt(alert_data.karty_12m)}</strong>
-        &nbsp;|&nbsp; ${alert_data.procent}% z limitu 1,5M
-        ${(alert_data.per_firma||[]).map(f=>`
-          <span style="margin-left:1rem;padding:.2rem .6rem;border-radius:4px;background:${f.alert?"#fee2e2":f.varovani?"#fef3c7":"#dcfce7"};color:${f.alert?"#991b1b":f.varovani?"#92400e":"#166534"}">
-            ${escHtml(f.firma)}: <strong>${czInt(f.karty_12m)}</strong> (${f.procent}%)
-          </span>`).join("")}
-        <div style="background:#dcfce7;border-radius:4px;height:6px;margin-top:.4rem">
-          <div style="background:#16a34a;height:6px;border-radius:4px;width:${Math.min(alert_data.procent,100)}%"></div>
-        </div>
-       </div>`;
 
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
@@ -2288,7 +2264,6 @@ async function renderReporty() {
         <button class="btn btn-secondary btn-sm" onclick="exportReporty('csv')">⬇ CSV</button>
       </div>
     </div>
-    ${alertHtml}
     ${renderKartaStatHtml(karty_stats)}
     <div class="filters">
       <label>Rok:</label>
