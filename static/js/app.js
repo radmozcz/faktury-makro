@@ -3853,9 +3853,9 @@ async function loadVystavene() {
     if (f.stav === "zaplaceno") zapl += f.castka; else nezapl += f.castka;
   });
   const p = document.getElementById("vyst-pocet");  if (p) p.textContent = data.length;
-  const c = document.getElementById("vyst-celkem"); if (c) c.textContent = formatCastka(celkem) + " Kč";
-  const n = document.getElementById("vyst-nezapl"); if (n) n.textContent = formatCastka(nezapl) + " Kč";
-  const z = document.getElementById("vyst-zapl");   if (z) z.textContent = formatCastka(zapl) + " Kč";
+  const c = document.getElementById("vyst-celkem"); if (c) c.textContent = czMoney(celkem) + " Kč";
+  const n = document.getElementById("vyst-nezapl"); if (n) n.textContent = czMoney(nezapl) + " Kč";
+  const z = document.getElementById("vyst-zapl");   if (z) z.textContent = czMoney(zapl) + " Kč";
 
   if (!data.length) { el.innerHTML = "<p style='padding:1rem;color:var(--text-muted)'>Žádné vystavené faktury.</p>"; return; }
   const muzeEditovat = App.role === "admin";
@@ -3883,7 +3883,7 @@ async function loadVystavene() {
         <td><span class="badge">${f.firma_zkratka}</span></td>
         <td>${odkaz}</td><td>${f.datum||"—"}</td><td>${f.odberatel||"—"}</td>
         <td style="color:var(--text-muted);font-size:0.85rem">${f.popis||"—"}</td>
-        <td class="text-right fw-bold">${formatCastka(f.castka)} Kč</td>
+        <td class="text-right fw-bold">${czMoney(f.castka)} Kč</td>
         <td class="text-center">${stavBtn}</td>${akce}
       </tr>`;
     }).join("")}</tbody></table>`;
