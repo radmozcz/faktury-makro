@@ -271,6 +271,32 @@ document.getElementById("modalOverlay").addEventListener("click", e => {
 function czMoney(v) {
   return Number(v).toLocaleString("cs-CZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " Kč";
 }
+
+// Helper: dropdown výběr roku (Vše + roky od 2023 do aktuálního)
+function rokOptions(selectedRok = "") {
+  const aktualni = new Date().getFullYear();
+  let opts = `<option value="">Vše</option>`;
+  for (let r = aktualni; r >= 2023; r--) {
+    const sel = String(r) === String(selectedRok) ? " selected" : "";
+    opts += `<option value="${r}"${sel}>${r}</option>`;
+  }
+  return opts;
+}
+
+// Helper: nastav Od/Do podle vybraného roku
+function aplikujRokFiltr(rokId, odId, doId, loadFn) {
+  const rok = document.getElementById(rokId)?.value;
+  const odEl = document.getElementById(odId);
+  const doEl = document.getElementById(doId);
+  if (rok) {
+    if (odEl) odEl.value = `${rok}-01-01`;
+    if (doEl) doEl.value = `${rok}-12-31`;
+  } else {
+    if (odEl) odEl.value = "";
+    if (doEl) doEl.value = "";
+  }
+  if (loadFn) loadFn();
+}
 // Celé číslo bez desetinné čárky a bez "Kč" – pro tabulku reportů
 function czInt(v) {
   return Math.round(Number(v)).toLocaleString("cs-CZ");
@@ -505,6 +531,10 @@ async function renderFaktury() {
         <option value="po_splatnosti">Po splatnosti</option>
         <option value="duplikat">Duplikát</option>
       </select>
+      <label>Rok:</label>
+      <select id="fRok" onchange="aplikujRokFiltr('fRok','fOd','fDo',loadFaktury)">
+        ${rokOptions(new Date().getFullYear())}
+      </select>
       <label>Od:</label><input type="date" id="fOd">
       <label>Do:</label><input type="date" id="fDo">
       <input type="text" id="fQ" placeholder="Hledat dodavatele/č. faktury..." style="min-width:200px">
@@ -513,9 +543,10 @@ async function renderFaktury() {
       <div class="table-wrap" id="fakturyTable"><div class="loading-center"><span class="spinner"></span></div></div>
     </div>`;
 
+  aplikujRokFiltr('fRok','fOd','fDo', null);
   loadFaktury();
 
-  ["fFirma","fStav","fOd","fDo"].forEach(id => {
+  ["fFirma","fStav","fRok","fOd","fDo"].forEach(id => {
     document.getElementById(id)?.addEventListener("change", loadFaktury);
   });
   let qdeb;
@@ -1398,13 +1429,18 @@ async function renderPolozky() {
       </select>
       <label>Od:</label><input type="date" id="pOd">
       <label>Do:</label><input type="date" id="pDo">
+      <label>Rok:</label>
+      <select id="pRok" onchange="aplikujRokFiltr('pRok','pOd','pDo',loadPolozky)">
+        ${rokOptions(new Date().getFullYear())}
+      </select>
     </div>
     <div class="card">
       <div class="table-wrap" id="polozkyList"><div class="loading-center"><span class="spinner"></span></div></div>
     </div>`;
 
+  aplikujRokFiltr('pRok','pOd','pDo', null);
   loadPolozky();
-  ["pFirma","pOd","pDo"].forEach(id => {
+  ["pFirma","pRok","pOd","pDo"].forEach(id => {
     document.getElementById(id)?.addEventListener("change", loadPolozky);
   });
 }
@@ -2575,10 +2611,8 @@ async function renderReporty() {
     ${renderKartaStatHtml(karty_stats)}
     <div class="filters">
       <label>Rok:</label>
-      <select id="rRok" onchange="nastavRokFiltr()">
-        <option value="">Vše</option>
-        <option value="2025">2025</option>
-        <option value="2026" selected>2026</option>
+      <select id="rRok" onchange="aplikujRokFiltr('rRok','rOd','rDo',loadReporty)">
+        ${rokOptions(new Date().getFullYear())}
       </select>
       <label>Od:</label><input type="date" id="rOd">
       <label>Do:</label><input type="date" id="rDo">
@@ -2588,7 +2622,7 @@ async function renderReporty() {
       <div class="table-wrap" id="reportyList"><div class="loading-center"><span class="spinner"></span></div></div>
     </div>`;
 
-  nastavRokFiltr();
+  aplikujRokFiltr('rRok','rOd','rDo', null);
   setTimeout(loadReporty, 50);}
 
 function nastavRokFiltr() {
@@ -3317,12 +3351,17 @@ async function _renderBankyOld() {
         <option value="prichozi">Příchozí</option>
         <option value="odchozi">Odchozí</option>
       </select>
+      <label>Rok:</label>
+      <select id="bRok" onchange="aplikujRokFiltr('bRok','bOd','bDo',loadBanky)">
+        ${rokOptions(new Date().getFullYear())}
+      </select>
       <label>Od:</label><input type="date" id="bOd" onchange="loadBanky()">
       <label>Do:</label><input type="date" id="bDo" onchange="loadBanky()">
     </div>
     <div class="card">
       <div class="table-wrap" id="bankyList"><div class="loading-center"><span class="spinner"></span></div></div>
     </div>`;
+  aplikujRokFiltr('bRok','bOd','bDo', null);
   loadBanky();
 }
 
@@ -3460,12 +3499,17 @@ async function renderVydaje() {
         <option value="nezaplaceno">Nezaplaceno</option>
         <option value="zaplaceno">Zaplaceno</option>
       </select>
+      <label>Rok:</label>
+      <select id="vRok" onchange="aplikujRokFiltr('vRok','vOd','vDo',loadVydaje)">
+        ${rokOptions(new Date().getFullYear())}
+      </select>
       <label>Od:</label><input type="date" id="vOd" onchange="loadVydaje()">
       <label>Do:</label><input type="date" id="vDo" onchange="loadVydaje()">
     </div>
     <div class="card">
       <div class="table-wrap" id="vydajeList"><div class="loading-center"><span class="spinner"></span></div></div>
     </div>`;
+  aplikujRokFiltr('vRok','vOd','vDo', null);
   loadVydajeNezaplacene();
   loadVydaje();
 }
@@ -3843,16 +3887,35 @@ async function renderVystavene() {
         <div class="fw-bold" style="color:var(--success)" id="vyst-zapl">—</div>
       </div>
     </div>
+    <div class="filters">
+      <label>Firma:</label>
+      <select id="vystFirmaFilter" class="firma-select" onchange="loadVystavene()">
+        <option value="">Všechny firmy</option>
+        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+      </select>
+      <label>Rok:</label>
+      <select id="vystRok" onchange="aplikujRokFiltr('vystRok','vystOd','vystDo',loadVystavene)">
+        ${rokOptions(new Date().getFullYear())}
+      </select>
+      <label>Od:</label><input type="date" id="vystOd" onchange="loadVystavene()">
+      <label>Do:</label><input type="date" id="vystDo" onchange="loadVystavene()">
+    </div>
     <div class="card">
       <div class="table-wrap" id="vystList"><div class="loading-center"><span class="spinner"></span></div></div>
     </div>`;
+  aplikujRokFiltr('vystRok','vystOd','vystDo', null);
   loadVystavene();
 }
 
 async function loadVystavene() {
   const el = document.getElementById("vystList");
   if (!el) return;
-  const data = await api("/api/vystavene-faktury").catch(() => []);
+  const params = new URLSearchParams({
+    firma: document.getElementById("vystFirmaFilter")?.value || "",
+    od:    document.getElementById("vystOd")?.value || "",
+    do:    document.getElementById("vystDo")?.value || "",
+  });
+  const data = await api(`/api/vystavene-faktury?${params}`).catch(() => []);
   // souhrn
   let celkem = 0, nezapl = 0, zapl = 0;
   data.forEach(f => {
