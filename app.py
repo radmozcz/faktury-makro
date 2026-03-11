@@ -1986,7 +1986,7 @@ def api_vydaje_nahrat():
     f = request.files["soubor"]
     firma = request.form.get("firma_zkratka", "")
     fname = secure_filename(f.filename or "vydaj")
-    fpath = os.path.join(UPLOAD_FOLDER, fname)
+    fpath = os.path.join(UPLOAD_DIR, fname)
     f.save(fpath)
     gcs_url = upload_to_gcs(fpath, f"vydaje/{fname}")
 
@@ -2105,7 +2105,7 @@ def api_vystavene_nahrat():
     fname = secure_filename(f.filename or "faktura.pdf")
     ts = datetime.now().strftime("%Y%m%d_%H%M%S_")
     fname = ts + fname
-    fpath = os.path.join(UPLOAD_FOLDER, fname)
+    fpath = os.path.join(UPLOAD_DIR, fname)
     f.save(fpath)
     gcs_url = upload_to_gcs(fpath, f"vystavene/{fname}")
 
