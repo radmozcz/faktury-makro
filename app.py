@@ -401,6 +401,27 @@ def init_db():
             povoleno INTEGER DEFAULT 0,
             UNIQUE(role, sekce)
         )"""),
+        ("pausalni_odvody", """CREATE TABLE IF NOT EXISTS pausalni_odvody (
+            id      SERIAL PRIMARY KEY,
+            jmeno   TEXT NOT NULL,
+            nazev   TEXT NOT NULL,
+            castka  REAL NOT NULL DEFAULT 0,
+            poradi  INTEGER DEFAULT 0,
+            UNIQUE(jmeno, nazev)
+        )"""),
+        ("bankovni_pohyby", """CREATE TABLE IF NOT EXISTS bankovni_pohyby (
+            id              SERIAL PRIMARY KEY,
+            banka           TEXT NOT NULL,
+            datum           TEXT NOT NULL,
+            castka          REAL NOT NULL DEFAULT 0,
+            protiucet       TEXT DEFAULT '',
+            nazev_protiucet TEXT DEFAULT '',
+            typ_transakce   TEXT DEFAULT '',
+            zprava          TEXT DEFAULT '',
+            id_transakce    TEXT UNIQUE,
+            firma_zkratka   TEXT DEFAULT '',
+            created_at      TEXT DEFAULT NOW()
+        )"""),
     ]
     with get_db() as conn:
         for name, sql in TABLES:
@@ -1723,6 +1744,216 @@ def api_vyplata_update(vid):
         conn.execute(f"UPDATE vyplaty SET {','.join(set_parts)} WHERE id=?", vals)
     return jsonify({"ok": True})
 
+@app.route("/api/vyplaty/souhrn/<jmeno>")
+@vyzaduj_prihlaseni
+def api_vyplaty_souhrn(jmeno):
+    """Vrátí součet výplat za aktuální měsíc a rok pro daného zaměstnance."""
+    from datetime import date as _date
+    dnes = _date.today()
+    mesic_od = f"{dnes.year}-{dnes.month:02d}-01"
+    rok_od   = f"{dnes.year}-01-01"
+    rok_do   = f"{dnes.year}-12-31"
+    with get_db() as conn:
+        r_mesic = conn.execute(
+            "SELECT COALESCE(SUM(castka),0) as total FROM vyplaty WHERE jmeno=? AND datum>=?",
+            (jmeno, mesic_od)
+        ).fetchone()
+        r_rok = conn.execute(
+            "SELECT COALESCE(SUM(castka),0) as total FROM vyplaty WHERE jmeno=? AND datum>=? AND datum<=?",
+            (jmeno, rok_od, rok_do)
+        ).fetchone()
+        odvody = conn.execute(
+            "SELECT nazev, castka FROM pausalni_odvody WHERE jmeno=? ORDER BY poradi, nazev",
+            (jmeno,)
+        ).fetchall()
+    celkem_mesic = _first_val(r_mesic)
+    celkem_rok   = _first_val(r_rok)
+    odvody_list  = [dict(r) for r in odvody]
+    odvody_suma  = sum(float(r["castka"]) for r in odvody_list)
+    return jsonify({
+        "celkem_mesic": round(celkem_mesic, 2),
+        "celkem_rok":   round(celkem_rok, 2),
+        "odvody":       odvody_list,
+        "odvody_suma":  round(odvody_suma, 2),
+    })
+
+@app.route("/api/pausalni-odvody/<jmeno>", methods=["GET"])
+@vyzaduj_prihlaseni
+def api_pausalni_get(jmeno):
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, nazev, castka FROM pausalni_odvody WHERE jmeno=? ORDER BY poradi, nazev",
+            (jmeno,)
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+@app.route("/api/pausalni-odvody/<jmeno>", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_pausalni_save(jmeno):
+    """Uloží seznam paušálních odvodů pro zaměstnance (replace all)."""
+    data = request.json or []
+    with get_db() as conn:
+        conn.execute("DELETE FROM pausalni_odvody WHERE jmeno=?", (jmeno,))
+        for i, item in enumerate(data):
+            nazev  = str(item.get("nazev","")).strip()
+            castka = float(item.get("castka", 0) or 0)
+            if nazev:
+                conn.execute(
+                    "INSERT INTO pausalni_odvody (jmeno, nazev, castka, poradi) VALUES (?,?,?,?)",
+                    (jmeno, nazev, castka, i)
+                )
+    return jsonify({"ok": True})
+
+
+# ── API: BANKOVNÍ VÝPISY ──────────────────────────────────────────────────────
+def parse_csv_airbank(content_bytes):
+    """Parsuje CSV výpis z Air Bank (cp1250, ; oddělovač, datum DD/MM/YYYY)."""
+    import csv, io
+    text = content_bytes.decode("cp1250")
+    reader = csv.DictReader(io.StringIO(text), delimiter=";")
+    pohyby = []
+    for row in reader:
+        datum_raw = row.get("Datum provedení", "").strip().strip('"')
+        castka_raw = row.get("Částka v měně účtu", "").strip().strip('"').replace(",", ".")
+        id_transakce = row.get("Referenční číslo", "").strip().strip('"')
+        if not datum_raw or not castka_raw:
+            continue
+        try:
+            # DD/MM/YYYY → YYYY-MM-DD
+            d, m, y = datum_raw.split("/")
+            datum = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+            castka = float(castka_raw)
+        except:
+            continue
+        pohyby.append({
+            "banka":           "AirBank",
+            "datum":           datum,
+            "castka":          castka,
+            "protiucet":       row.get("Číslo účtu protistrany", "").strip().strip('"'),
+            "nazev_protiucet": row.get("Název protistrany", "").strip().strip('"'),
+            "typ_transakce":   row.get("Typ úhrady", "").strip().strip('"'),
+            "zprava":          row.get("Obchodní místo", "").strip().strip('"') or row.get("Zpráva pro příjemce", "").strip().strip('"'),
+            "id_transakce":    f"AIR_{id_transakce}" if id_transakce else None,
+        })
+    return pohyby
+
+def parse_csv_rb(content_bytes):
+    """Parsuje CSV výpis z Raiffeisenbank (utf-8 BOM, ; oddělovač, datum DD.MM.YYYY)."""
+    import csv, io
+    text = content_bytes.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text), delimiter=";")
+    pohyby = []
+    for row in reader:
+        datum_raw = row.get("Datum provedení", "").strip().strip('"')
+        castka_raw = row.get("Zaúčtovaná částka", "").strip().strip('"').replace(",", ".")
+        id_transakce = row.get("Id transakce", "").strip().strip('"')
+        if not datum_raw or not castka_raw:
+            continue
+        try:
+            # DD.MM.YYYY → YYYY-MM-DD
+            d, m, y = datum_raw.split(".")
+            datum = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+            castka = float(castka_raw)
+        except:
+            continue
+        pohyby.append({
+            "banka":           "RB",
+            "datum":           datum,
+            "castka":          castka,
+            "protiucet":       row.get("Číslo protiúčtu", "").strip().strip('"'),
+            "nazev_protiucet": row.get("Název protiúčtu", "").strip().strip('"') or row.get("Název obchodníka", "").strip().strip('"'),
+            "typ_transakce":   row.get("Typ transakce", "").strip().strip('"'),
+            "zprava":          row.get("Zpráva", "").strip().strip('"') or row.get("Poznámka", "").strip().strip('"'),
+            "id_transakce":    f"RB_{id_transakce}" if id_transakce else None,
+        })
+    return pohyby
+
+@app.route("/api/banky/import", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_banky_import():
+    """Importuje CSV výpis z banky."""
+    if "soubor" not in request.files:
+        return jsonify({"error": "Žádný soubor"}), 400
+    f = request.files["soubor"]
+    firma = request.form.get("firma_zkratka", "")
+    content = f.read()
+    fname = (f.filename or "").lower()
+
+    # Detekce banky podle obsahu nebo názvu souboru
+    try:
+        if "airbank" in fname or "air_bank" in fname:
+            pohyby = parse_csv_airbank(content)
+            banka = "AirBank"
+        elif "pohyby_" in fname:
+            pohyby = parse_csv_rb(content)
+            banka = "RB"
+        else:
+            # Zkus podle BOM
+            if content[:3] == b'\xef\xbb\xbf':
+                pohyby = parse_csv_rb(content)
+                banka = "RB"
+            else:
+                pohyby = parse_csv_airbank(content)
+                banka = "AirBank"
+    except Exception as e:
+        return jsonify({"error": f"Chyba parsování: {str(e)}"}), 400
+
+    naimportovano = 0
+    duplicity = 0
+    with get_db() as conn:
+        for p in pohyby:
+            try:
+                conn.execute("""
+                    INSERT INTO bankovni_pohyby
+                        (banka, datum, castka, protiucet, nazev_protiucet, typ_transakce, zprava, id_transakce, firma_zkratka)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                """, (
+                    p["banka"], p["datum"], p["castka"],
+                    p["protiucet"], p["nazev_protiucet"],
+                    p["typ_transakce"], p["zprava"],
+                    p["id_transakce"], firma
+                ))
+                naimportovano += 1
+            except Exception:
+                duplicity += 1  # UNIQUE constraint = duplikát
+    return jsonify({"ok": True, "banka": banka, "naimportovano": naimportovano, "duplicity": duplicity})
+
+@app.route("/api/banky/pohyby")
+@vyzaduj_prihlaseni
+def api_banky_pohyby():
+    """Vrátí seznam bankovních pohybů s filtry."""
+    banka  = request.args.get("banka", "")
+    firma  = request.args.get("firma", "")
+    od     = request.args.get("od", "")
+    do_    = request.args.get("do", "")
+    typ    = request.args.get("typ", "")
+    clauses, params = [], []
+    if banka: clauses.append("banka=?"); params.append(banka)
+    if firma: clauses.append("firma_zkratka=?"); params.append(firma)
+    if od:    clauses.append("datum>=?"); params.append(od)
+    if do_:   clauses.append("datum<=?"); params.append(do_)
+    if typ == "prichozi":  clauses.append("castka>0")
+    if typ == "odchozi":   clauses.append("castka<0")
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    with get_db() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM bankovni_pohyby {where} ORDER BY datum DESC, id DESC",
+            params
+        ).fetchall()
+        total_row = conn.execute(
+            f"SELECT COALESCE(SUM(castka),0) as total FROM bankovni_pohyby {where}", params
+        ).fetchone()
+    return jsonify({
+        "pohyby": [dict(r) for r in rows],
+        "celkem": round(_first_val(total_row), 2)
+    })
+
+@app.route("/api/banky/pohyby/<int:pid>", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_banky_pohyb_delete(pid):
+    with get_db() as conn:
+        conn.execute("DELETE FROM bankovni_pohyby WHERE id=?", (pid,))
+    return jsonify({"ok": True})
 
 # ── API: REPORTY ──────────────────────────────────────────────────────────────
 @app.route("/api/reporty/nahrat-foto", methods=["POST"])
