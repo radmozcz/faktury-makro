@@ -43,7 +43,7 @@ async function loadConfig() {
 async function zkontrolujPrihlaseni() {
   try {
     const me = await fetch("/api/me").then(r => r.json());
-    if (me.prihlasен) {
+    if (me.prihlasen) {
       App.role  = me.role;
       App.jmeno = me.jmeno;
       App.prava = me.prava === "vse" ? null : (me.prava || {});
