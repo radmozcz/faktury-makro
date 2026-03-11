@@ -2086,12 +2086,15 @@ def api_vystavene_ulozit():
     with get_db() as conn:
         conn.execute(
             """INSERT INTO vystavene_faktury
-               (firma_zkratka, cislo_faktury, datum, datum_splatnosti, odberatel, popis, castka, stav, soubor_url)
-               VALUES (?,?,?,?,?,?,?,?,?)""",
+               (firma_zkratka, cislo_faktury, datum, datum_splatnosti, odberatel, popis, castka, stav, soubor_url, duplicita_id)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
             (d.get("firma_zkratka",""), d.get("cislo_faktury",""),
              d.get("datum",""), d.get("datum_splatnosti",""),
              d.get("odberatel",""), d.get("popis",""),
-             float(d.get("castka",0)), d.get("stav","nezaplaceno"), d.get("soubor_url",""))
+             float(d.get("castka",0)),
+             "duplikat" if duplicita else d.get("stav","nezaplaceno"),
+             d.get("soubor_url",""),
+             duplicita["id"] if duplicita else None)
         )
     return jsonify({"ok": True, "duplicita": duplicita})
 
