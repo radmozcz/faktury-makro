@@ -3944,8 +3944,7 @@ function toggleVystOdb() {
 }
 
 function openVystNahrat() {
-  openModal(`
-    <h2>📄 Nahrát vystavenou fakturu</h2>
+  openModal("📄 Nahrát vystavenou fakturu", `
     <div class="form-group">
       <label>PDF / foto</label>
       <input type="file" id="vystSoubor" accept=".pdf,image/*" class="form-control">
@@ -3964,8 +3963,7 @@ function openVystNahrat() {
 }
 
 function openVystRucni() {
-  openModal(`
-    <h2>✏️ Ruční zadání vystavené faktury</h2>
+  openModal("✏️ Ruční zadání vystavené faktury", `
     ${vystFormHtml()}
     <div style="margin-top:1rem;display:flex;gap:0.5rem;justify-content:flex-end">
       <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
@@ -3978,8 +3976,7 @@ async function openVystEdit(id) {
   const data = await api("/api/vystavene-faktury").catch(()=>[]);
   const f = data.find(x => x.id === id);
   if (!f) return;
-  openModal(`
-    <h2>✏️ Upravit vystavenou fakturu</h2>
+  openModal("✏️ Upravit vystavenou fakturu", `
     ${vystFormHtml(f)}
     <div style="margin-top:1rem;display:flex;gap:0.5rem;justify-content:flex-end">
       <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
