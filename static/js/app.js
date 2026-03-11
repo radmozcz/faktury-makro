@@ -1931,6 +1931,42 @@ async function renderNastaveni() {
       </td>
     </tr>`).join("");
 
+  // Načti aktuální oprávnění
+  let prava = {};
+  try { prava = await api("/api/prava"); } catch(e) {}
+
+  const SEKCE = [
+    { klic: "faktury_zobrazit",  label: "Faktury — zobrazit" },
+    { klic: "faktury_upravit",   label: "Faktury — přidat / upravit" },
+    { klic: "faktury_smazat",    label: "Faktury — mazat" },
+    { klic: "faktury_export",    label: "Faktury — export" },
+    { klic: "reporty_zobrazit",  label: "Reporty — zobrazit" },
+    { klic: "reporty_upravit",   label: "Reporty — přidat / upravit" },
+    { klic: "vyplaty_zobrazit",  label: "Výplaty — zobrazit" },
+    { klic: "vyplaty_upravit",   label: "Výplaty — upravit" },
+    { klic: "zbozi_zobrazit",    label: "Zboží — zobrazit" },
+    { klic: "naklady_zobrazit",  label: "Náklady — zobrazit" },
+    { klic: "bankovni_vypisy",   label: "Bankovní výpisy" },
+    { klic: "statistiky",        label: "Statistiky" },
+    { klic: "nastaveni",         label: "Nastavení" },
+  ];
+
+  const pravaNastaveniRows = SEKCE.map(s => {
+    const chkV = (prava.verunka?.[s.klic]) ? "checked" : "";
+    const chkU = (prava.ucetni?.[s.klic])  ? "checked" : "";
+    return `<tr>
+      <td style="padding:.5rem .5rem">${s.label}</td>
+      <td style="padding:.5rem .5rem;text-align:center">
+        <input type="checkbox" class="prava-check" data-role="verunka" data-sekce="${s.klic}" ${chkV}
+          style="width:18px;height:18px;cursor:pointer">
+      </td>
+      <td style="padding:.5rem .5rem;text-align:center">
+        <input type="checkbox" class="prava-check" data-role="ucetni" data-sekce="${s.klic}" ${chkU}
+          style="width:18px;height:18px;cursor:pointer">
+      </td>
+    </tr>`;
+  }).join("");
+
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header"><h1 class="page-title">Nastavení</h1></div>
     <div class="card" style="max-width:560px">
@@ -1970,6 +2006,31 @@ async function renderNastaveni() {
         <button class="btn" style="background:var(--accent);color:#fff" onclick="opravDuplicity()">🔍 Zkontrolovat duplicity</button>
         <button class="btn" style="background:#6c757d;color:#fff" onclick="normalizujNazvy()">🧹 Odstranit ARO/MC/FL prefixy</button>
       </div>
+
+      <hr style="margin:1.5rem 0">
+
+      <!-- MATICE OPRÁVNĚNÍ -->
+      <div>
+        <h3 style="margin:0 0 .75rem;font-size:1rem">👥 Oprávnění uživatelů</h3>
+        <p style="color:var(--txt2);font-size:.85rem;margin-bottom:1rem">
+          Admin má vždy vše. Kliknutím na čtvereček povoluješ nebo zakazuješ přístup.
+        </p>
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="border-bottom:2px solid var(--border)">
+              <th style="padding:.5rem;text-align:left">Sekce</th>
+              <th style="padding:.5rem;text-align:center;width:90px">VERUNKA</th>
+              <th style="padding:.5rem;text-align:center;width:90px">UCETNI</th>
+            </tr>
+          </thead>
+          <tbody id="pravaTbody">${pravaNastaveniRows}</tbody>
+        </table>
+        <button class="btn btn-primary" style="margin-top:1rem" onclick="ulozitPrava()">
+          💾 Uložit oprávnění
+        </button>
+        <span id="pravaSaveStatus" style="margin-left:.75rem;font-size:.9rem;color:var(--txt2)"></span>
+      </div>
+
       <hr style="margin:1.5rem 0">
       <div style="border:1px solid #e55;border-radius:8px;padding:1rem;background:#fff5f5">
         <div style="font-weight:600;color:#c00;margin-bottom:.5rem">⚠️ Nebezpečná zóna</div>
@@ -1977,6 +2038,33 @@ async function renderNastaveni() {
         <button class="btn" style="background:#c00;color:#fff" onclick="smazatVseFaktury()">🗑️ Smazat všechny faktury</button>
       </div>
     </div>`;
+}
+
+async function ulozitPrava() {
+  const statusEl = document.getElementById("pravaSaveStatus");
+  statusEl.textContent = "Ukládám...";
+  const prava = { verunka: {}, ucetni: {} };
+  document.querySelectorAll(".prava-check").forEach(chk => {
+    const role  = chk.dataset.role;
+    const sekce = chk.dataset.sekce;
+    prava[role][sekce] = chk.checked;
+  });
+  try {
+    await api("/api/prava", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(prava)
+    });
+    statusEl.textContent = "✅ Uloženo";
+    setTimeout(() => statusEl.textContent = "", 2000);
+    // Aktualizuj oprávnění v App (pokud jsme sami verunka/ucetni — nepravděpodobné ale pro jistotu)
+    if (App.role !== "admin") {
+      App.prava = prava[App.role] || {};
+      skryjNepovoleneMenu();
+    }
+  } catch(e) {
+    statusEl.textContent = "❌ Chyba při ukládání";
+  }
 }
 
 async function opravDuplicity() {
