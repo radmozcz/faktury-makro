@@ -12,6 +12,9 @@ const App = {
   chartInstances: {},
   polozkyData: [],          // cache pro sortování
   polozkySort: { col: "celkem_utraceno", asc: false },
+  role: null,               // přihlášená role: "admin" | "verunka" | "ucetni"
+  jmeno: null,              // zobrazované jméno
+  prava: {},                // matice oprávnění
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -20,11 +23,10 @@ const App = {
 document.addEventListener("DOMContentLoaded", async () => {
   loadTheme();
   showDate();
-  await loadConfig();
-  setupNav();
   setupThemeSwitch();
   setupMobileMenu();
-  navigateTo("dashboard");
+  // Zkontroluj zda je uživatel přihlášen
+  await zkontrolujPrihlaseni();
 });
 
 async function loadConfig() {
@@ -33,6 +35,111 @@ async function loadConfig() {
   document.getElementById("appNazev").textContent = cfg.app_nazev;
   document.title = cfg.app_nazev;
   fillFirmaSelects();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Přihlašování
+// ═══════════════════════════════════════════════════════════════
+async function zkontrolujPrihlaseni() {
+  try {
+    const me = await fetch("/api/me").then(r => r.json());
+    if (me.prihlasен) {
+      App.role  = me.role;
+      App.jmeno = me.jmeno;
+      App.prava = me.prava === "vse" ? null : (me.prava || {});
+      await spustAplikaci();
+    } else {
+      zobrazLogin();
+    }
+  } catch(e) {
+    zobrazLogin();
+  }
+}
+
+function zobrazLogin() {
+  document.getElementById("loginOverlay").style.display = "flex";
+  document.getElementById("appShell").style.display = "none";
+  document.getElementById("loginHeslo").focus();
+}
+
+function skryjLogin() {
+  document.getElementById("loginOverlay").style.display = "none";
+  document.getElementById("appShell").style.display = "flex";
+}
+
+async function prihlasit() {
+  const heslo = document.getElementById("loginHeslo").value;
+  const errEl = document.getElementById("loginError");
+  errEl.textContent = "";
+  if (!heslo) { errEl.textContent = "Zadej heslo"; return; }
+
+  try {
+    const r = await fetch("/api/login", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({heslo})
+    });
+    const data = await r.json();
+    if (!data.ok) {
+      errEl.textContent = "❌ Špatné heslo";
+      document.getElementById("loginHeslo").value = "";
+      return;
+    }
+    App.role  = data.role;
+    App.jmeno = data.jmeno;
+    App.prava = data.prava === "vse" ? null : (data.prava || {});
+    document.getElementById("loginHeslo").value = "";
+    skryjLogin();
+    await spustAplikaci();
+  } catch(e) {
+    errEl.textContent = "❌ Chyba připojení";
+  }
+}
+
+async function odhlasit() {
+  await fetch("/api/logout", {method: "POST"});
+  App.role = null; App.jmeno = null; App.prava = {};
+  zobrazLogin();
+}
+
+function maPravo(sekce) {
+  if (App.role === "admin" || App.prava === null) return true;
+  return App.prava[sekce] === true;
+}
+
+async function spustAplikaci() {
+  // Zobraz jméno přihlášeného uživatele
+  const userEl = document.getElementById("prihlasenyUzivatel");
+  if (userEl) userEl.textContent = App.jmeno;
+
+  await loadConfig();
+  setupNav();
+  skryjNepovoleneMenu();
+  navigateTo("dashboard");
+}
+
+function skryjNepovoleneMenu() {
+  // Mapování data-page → právo které se kontroluje
+  const menuPrava = {
+    "faktury":    "faktury_zobrazit",
+    "nahrat":     "faktury_upravit",
+    "rucni":      "faktury_upravit",
+    "polozky":    "faktury_zobrazit",
+    "vyplaty":    "vyplaty_zobrazit",
+    "reporty":    "reporty_zobrazit",
+    "statistiky": "statistiky",
+    "nastaveni":  "nastaveni",
+  };
+  document.querySelectorAll(".nav-item[data-page]").forEach(el => {
+    const page = el.dataset.page;
+    if (page === "dashboard") return; // dashboard vidí vždy
+    const pravo = menuPrava[page];
+    if (pravo && !maPravo(pravo)) {
+      el.style.display = "none";
+    } else {
+      el.style.display = "";
+    }
+  });
 }
 
 function fillFirmaSelects() {
@@ -112,10 +219,15 @@ function showDate() {
 async function api(url, opts = {}) {
   try {
     const r = await fetch(url, opts);
+    if (r.status === 401) {
+      // Session vypršela - zobraz přihlášení
+      zobrazLogin();
+      throw new Error("Nejsi přihlášen");
+    }
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || r.statusText); }
     return r.json();
   } catch (e) {
-    toast("Chyba: " + e.message, true);
+    if (e.message !== "Nejsi přihlášen") toast("Chyba: " + e.message, true);
     throw e;
   }
 }
