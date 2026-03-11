@@ -3382,6 +3382,54 @@ init_db()
 migrate_db()
 
 
+@app.route("/api/zaloha-db")
+@vyzaduj_prihlaseni
+def api_zaloha_db():
+    if session.get("role") != "admin":
+        return jsonify({"error": "Pouze admin"}), 403
+    import subprocess, tempfile, os as _os
+    from datetime import datetime as _dt
+    db_url = _os.environ.get("DATABASE_URL", "")
+    if not db_url:
+        return jsonify({"error": "DATABASE_URL není nastavena"}), 500
+    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"zaloha_{ts}.sql"
+    try:
+        result = subprocess.run(
+            ["pg_dump", "--no-password", "--format=plain", "--encoding=UTF8", db_url],
+            capture_output=True, timeout=60
+        )
+        if result.returncode != 0:
+            return jsonify({"error": result.stderr.decode("utf-8", errors="replace")}), 500
+        sql_data = result.stdout
+    except FileNotFoundError:
+        return jsonify({"error": "pg_dump není dostupný na serveru"}), 500
+    except subprocess.TimeoutExpired:
+        return jsonify({"error": "Záloha trvá příliš dlouho"}), 500
+
+    # Uložit do GCS (složka zalohy/)
+    gcs_url = None
+    try:
+        bucket = get_gcs_client()
+        if bucket:
+            blob = bucket.blob(f"zalohy/{filename}")
+            blob.upload_from_string(sql_data, content_type="application/sql")
+            gcs_url = f"gs://{_os.environ.get('GCS_BUCKET_NAME','')}/zalohy/{filename}"
+            print(f"✅ Záloha uložena do GCS: {gcs_url}")
+    except Exception as e:
+        print(f"⚠  GCS záloha error: {e}")
+
+    from flask import Response
+    resp = Response(
+        sql_data,
+        mimetype="application/sql",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+    if gcs_url:
+        resp.headers["X-GCS-URL"] = gcs_url
+    return resp
+
+
 @app.route("/api/smazat-vse-faktury", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_smazat_vse_faktury():
