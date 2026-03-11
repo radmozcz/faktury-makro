@@ -130,7 +130,8 @@ function skryjNepovoleneMenu() {
     "statistiky": "statistiky",
     "nastaveni":  "nastaveni",
     "banky":      "bankovni_vypisy",
-    "vydaje":     "vydaje_zobrazit",
+    "vydaje":          "vydaje_zobrazit",
+    "vystavene":       "vystavene_zobrazit",
   };
   document.querySelectorAll(".nav-item[data-page]").forEach(el => {
     const page = el.dataset.page;
@@ -183,7 +184,8 @@ function navigateTo(page) {
     statistiky: renderStatistiky,
     nastaveni:  renderNastaveni,
     banky:      renderBanky,
-    vydaje:     renderVydaje,
+    vydaje:        renderVydaje,
+    vystavene:     renderVystavene,
   };
   if (pages[page]) pages[page]();
 }
@@ -3797,5 +3799,251 @@ async function smazatVydaj(id) {
   if (!confirm("Opravdu smazat tento výdaj?")) return;
   await api(`/api/vydaje/${id}`, { method:"DELETE" });
   toast("Výdaj smazán ✓"); loadVydaje(); loadVydajeNezaplacene();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  VYSTAVENÉ FAKTURY
+// ═══════════════════════════════════════════════════════════════
+
+const VYST_ODBERATELE = ["Bauhaus"];
+
+async function renderVystavene() {
+  const muzeEditovat = App.role === "admin";
+  const tlacitka = muzeEditovat
+    ? `<button class="btn btn-primary btn-sm" onclick="openVystNahrat()">📄 Nahrát PDF</button>
+       <button class="btn btn-sm" onclick="openVystRucni()">✏️ Ruční zadání</button>`
+    : "";
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Vystavené faktury</h1>
+      <div class="btn-group">${tlacitka}</div>
+    </div>
+    <div class="row" style="gap:0.5rem;margin-bottom:1rem;display:flex;flex-wrap:wrap">
+      <div class="card" style="flex:1;min-width:130px;padding:0.75rem;text-align:center">
+        <div class="text-muted" style="font-size:0.8rem">Celkem faktur</div>
+        <div class="fw-bold" id="vyst-pocet">—</div>
+      </div>
+      <div class="card" style="flex:1;min-width:130px;padding:0.75rem;text-align:center">
+        <div class="text-muted" style="font-size:0.8rem">Celková částka</div>
+        <div class="fw-bold" id="vyst-celkem">—</div>
+      </div>
+      <div class="card" style="flex:1;min-width:130px;padding:0.75rem;text-align:center">
+        <div class="text-muted" style="font-size:0.8rem">Nezaplaceno</div>
+        <div class="fw-bold" style="color:var(--danger)" id="vyst-nezapl">—</div>
+      </div>
+      <div class="card" style="flex:1;min-width:130px;padding:0.75rem;text-align:center">
+        <div class="text-muted" style="font-size:0.8rem">Zaplaceno</div>
+        <div class="fw-bold" style="color:var(--success)" id="vyst-zapl">—</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="table-wrap" id="vystList"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>`;
+  loadVystavene();
+}
+
+async function loadVystavene() {
+  const el = document.getElementById("vystList");
+  if (!el) return;
+  const data = await api("/api/vystavene-faktury").catch(() => []);
+  // souhrn
+  let celkem = 0, nezapl = 0, zapl = 0;
+  data.forEach(f => {
+    celkem += f.castka;
+    if (f.stav === "zaplaceno") zapl += f.castka; else nezapl += f.castka;
+  });
+  const p = document.getElementById("vyst-pocet");  if (p) p.textContent = data.length;
+  const c = document.getElementById("vyst-celkem"); if (c) c.textContent = formatCastka(celkem) + " Kč";
+  const n = document.getElementById("vyst-nezapl"); if (n) n.textContent = formatCastka(nezapl) + " Kč";
+  const z = document.getElementById("vyst-zapl");   if (z) z.textContent = formatCastka(zapl) + " Kč";
+
+  if (!data.length) { el.innerHTML = "<p style='padding:1rem;color:var(--text-muted)'>Žádné vystavené faktury.</p>"; return; }
+  const muzeEditovat = App.role === "admin";
+  el.innerHTML = `<table class="data-table">
+    <thead><tr>
+      <th>Firma</th><th>Číslo faktury</th><th>Datum</th>
+      <th>Odběratel</th><th>Popis</th>
+      <th class="text-right">Částka</th><th class="text-center">Stav</th>
+      ${muzeEditovat ? "<th class='text-center'>Akce</th>" : ""}
+    </tr></thead>
+    <tbody>${data.map(f => {
+      const odkaz = f.soubor_url
+        ? `<a href="${f.soubor_url}" target="_blank">${f.cislo_faktury||"—"}</a>`
+        : (f.cislo_faktury||"—");
+      const stavBtn = muzeEditovat
+        ? `<button class="btn btn-xs ${f.stav==="zaplaceno"?"btn-success":"btn-outline"}"
+             onclick="toggleVystStav(${f.id},'${f.stav}')">${f.stav==="zaplaceno"?"✓ Zaplaceno":"✗ Nezaplaceno"}</button>`
+        : `<span class="badge ${f.stav==="zaplaceno"?"badge-success":"badge-danger"}">${f.stav==="zaplaceno"?"Zaplaceno":"Nezaplaceno"}</span>`;
+      const akce = muzeEditovat
+        ? `<td class="text-center">
+             <button class="btn btn-xs btn-outline" onclick="openVystEdit(${f.id})" title="Upravit">✏️</button>
+             <button class="btn btn-xs btn-danger" onclick="smazatVystavenu(${f.id})" title="Smazat">🗑</button>
+           </td>` : "";
+      return `<tr>
+        <td><span class="badge">${f.firma_zkratka}</span></td>
+        <td>${odkaz}</td><td>${f.datum||"—"}</td><td>${f.odberatel||"—"}</td>
+        <td style="color:var(--text-muted);font-size:0.85rem">${f.popis||"—"}</td>
+        <td class="text-right fw-bold">${formatCastka(f.castka)} Kč</td>
+        <td class="text-center">${stavBtn}</td>${akce}
+      </tr>`;
+    }).join("")}</tbody></table>`;
+}
+
+function vystFormHtml(f = {}) {
+  const jeZnamy = f.odberatel && VYST_ODBERATELE.includes(f.odberatel);
+  return `
+    <div class="form-row">
+      <div class="form-group">
+        <label>Firma</label>
+        <select id="vystFirma" class="form-control firma-select">
+          ${App.config.firmy.map(fi=>`<option ${fi===(f.firma_zkratka||"")?"selected":""}>${fi}</option>`).join("")}
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Číslo faktury</label>
+        <input type="text" id="vystCislo" class="form-control" value="${f.cislo_faktury||""}" placeholder="např. 2025001">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Datum</label>
+        <input type="date" id="vystDatum" class="form-control" value="${f.datum||""}">
+      </div>
+      <div class="form-group">
+        <label>Částka (Kč)</label>
+        <input type="number" id="vystCastka" class="form-control" step="0.01" min="0" value="${f.castka||""}">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Odběratel</label>
+      <select id="vystOdbSel" class="form-control" onchange="toggleVystOdb()">
+        ${VYST_ODBERATELE.map(o=>`<option ${o===(f.odberatel||"")?"selected":""}>${o}</option>`).join("")}
+        <option value="__jiny__" ${!jeZnamy&&f.odberatel?"selected":""}>— zadat ručně —</option>
+      </select>
+      <input type="text" id="vystOdbRucne" class="form-control" style="margin-top:0.4rem;${jeZnamy||!f.odberatel?"display:none":""}"
+             value="${!jeZnamy?f.odberatel||"":""}" placeholder="Název odběratele">
+    </div>
+    <div class="form-group">
+      <label>Popis plnění</label>
+      <input type="text" id="vystPopis" class="form-control" value="${f.popis||""}" placeholder="Stručný popis">
+    </div>
+    <div class="form-group">
+      <label>Stav</label>
+      <select id="vystStav" class="form-control">
+        <option value="nezaplaceno" ${(f.stav||"nezaplaceno")==="nezaplaceno"?"selected":""}>Nezaplaceno</option>
+        <option value="zaplaceno" ${f.stav==="zaplaceno"?"selected":""}>Zaplaceno</option>
+      </select>
+    </div>
+    <input type="hidden" id="vystSouborUrl" value="${f.soubor_url||""}">`;
+}
+
+function toggleVystOdb() {
+  const sel = document.getElementById("vystOdbSel").value;
+  const m = document.getElementById("vystOdbRucne");
+  if (m) m.style.display = sel === "__jiny__" ? "" : "none";
+}
+
+function openVystNahrat() {
+  openModal(`
+    <h2>📄 Nahrát vystavenou fakturu</h2>
+    <div class="form-group">
+      <label>PDF / foto</label>
+      <input type="file" id="vystSoubor" accept=".pdf,image/*" class="form-control">
+    </div>
+    <button class="btn btn-primary" onclick="spustVystOCR()">🔍 Rozpoznat z PDF</button>
+    <span id="vystOcrStatus" style="margin-left:0.5rem;font-size:0.85rem;color:var(--text-muted)"></span>
+    <hr>
+    <div id="vystFormFields" style="display:none">
+      ${vystFormHtml()}
+      <div style="margin-top:1rem;display:flex;gap:0.5rem;justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
+        <button class="btn btn-primary" onclick="saveVystavena()">💾 Uložit</button>
+      </div>
+    </div>`);
+  fillFirmaSelects();
+}
+
+function openVystRucni() {
+  openModal(`
+    <h2>✏️ Ruční zadání vystavené faktury</h2>
+    ${vystFormHtml()}
+    <div style="margin-top:1rem;display:flex;gap:0.5rem;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
+      <button class="btn btn-primary" onclick="saveVystavena()">💾 Uložit</button>
+    </div>`);
+  fillFirmaSelects();
+}
+
+async function openVystEdit(id) {
+  const data = await api("/api/vystavene-faktury").catch(()=>[]);
+  const f = data.find(x => x.id === id);
+  if (!f) return;
+  openModal(`
+    <h2>✏️ Upravit vystavenou fakturu</h2>
+    ${vystFormHtml(f)}
+    <div style="margin-top:1rem;display:flex;gap:0.5rem;justify-content:flex-end">
+      <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
+      <button class="btn btn-primary" onclick="saveVystavena(${id})">💾 Uložit</button>
+    </div>`);
+  fillFirmaSelects();
+  document.getElementById("vystFirma").value = f.firma_zkratka || "";
+}
+
+async function spustVystOCR() {
+  const fi = document.getElementById("vystSoubor");
+  if (!fi?.files.length) { toast("Vyberte soubor."); return; }
+  const status = document.getElementById("vystOcrStatus");
+  status.textContent = "Rozpoznávám…";
+  const fd = new FormData();
+  fd.append("soubor", fi.files[0]);
+  try {
+    const data = await api("/api/vystavene-faktury/nahrat", {method:"POST", body: fd});
+    if (data.error) { status.textContent = "Chyba: " + data.error; return; }
+    document.getElementById("vystFormFields").style.display = "";
+    if (data.cislo_faktury) document.getElementById("vystCislo").value = data.cislo_faktury;
+    if (data.datum)         document.getElementById("vystDatum").value = data.datum;
+    if (data.castka)        document.getElementById("vystCastka").value = data.castka;
+    if (data.popis)         document.getElementById("vystPopis").value = data.popis;
+    if (data.soubor_url)    document.getElementById("vystSouborUrl").value = data.soubor_url;
+    if (data.odberatel) {
+      const sel = document.getElementById("vystOdbSel");
+      if (VYST_ODBERATELE.includes(data.odberatel)) { sel.value = data.odberatel; }
+      else { sel.value = "__jiny__"; toggleVystOdb(); document.getElementById("vystOdbRucne").value = data.odberatel; }
+    }
+    status.textContent = "✓ Rozpoznáno";
+  } catch(e) { status.textContent = "Chyba OCR"; }
+}
+
+async function saveVystavena(editId = null) {
+  const sel = document.getElementById("vystOdbSel").value;
+  const odberatel = sel === "__jiny__"
+    ? (document.getElementById("vystOdbRucne").value||"").trim() : sel;
+  const payload = {
+    firma_zkratka: document.getElementById("vystFirma").value,
+    cislo_faktury: document.getElementById("vystCislo").value.trim(),
+    datum:         document.getElementById("vystDatum").value,
+    odberatel,
+    popis:         document.getElementById("vystPopis").value.trim(),
+    castka:        parseFloat(document.getElementById("vystCastka").value)||0,
+    stav:          document.getElementById("vystStav").value,
+    soubor_url:    document.getElementById("vystSouborUrl").value,
+  };
+  const url    = editId ? `/api/vystavene-faktury/${editId}` : "/api/vystavene-faktury";
+  const method = editId ? "PUT" : "POST";
+  await api(url, {method, headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload)});
+  toast(editId ? "Faktura upravena ✓" : "Faktura uložena ✓");
+  closeModal(); loadVystavene();
+}
+
+async function toggleVystStav(id, stavNyni) {
+  const novy = stavNyni === "zaplaceno" ? "nezaplaceno" : "zaplaceno";
+  await api(`/api/vystavene-faktury/${id}/stav`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({stav: novy})});
+  loadVystavene();
+}
+
+async function smazatVystavenu(id) {
+  if (!confirm("Opravdu smazat tuto fakturu?")) return;
+  await api(`/api/vystavene-faktury/${id}`, {method:"DELETE"});
+  toast("Faktura smazána ✓"); loadVystavene();
 }
 
