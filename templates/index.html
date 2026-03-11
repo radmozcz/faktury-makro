@@ -7,8 +7,69 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/style.css">
+<style>
+  /* ── Login overlay ── */
+  #loginOverlay {
+    display: none;
+    position: fixed; inset: 0; z-index: 9999;
+    background: var(--bg, #f5f5f5);
+    align-items: center; justify-content: center;
+  }
+  .login-box {
+    background: var(--card, #fff);
+    border-radius: 16px;
+    padding: 2.5rem 2rem;
+    box-shadow: 0 4px 32px rgba(0,0,0,.12);
+    width: 320px; max-width: 95vw;
+    text-align: center;
+  }
+  .login-box .logo-icon { font-size: 2.5rem; display: block; margin-bottom: .5rem; }
+  .login-box h2 { margin: 0 0 1.5rem; font-size: 1.3rem; color: var(--txt, #111); }
+  .login-box input {
+    width: 100%; padding: .75rem 1rem; border-radius: 8px;
+    border: 1.5px solid var(--border, #ddd); font-size: 1rem;
+    margin-bottom: 1rem; box-sizing: border-box;
+    background: var(--bg, #f5f5f5); color: var(--txt, #111);
+  }
+  .login-box button {
+    width: 100%; padding: .75rem; border-radius: 8px;
+    background: var(--primary, #4f46e5); color: #fff;
+    border: none; font-size: 1rem; font-weight: 600; cursor: pointer;
+  }
+  .login-box button:hover { opacity: .9; }
+  #loginError { color: #dc2626; font-size: .9rem; margin-top: .5rem; min-height: 1.2rem; }
+
+  /* ── Přihlášený uživatel v topbaru ── */
+  .topbar-user {
+    display: flex; align-items: center; gap: .6rem;
+    font-size: .85rem; color: var(--txt2, #666);
+  }
+  .topbar-user strong { color: var(--txt, #111); }
+  .btn-odhlasit {
+    padding: .3rem .7rem; border-radius: 6px; font-size: .8rem;
+    background: transparent; border: 1.5px solid var(--border, #ddd);
+    cursor: pointer; color: var(--txt, #111);
+  }
+  .btn-odhlasit:hover { background: var(--bg, #f5f5f5); }
+</style>
 </head>
 <body>
+
+<!-- LOGIN OVERLAY -->
+<div id="loginOverlay">
+  <div class="login-box">
+    <span class="logo-icon">🧾</span>
+    <h2>Správa faktur</h2>
+    <input type="password" id="loginHeslo" placeholder="Zadej heslo..."
+      onkeydown="if(event.key==='Enter') prihlasit()">
+    <button onclick="prihlasit()">Přihlásit se</button>
+    <div id="loginError"></div>
+  </div>
+</div>
+
+<!-- APLIKACE -->
+<div id="appShell" style="display:none; width:100%; height:100%; flex:1;">
+
 <!-- SIDEBAR -->
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
@@ -62,6 +123,10 @@
     </div>
     <div class="topbar-right">
       <span id="todayDate"></span>
+      <div class="topbar-user">
+        <strong id="prihlasenyUzivatel"></strong>
+        <button class="btn-odhlasit" onclick="odhlasit()">Odhlásit</button>
+      </div>
     </div>
   </header>
 
@@ -69,6 +134,8 @@
     <!-- stránky jsou renderovány dynamicky -->
   </main>
 </div>
+
+</div><!-- /#appShell -->
 
 <!-- MODAL -->
 <div class="modal-overlay" id="modalOverlay" style="display:none">
