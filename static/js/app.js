@@ -1652,17 +1652,27 @@ function exportPolozky(fmt) {
 //  VÝPLATY
 // ═══════════════════════════════════════════════════════════════
 async function renderVyplaty() {
-  const dnes = new Date();
-  const mesicOd = `${dnes.getFullYear()}-${String(dnes.getMonth()+1).padStart(2,"0")}-01`;
-  const rokOd   = `${dnes.getFullYear()}-01-01`;
-  const rokDo   = `${dnes.getFullYear()}-12-31`;
-
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
       <h1 class="page-title">Výplaty</h1>
       <button class="btn btn-primary btn-sm" onclick="openNovVyplata()">+ Nová výplata</button>
     </div>
+    <div class="filters" style="margin-bottom:1rem">
+      <label>Rok:</label>
+      <select id="vyplRok" onchange="loadVyplatyKarty()">
+        ${rokOptions(new Date().getFullYear())}
+      </select>
+    </div>
     <div id="vyplatyKarty"><div class="loading-center"><span class="spinner"></span></div></div>`;
+  loadVyplatyKarty();
+}
+
+async function loadVyplatyKarty() {
+  const dnes = new Date();
+  const zvolenyRok = parseInt(document.getElementById("vyplRok")?.value || dnes.getFullYear());
+  const mesicOd = `${dnes.getFullYear()}-${String(dnes.getMonth()+1).padStart(2,"0")}-01`;
+  const rokOd   = `${zvolenyRok}-01-01`;
+  const rokDo   = `${zvolenyRok}-12-31`;
 
   let dataMesic, dataRok, dataNaklady;
   try { dataMesic   = await api(`/api/vyplaty?od=${mesicOd}`); } catch { dataMesic = {vyplaty:[]}; }
@@ -1708,7 +1718,7 @@ async function renderVyplaty() {
 
   const mesicLabel = new Date(mesicOd).toLocaleDateString("cs-CZ",{month:"long",year:"numeric"});
   el.innerHTML = `
-    <div style="font-size:.85rem;color:var(--txt2);margin-bottom:1rem">Aktuální měsíc: <strong>${mesicLabel}</strong> &nbsp;·&nbsp; Rok ${dnes.getFullYear()}</div>
+    <div style="font-size:.85rem;color:var(--txt2);margin-bottom:1rem">Aktuální měsíc: <strong>${mesicLabel}</strong> &nbsp;·&nbsp; Rok ${zvolenyRok}</div>
     <div style="display:flex;flex-wrap:wrap;gap:1rem">
       ${jmena.map(jmeno => {
         const z = zam[jmeno];
@@ -1736,7 +1746,7 @@ async function renderVyplaty() {
               <div style="font-weight:700;color:#dc2626">${czMoney(z.naklady_mesic)}</div>
             </div>
             <div style="background:var(--bg);border-radius:6px;padding:.4rem .6rem">
-              <div style="color:var(--txt2);font-size:.75rem">Rok ${dnes.getFullYear()}</div>
+              <div style="color:var(--txt2);font-size:.75rem">Rok ${zvolenyRok}</div>
               <div style="font-weight:700">${czMoney(z.celkem_rok)}</div>
             </div>
             <div style="background:var(--bg);border-radius:6px;padding:.4rem .6rem">
@@ -2187,6 +2197,10 @@ async function renderStatistiky() {
       <select id="sFirma" class="firma-select">
         <option value="">Všechny</option>
         ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+      </select>
+      <label>Rok:</label>
+      <select id="sRok" onchange="aplikujRokFiltr('sRok','sOd','sDo',loadStatistiky)">
+        ${rokOptions("")}
       </select>
       <label>Od:</label><input type="date" id="sOd" value="${odStr}">
       <label>Do:</label><input type="date" id="sDo" value="${doStr}">
@@ -3958,16 +3972,18 @@ async function loadVystavene() {
         : (f.cislo_faktury||"—");
       const dupBadge = f.duplicita_id
         ? ` <small style="color:orange">⚠️ dup #${f.duplicita_id}</small>` : "";
-      const stavBtn = muzeEditovat
-        ? `<button class="btn btn-xs ${f.stav==="zaplaceno"?"btn-success":"btn-outline"}"
-             onclick="toggleVystStav(${f.id},'${f.stav}')">${f.stav==="zaplaceno"?"✓ Zaplaceno":"✗ Nezaplaceno"}</button>`
-        : `<span class="badge ${f.stav==="zaplaceno"?"badge-success":"badge-danger"}">${f.stav==="zaplaceno"?"Zaplaceno":"Nezaplaceno"}</span>`;
+      const stavBtn = f.duplicita_id
+        ? `<span class="badge" style="background:#0d6efd;color:#fff">🔗 Duplikát #${f.duplicita_id}</span>`
+        : muzeEditovat
+          ? `<button class="btn btn-xs ${f.stav==="zaplaceno"?"btn-success":"btn-outline"}"
+               onclick="toggleVystStav(${f.id},'${f.stav}')">${f.stav==="zaplaceno"?"✓ Zaplaceno":"✗ Nezaplaceno"}</button>`
+          : `<span class="badge ${f.stav==="zaplaceno"?"badge-success":"badge-danger"}">${f.stav==="zaplaceno"?"Zaplaceno":"Nezaplaceno"}</span>`;
       const akce = muzeEditovat
         ? `<td class="text-center">
              <button class="btn btn-xs btn-outline" onclick="openVystEdit(${f.id})" title="Upravit">✏️</button>
              <button class="btn btn-xs btn-danger" onclick="smazatVystavenu(${f.id})" title="Smazat">🗑</button>
            </td>` : "";
-      return `<tr>
+      return `<tr style="opacity:${f.duplicita_id ? '0.55' : '1'}">
         <td><span class="badge">${f.firma_zkratka}</span></td>
         <td>${odkaz}${dupBadge}</td><td>${f.datum||"—"}</td><td>${f.datum_splatnosti||"—"}</td>
         <td>${f.odberatel||"—"}</td>
