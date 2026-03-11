@@ -130,6 +130,7 @@ function skryjNepovoleneMenu() {
     "statistiky": "statistiky",
     "nastaveni":  "nastaveni",
     "banky":      "bankovni_vypisy",
+    "vydaje":     "vydaje_zobrazit",
   };
   document.querySelectorAll(".nav-item[data-page]").forEach(el => {
     const page = el.dataset.page;
@@ -182,6 +183,7 @@ function navigateTo(page) {
     statistiky: renderStatistiky,
     nastaveni:  renderNastaveni,
     banky:      renderBanky,
+    vydaje:     renderVydaje,
   };
   if (pages[page]) pages[page]();
 }
@@ -2105,6 +2107,9 @@ async function renderNastaveni() {
     { klic: "vyplaty_zobrazit",  label: "Výplaty — zobrazit" },
     { klic: "vyplaty_upravit",   label: "Výplaty — upravit" },
     { klic: "zbozi_zobrazit",    label: "Zboží — zobrazit" },
+    { klic: "vydaje_zobrazit",   label: "Výdaje — zobrazit" },
+    { klic: "vydaje_upravit",    label: "Výdaje — přidat/upravit" },
+    { klic: "vydaje_smazat",     label: "Výdaje — mazat" },
     { klic: "naklady_zobrazit",  label: "Náklady — zobrazit" },
     { klic: "bankovni_vypisy",   label: "Bankovní výpisy" },
     { klic: "statistiky",        label: "Statistiky" },
@@ -2941,7 +2946,192 @@ function exportReporty(fmt) {
 // ═══════════════════════════════════════════════════════════════
 //  BANKY – Bankovní výpisy
 // ═══════════════════════════════════════════════════════════════
-async function renderBanky() {
+
+// Hlavní stránka – výběr banky
+function renderBanky() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header"><h1 class="page-title">Bankovní výpisy</h1></div>
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:1rem">
+      <div class="card" style="flex:1;min-width:220px;max-width:320px;cursor:pointer;text-align:center;padding:2rem;transition:box-shadow .2s"
+           onclick="renderBankaDetail('AirBank')"
+           onmouseover="this.style.boxShadow='0 4px 24px rgba(0,0,0,.13)'"
+           onmouseout="this.style.boxShadow=''">
+        <div style="font-size:3rem">🏦</div>
+        <div style="font-size:1.3rem;font-weight:700;margin-top:.5rem">Air Bank</div>
+        <div style="color:var(--txt2);font-size:.9rem;margin-top:.3rem">Zobrazit výpisy →</div>
+      </div>
+      <div class="card" style="flex:1;min-width:220px;max-width:320px;cursor:pointer;text-align:center;padding:2rem;transition:box-shadow .2s"
+           onclick="renderBankaDetail('RB')"
+           onmouseover="this.style.boxShadow='0 4px 24px rgba(0,0,0,.13)'"
+           onmouseout="this.style.boxShadow=''">
+        <div style="font-size:3rem">🏛</div>
+        <div style="font-size:1.3rem;font-weight:700;margin-top:.5rem">Raiffeisenbank</div>
+        <div style="color:var(--txt2);font-size:.9rem;margin-top:.3rem">Zobrazit výpisy →</div>
+      </div>
+    </div>`;
+}
+
+// Detail banky – accordion po měsících
+async function renderBankaDetail(banka) {
+  const nazev = banka === "AirBank" ? "Air Bank" : "Raiffeisenbank";
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">
+        <span style="cursor:pointer;color:var(--txt2);font-weight:400" onclick="renderBanky()">Banky</span>
+        <span style="margin:0 .4rem">›</span>${nazev}
+      </h1>
+      <button class="btn btn-primary btn-sm" onclick="openImportBanky('${banka}')">📥 Importovat výpis</button>
+    </div>
+    <div id="bankaAccordion"><div class="loading-center"><span class="spinner"></span></div></div>`;
+  await loadBankaAccordion(banka);
+}
+
+async function loadBankaAccordion(banka) {
+  const el = document.getElementById("bankaAccordion");
+  if (!el) return;
+  let data;
+  try { data = await api(`/api/banky/pohyby?banka=${banka}`); } catch { return; }
+
+  // Seskup po měsících
+  const mesice = {};
+  for (const p of data.pohyby) {
+    const klic = p.datum.substring(0, 7); // YYYY-MM
+    if (!mesice[klic]) mesice[klic] = [];
+    mesice[klic].push(p);
+  }
+
+  const klice = Object.keys(mesice).sort().reverse();
+  if (!klice.length) {
+    el.innerHTML = `<div class="card" style="text-align:center;color:var(--txt2);padding:2rem">
+      Žádné transakce — importuj výpis z banky pomocí tlačítka výše.</div>`;
+    return;
+  }
+
+  el.innerHTML = klice.map((klic, idx) => {
+    const pohyby = mesice[klic];
+    const [rok, mes] = klic.split("-");
+    const nazevMesice = new Date(rok, mes-1, 1).toLocaleDateString("cs-CZ", {month:"long", year:"numeric"});
+    const prichozi = pohyby.filter(p=>p.castka>0).reduce((s,p)=>s+p.castka,0);
+    const odchozi  = pohyby.filter(p=>p.castka<0).reduce((s,p)=>s+p.castka,0);
+    const saldo    = prichozi + odchozi;
+    const open     = idx === 0; // první měsíc otevřený
+    return `
+    <div class="card" style="margin-bottom:.75rem;padding:0;overflow:hidden">
+      <div style="display:flex;align-items:center;padding:.9rem 1.2rem;cursor:pointer;gap:1rem"
+           onclick="toggleBankaMonth('bm_${klic}', this)">
+        <span style="font-size:1.1rem;font-weight:700;flex:1">${nazevMesice}</span>
+        <span style="color:#16a34a;font-size:.9rem">↑ ${czMoney(prichozi)}</span>
+        <span style="color:#dc2626;font-size:.9rem">↓ ${czMoney(Math.abs(odchozi))}</span>
+        <span style="font-weight:600;font-size:.9rem;color:${saldo>=0?'#16a34a':'#dc2626'}">= ${czMoney(saldo)}</span>
+        <span style="color:var(--txt2);font-size:.85rem">${pohyby.length} trans.</span>
+        <div style="display:flex;gap:.4rem" onclick="event.stopPropagation()">
+          <button class="btn btn-sm" style="font-size:.75rem;padding:.2rem .5rem" onclick="exportBankaMonth('${banka}','${klic}','csv')">CSV</button>
+          <button class="btn btn-sm" style="font-size:.75rem;padding:.2rem .5rem" onclick="exportBankaMonth('${banka}','${klic}','pdf')">PDF</button>
+        </div>
+        <span class="accordion-arrow" style="transition:transform .2s;${open?'transform:rotate(180deg)':''}">▼</span>
+      </div>
+      <div id="bm_${klic}" style="display:${open?'block':'none'};border-top:1px solid var(--border)">
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Datum</th><th>Protistrana</th><th>Typ</th><th>Zpráva</th>
+              <th style="text-align:right">Částka</th><th></th>
+            </tr></thead>
+            <tbody>
+              ${pohyby.map(p=>`
+              <tr>
+                <td>${czDate(p.datum)}</td>
+                <td><strong>${escHtml(p.nazev_protiucet||"—")}</strong>${p.protiucet?`<br><small style="color:var(--txt2)">${escHtml(p.protiucet)}</small>`:""}</td>
+                <td style="font-size:.85rem;color:var(--txt2)">${escHtml(p.typ_transakce||"")}</td>
+                <td style="font-size:.85rem;color:var(--txt2);max-width:180px">${escHtml(p.zprava||"")}</td>
+                <td style="text-align:right;font-weight:600;color:${p.castka>=0?'#16a34a':'#dc2626'}">${czMoney(p.castka)}</td>
+                <td><button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:.2rem .4rem;border-radius:4px" onclick="smazatBankovniPohyb(${p.id},'${banka}')">🗑</button></td>
+              </tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function toggleBankaMonth(id, header) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const open = el.style.display !== "none";
+  el.style.display = open ? "none" : "block";
+  const arrow = header.querySelector(".accordion-arrow");
+  if (arrow) arrow.style.transform = open ? "" : "rotate(180deg)";
+}
+
+function exportBankaMonth(banka, mesic, fmt) {
+  window.location.href = `/api/banky/export?banka=${banka}&mesic=${mesic}&format=${fmt}`;
+}
+
+function openImportBanky(banka) {
+  const nazev = banka === "AirBank" ? "Air Bank" : "Raiffeisenbank";
+  openModal(`Importovat výpis – ${nazev}`, `
+    <p style="color:var(--txt2);font-size:.85rem;margin-bottom:1rem">
+      Nahraj CSV výpis z <strong>${nazev}</strong>.
+      Duplicitní transakce budou automaticky přeskočeny.
+    </p>
+    <div class="form-group">
+      <label class="form-label">Firma</label>
+      <select id="bImportFirma" class="form-control">
+        <option value="">— nevybráno —</option>
+        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+      </select>
+    </div>
+    <div class="dropzone" id="bankyDropzone" style="padding:1.5rem;margin-top:.5rem">
+      <div class="dropzone-icon">🏦</div>
+      <div class="dropzone-text"><strong>Přetáhněte CSV soubor</strong> nebo klikněte</div>
+      <input type="file" id="bankyFileInput" accept=".csv,.pdf">
+    </div>
+    <div id="bankyImportStatus" style="margin-top:1rem;font-size:.9rem"></div>
+  `);
+  const dz  = document.getElementById("bankyDropzone");
+  const inp = document.getElementById("bankyFileInput");
+  inp.style.display = "none";
+  dz.addEventListener("click", () => inp.click());
+  inp.addEventListener("change", () => { if (inp.files[0]) doImportBanky(inp.files[0], banka); });
+  dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag-over"); });
+  dz.addEventListener("dragleave", () => dz.classList.remove("drag-over"));
+  dz.addEventListener("drop", e => {
+    e.preventDefault(); dz.classList.remove("drag-over");
+    if (e.dataTransfer.files[0]) doImportBanky(e.dataTransfer.files[0], banka);
+  });
+}
+
+async function doImportBanky(file, banka) {
+  const statusEl = document.getElementById("bankyImportStatus");
+  statusEl.innerHTML = `<span class="spinner"></span> Importuji...`;
+  const fd = new FormData();
+  fd.append("soubor", file);
+  fd.append("firma_zkratka", document.getElementById("bImportFirma")?.value || "");
+  fd.append("banka_hint", banka || "");
+  try {
+    const data = await api("/api/banky/import", { method: "POST", body: fd });
+    statusEl.innerHTML = `
+      <div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:6px;padding:.7rem 1rem;color:#065f46">
+        ✅ Import dokončen! Banka: <strong>${data.banka}</strong><br>
+        Naimportováno: <strong>${data.naimportovano}</strong> transakcí
+        ${data.duplicity ? `, přeskočeno duplicit: <strong>${data.duplicity}</strong>` : ""}
+      </div>`;
+    setTimeout(() => { closeModal(); loadBankaAccordion(banka); }, 2000);
+  } catch(e) {
+    statusEl.innerHTML = `❌ Chyba: ${e.message}`;
+  }
+}
+
+async function smazatBankovniPohyb(id, banka) {
+  if (!confirm("Opravdu smazat tento pohyb?")) return;
+  await api(`/api/banky/pohyby/${id}`, { method: "DELETE" });
+  toast("Pohyb smazán ✓");
+  loadBankaAccordion(banka);
+}
+
+// stará renderBanky (prázdná placeholder aby nedošlo k chybě při náhodném zavolání)
+async function _renderBankyOld() {
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
       <h1 class="page-title">Bankovní výpisy</h1>
@@ -3082,4 +3272,231 @@ async function smazatBankovniPohyb(id) {
   await api(`/api/banky/pohyby/${id}`, { method: "DELETE" });
   toast("Pohyb smazán ✓");
   loadBanky();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  VÝDAJE
+// ═══════════════════════════════════════════════════════════════
+async function renderVydaje() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Výdaje</h1>
+      <div class="btn-group">
+        ${maPravo("vydaje_upravit") ? `
+        <button class="btn btn-primary btn-sm" onclick="openVydajNahrat()">📷 Nahrát doklad</button>
+        <button class="btn btn-sm" onclick="openVydajRucni()">✏️ Ruční zadání</button>` : ""}
+      </div>
+    </div>
+    <div class="filters">
+      <label>Firma:</label>
+      <select id="vFirma" class="firma-select" onchange="loadVydaje()">
+        <option value="">Všechny firmy</option>
+        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+      </select>
+      <label>Od:</label><input type="date" id="vOd" onchange="loadVydaje()">
+      <label>Do:</label><input type="date" id="vDo" onchange="loadVydaje()">
+    </div>
+    <div class="card">
+      <div class="table-wrap" id="vydajeList"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>`;
+  loadVydaje();
+}
+
+async function loadVydaje() {
+  const params = new URLSearchParams({
+    firma: document.getElementById("vFirma")?.value || "",
+    od:    document.getElementById("vOd")?.value || "",
+    do:    document.getElementById("vDo")?.value || "",
+  });
+  const data = await api(`/api/vydaje?${params}`);
+  const el = document.getElementById("vydajeList");
+  if (!el) return;
+  const mozeUpravit = maPravo("vydaje_upravit");
+  const mozeSmazat  = maPravo("vydaje_smazat");
+  el.innerHTML = `
+    <table>
+      <thead><tr>
+        <th>Datum</th><th>Firma</th><th>Dodavatel</th><th>Způsob úhrady</th>
+        <th>Poznámka</th><th style="text-align:right">Částka</th><th>Doklad</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${data.vydaje.length ? data.vydaje.map(v=>`
+        <tr style="cursor:${mozeUpravit?'pointer':'default'}" onclick="${mozeUpravit?`openVydajEdit(${v.id})`:''}">
+          <td>${czDate(v.datum)}</td>
+          <td><span class="badge">${escHtml(v.firma_zkratka)}</span></td>
+          <td>${escHtml(v.dodavatel||"—")}</td>
+          <td><span class="badge" style="background:#f3f4f6">${escHtml(v.zpusob_uhrady||"")}</span></td>
+          <td style="color:var(--txt2);font-size:.9rem">${escHtml(v.poznamka||"")}</td>
+          <td style="text-align:right;font-weight:600;color:#dc2626">${czMoney(v.castka)}</td>
+          <td>${v.soubor_url ? `<a href="${v.soubor_url}" target="_blank" onclick="event.stopPropagation()" style="font-size:.85rem">📎 Doklad</a>` : ""}</td>
+          <td onclick="event.stopPropagation()">
+            ${mozeSmazat ? `<button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:.2rem .4rem;border-radius:4px" onclick="smazatVydaj(${v.id})">🗑</button>` : ""}
+          </td>
+        </tr>`).join("")
+        : "<tr><td colspan='8' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné výdaje</td></tr>"}
+      </tbody>
+      ${data.vydaje.length ? `
+      <tfoot><tr class="table-footer">
+        <td colspan="5">Celkem (${data.vydaje.length} výdajů)</td>
+        <td style="text-align:right"><strong style="color:#dc2626">${czMoney(data.celkem)}</strong></td>
+        <td colspan="2"></td>
+      </tr></tfoot>` : ""}
+    </table>`;
+}
+
+function _vydajModal(titul, v, onSave) {
+  openModal(titul, `
+    <div class="grid-2" style="gap:1rem">
+      <div class="form-group"><label class="form-label">Firma *</label>
+        <select id="evFirma" class="form-control">
+          ${App.config.firmy.map(f=>`<option ${v.firma_zkratka===f?'selected':''}>${f}</option>`).join("")}
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Dodavatel</label>
+        <input id="evDodavatel" class="form-control" value="${escHtml(v.dodavatel||'')}" placeholder="Název obchodu / firmy">
+      </div>
+      <div class="form-group"><label class="form-label">Datum</label>
+        <input type="date" id="evDatum" class="form-control" value="${v.datum||''}">
+      </div>
+      <div class="form-group"><label class="form-label">Částka (Kč) *</label>
+        <input type="number" step="0.01" id="evCastka" class="form-control" value="${v.castka||''}">
+      </div>
+      <div class="form-group"><label class="form-label">Způsob úhrady</label>
+        <select id="evUhrada" class="form-control">
+          ${["hotovost","karta","převodem"].map(u=>`<option ${(v.zpusob_uhrady||'hotovost')===u?'selected':''}>${u}</option>`).join("")}
+        </select>
+      </div>
+      <div class="form-group" style="grid-column:1/-1"><label class="form-label">Poznámka</label>
+        <input id="evPoznamka" class="form-control" value="${escHtml(v.poznamka||'')}" placeholder="Co bylo nakoupeno...">
+      </div>
+    </div>
+    <div style="text-align:right;margin-top:1rem">
+      <button class="btn btn-primary" onclick="(${onSave.toString()})()">💾 Uložit</button>
+    </div>`);
+}
+
+function openVydajRucni() {
+  _vydajModal("Nový výdaj", { firma_zkratka: App.config.firmy[0]||"" }, async function() {
+    const payload = {
+      firma_zkratka: document.getElementById("evFirma").value,
+      dodavatel:     document.getElementById("evDodavatel").value,
+      datum:         document.getElementById("evDatum").value,
+      castka:        parseFloat(document.getElementById("evCastka").value||0),
+      zpusob_uhrady: document.getElementById("evUhrada").value,
+      poznamka:      document.getElementById("evPoznamka").value,
+      zdroj:         "rucni",
+    };
+    if (!payload.firma_zkratka || !payload.castka) { toast("Vyplň firmu a částku"); return; }
+    await api("/api/vydaje", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+    toast("Výdaj uložen ✓"); closeModal(); loadVydaje();
+  });
+}
+
+async function openVydajEdit(id) {
+  const data = await api("/api/vydaje");
+  const v = data.vydaje.find(x=>x.id===id);
+  if (!v) return;
+  _vydajModal("Upravit výdaj", v, async function() {
+    const payload = {
+      firma_zkratka: document.getElementById("evFirma").value,
+      dodavatel:     document.getElementById("evDodavatel").value,
+      datum:         document.getElementById("evDatum").value,
+      castka:        parseFloat(document.getElementById("evCastka").value||0),
+      zpusob_uhrady: document.getElementById("evUhrada").value,
+      poznamka:      document.getElementById("evPoznamka").value,
+    };
+    await api(`/api/vydaje/${id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+    toast("Uloženo ✓"); closeModal(); loadVydaje();
+  });
+}
+
+function openVydajNahrat() {
+  openModal("Nahrát doklad výdaje", `
+    <div class="form-group" style="margin-bottom:1rem">
+      <label class="form-label">Firma</label>
+      <select id="vNahratFirma" class="form-control">
+        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+      </select>
+    </div>
+    <div class="dropzone" id="vydajDropzone" style="padding:1.5rem">
+      <div class="dropzone-icon">🧾</div>
+      <div class="dropzone-text"><strong>Přetáhněte foto nebo PDF dokladu</strong> nebo klikněte</div>
+      <input type="file" id="vydajFileInput" accept="image/*,.pdf">
+    </div>
+    <div id="vydajNahratStatus" style="margin-top:1rem;font-size:.9rem"></div>
+    <div id="vydajNahratForm" style="display:none;margin-top:1rem"></div>`);
+
+  const dz  = document.getElementById("vydajDropzone");
+  const inp = document.getElementById("vydajFileInput");
+  inp.style.display = "none";
+  dz.addEventListener("click", () => inp.click());
+  inp.addEventListener("change", () => { if (inp.files[0]) doVydajNahrat(inp.files[0]); });
+  dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag-over"); });
+  dz.addEventListener("dragleave", () => dz.classList.remove("drag-over"));
+  dz.addEventListener("drop", e => {
+    e.preventDefault(); dz.classList.remove("drag-over");
+    if (e.dataTransfer.files[0]) doVydajNahrat(e.dataTransfer.files[0]);
+  });
+}
+
+async function doVydajNahrat(file) {
+  const statusEl = document.getElementById("vydajNahratStatus");
+  statusEl.innerHTML = `<span class="spinner"></span> Zpracovávám doklad...`;
+  const fd = new FormData();
+  fd.append("soubor", file);
+  fd.append("firma_zkratka", document.getElementById("vNahratFirma")?.value || "");
+  try {
+    const data = await api("/api/vydaje/nahrat", { method:"POST", body:fd });
+    statusEl.innerHTML = `✅ Doklad rozpoznán`;
+    const formEl = document.getElementById("vydajNahratForm");
+    formEl.style.display = "block";
+    formEl.innerHTML = `
+      <div class="grid-2" style="gap:1rem">
+        <div class="form-group"><label class="form-label">Dodavatel</label>
+          <input id="vnDodavatel" class="form-control" value="${escHtml(data.dodavatel||'')}">
+        </div>
+        <div class="form-group"><label class="form-label">Datum</label>
+          <input type="date" id="vnDatum" class="form-control" value="${data.datum||''}">
+        </div>
+        <div class="form-group"><label class="form-label">Částka (Kč)</label>
+          <input type="number" step="0.01" id="vnCastka" class="form-control" value="${data.castka||''}">
+        </div>
+        <div class="form-group"><label class="form-label">Způsob úhrady</label>
+          <select id="vnUhrada" class="form-control">
+            <option>hotovost</option><option>karta</option><option>převodem</option>
+          </select>
+        </div>
+        <div class="form-group" style="grid-column:1/-1"><label class="form-label">Poznámka</label>
+          <input id="vnPoznamka" class="form-control" value="${escHtml(data.poznamka||'')}">
+        </div>
+      </div>
+      <div style="text-align:right;margin-top:1rem">
+        <button class="btn btn-primary" onclick="ulozitVydajZDokladu('${data.soubor_cesta}','${data.soubor_gcs_url}')">💾 Uložit výdaj</button>
+      </div>`;
+  } catch(e) {
+    statusEl.innerHTML = `❌ Chyba: ${e.message}`;
+  }
+}
+
+async function ulozitVydajZDokladu(soubor_cesta, soubor_url) {
+  const payload = {
+    firma_zkratka: document.getElementById("vNahratFirma")?.value || "",
+    dodavatel:     document.getElementById("vnDodavatel").value,
+    datum:         document.getElementById("vnDatum").value,
+    castka:        parseFloat(document.getElementById("vnCastka").value||0),
+    zpusob_uhrady: document.getElementById("vnUhrada").value,
+    poznamka:      document.getElementById("vnPoznamka").value,
+    soubor_cesta,
+    soubor_url,
+    zdroj: "ocr",
+  };
+  if (!payload.firma_zkratka || !payload.castka) { toast("Vyplň firmu a částku"); return; }
+  await api("/api/vydaje", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+  toast("Výdaj uložen ✓"); closeModal(); loadVydaje();
+}
+
+async function smazatVydaj(id) {
+  if (!confirm("Opravdu smazat tento výdaj?")) return;
+  await api(`/api/vydaje/${id}`, { method:"DELETE" });
+  toast("Výdaj smazán ✓"); loadVydaje();
 }
