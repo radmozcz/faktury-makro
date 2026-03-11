@@ -2390,6 +2390,16 @@ async function renderNastaveni() {
       </div>
 
       <hr style="margin:1.5rem 0">
+      <div style="border:1px solid var(--border);border-radius:8px;padding:1rem">
+        <div style="font-weight:600;margin-bottom:.5rem">💾 Záloha databáze</div>
+        <div style="color:var(--txt2);font-size:.9rem;margin-bottom:.75rem">
+          Stáhne kompletní SQL dump celé databáze (PostgreSQL). Doporučujeme zálohovat pravidelně.
+        </div>
+        <button class="btn btn-primary" onclick="stahnoutZalohu()">⬇ Stáhnout zálohu (.sql)</button>
+        <span id="zalohaStatus" style="margin-left:.75rem;font-size:.9rem;color:var(--txt2)"></span>
+      </div>
+
+      <hr style="margin:1.5rem 0">
       <div style="border:1px solid #e55;border-radius:8px;padding:1rem;background:#fff5f5">
         <div style="font-weight:600;color:#c00;margin-bottom:.5rem">⚠️ Nebezpečná zóna</div>
         <div style="color:var(--txt2);font-size:.9rem;margin-bottom:.75rem">Smaže všechny faktury a položky. Akce je nevratná!</div>
@@ -2422,6 +2432,34 @@ async function ulozitPrava() {
     }
   } catch(e) {
     statusEl.textContent = "❌ Chyba při ukládání";
+  }
+}
+
+async function stahnoutZalohu() {
+  const statusEl = document.getElementById("zalohaStatus");
+  if (statusEl) statusEl.textContent = "⏳ Připravuji zálohu...";
+  try {
+    const resp = await fetch("/api/zaloha-db", { credentials: "same-origin" });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      throw new Error(err.error || resp.statusText);
+    }
+    const blob = await resp.blob();
+    const cd = resp.headers.get("Content-Disposition") || "";
+    const gcsUrl = resp.headers.get("X-GCS-URL");
+    const fnMatch = cd.match(/filename=([^\s;]+)/);
+    const filename = fnMatch ? fnMatch[1] : "zaloha.sql";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    const gcsInfo = gcsUrl ? " + uloženo do GCS" : "";
+    if (statusEl) { statusEl.textContent = `✅ Staženo${gcsInfo}`; setTimeout(() => statusEl.textContent = "", 4000); }
+  } catch(e) {
+    if (statusEl) statusEl.textContent = "❌ " + e.message;
+    toast("Záloha selhala: " + e.message, true);
   }
 }
 
