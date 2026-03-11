@@ -1359,9 +1359,9 @@ def api_me():
     """Vrátí info o přihlášeném uživateli."""
     role = session.get("role")
     if not role:
-        return jsonify({"prihlasен": False})
+        return jsonify({"prihlasen": False})
     return jsonify({
-        "prihlasен": True,
+        "prihlasen": True,
         "role": role,
         "jmeno": ROLE_NAMES.get(role, role),
         "prava": get_prava_z_db().get(role, {}) if role != "admin" else "vse",
