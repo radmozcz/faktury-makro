@@ -3014,7 +3014,7 @@ async function loadBankaAccordion(banka) {
     const prichozi = pohyby.filter(p=>p.castka>0).reduce((s,p)=>s+p.castka,0);
     const odchozi  = pohyby.filter(p=>p.castka<0).reduce((s,p)=>s+p.castka,0);
     const saldo    = prichozi + odchozi;
-    const open     = idx === 0; // první měsíc otevřený
+    const open = false; // vše zavřené, rozbalí se kliknutím
     return `
     <div class="card" style="margin-bottom:.75rem;padding:0;overflow:hidden">
       <div style="display:flex;align-items:center;padding:.9rem 1.2rem;cursor:pointer;gap:1rem"
