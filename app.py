@@ -501,8 +501,8 @@ def migrate_db():
             except Exception: pass
         # Migrace vydaje
         if _USE_PG:
-            cur2.execute("SELECT column_name FROM information_schema.columns WHERE table_name='vydaje'")
-            vydaj_cols = [r["column_name"] for r in cur2.fetchall()]
+            cur3 = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='vydaje'")
+            vydaj_cols = [r["column_name"] for r in cur3.fetchall()]
         else:
             vydaj_cols = [row[1] for row in conn.execute("PRAGMA table_info(vydaje)").fetchall()]
         if "popis" not in vydaj_cols:
