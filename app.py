@@ -137,13 +137,15 @@ DEFAULT_PRAVA = {
         "vyplaty_zobrazit":  True,
         "vyplaty_upravit":   False,
         "zbozi_zobrazit":    True,
-        "vydaje_zobrazit":   True,
-        "vydaje_upravit":    True,
-        "vydaje_smazat":     False,
-        "naklady_zobrazit":  False,
-        "bankovni_vypisy":   False,
-        "statistiky":        False,
-        "nastaveni":         False,
+        "vydaje_zobrazit":      True,
+        "vydaje_upravit":       True,
+        "vydaje_smazat":        False,
+        "naklady_zobrazit":     False,
+        "bankovni_vypisy":      False,
+        "statistiky":           False,
+        "nastaveni":            False,
+        "vystavene_zobrazit":   False,
+        "vystavene_upravit":    False,
     },
     "ucetni": {
         "faktury_zobrazit":  True,
@@ -155,13 +157,15 @@ DEFAULT_PRAVA = {
         "vyplaty_zobrazit":  False,
         "vyplaty_upravit":   False,
         "zbozi_zobrazit":    False,
-        "vydaje_zobrazit":   True,
-        "vydaje_upravit":    False,
-        "vydaje_smazat":     False,
-        "naklady_zobrazit":  True,
-        "bankovni_vypisy":   True,
-        "statistiky":        False,
-        "nastaveni":         False,
+        "vydaje_zobrazit":      True,
+        "vydaje_upravit":       False,
+        "vydaje_smazat":        False,
+        "naklady_zobrazit":     True,
+        "bankovni_vypisy":      True,
+        "statistiky":           False,
+        "nastaveni":            False,
+        "vystavene_zobrazit":   True,
+        "vystavene_upravit":    False,
     },
 }
 
@@ -449,6 +453,18 @@ def init_db():
             vydaj_id    INTEGER NOT NULL,
             nazev       TEXT NOT NULL,
             castka      REAL NOT NULL DEFAULT 0
+        )"""),
+        ("vystavene_faktury", """CREATE TABLE IF NOT EXISTS vystavene_faktury (
+            id              SERIAL PRIMARY KEY,
+            firma_zkratka   TEXT    NOT NULL,
+            cislo_faktury   TEXT    DEFAULT '',
+            datum           TEXT    DEFAULT '',
+            odberatel       TEXT    DEFAULT '',
+            popis           TEXT    DEFAULT '',
+            castka          REAL    NOT NULL DEFAULT 0,
+            stav            TEXT    DEFAULT 'nezaplaceno',
+            soubor_url      TEXT    DEFAULT '',
+            created_at      TEXT    DEFAULT NOW()
         )"""),
     ]
     with get_db() as conn:
@@ -2012,6 +2028,121 @@ Odpověz POUZE jako JSON: {"dodavatel":"...","datum":"...","castka":0,"poznamka"
         "soubor_gcs_url": gcs_url or "",
         "firma_zkratka": firma,
     })
+
+# ── API: VYSTAVENÉ FAKTURY ────────────────────────────────────────────────────
+
+@app.route("/api/vystavene-faktury")
+@vyzaduj_prihlaseni
+def api_vystavene_list():
+    if session.get("role") == "verunka":
+        return jsonify({"error": "Přístup zamítnut"}), 403
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM vystavene_faktury ORDER BY datum DESC, id DESC"
+        ).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+@app.route("/api/vystavene-faktury", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_vystavene_ulozit():
+    if session.get("role") != "admin":
+        return jsonify({"error": "Přístup zamítnut"}), 403
+    d = request.json or {}
+    with get_db() as conn:
+        conn.execute(
+            """INSERT INTO vystavene_faktury
+               (firma_zkratka, cislo_faktury, datum, odberatel, popis, castka, stav, soubor_url)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (d.get("firma_zkratka",""), d.get("cislo_faktury",""),
+             d.get("datum",""), d.get("odberatel",""), d.get("popis",""),
+             float(d.get("castka",0)), d.get("stav","nezaplaceno"), d.get("soubor_url",""))
+        )
+    return jsonify({"ok": True})
+
+@app.route("/api/vystavene-faktury/<int:fid>", methods=["PUT"])
+@vyzaduj_prihlaseni
+def api_vystavene_edit(fid):
+    if session.get("role") != "admin":
+        return jsonify({"error": "Přístup zamítnut"}), 403
+    d = request.json or {}
+    with get_db() as conn:
+        conn.execute(
+            """UPDATE vystavene_faktury SET firma_zkratka=?, cislo_faktury=?, datum=?,
+               odberatel=?, popis=?, castka=?, stav=?, soubor_url=? WHERE id=?""",
+            (d.get("firma_zkratka",""), d.get("cislo_faktury",""),
+             d.get("datum",""), d.get("odberatel",""), d.get("popis",""),
+             float(d.get("castka",0)), d.get("stav","nezaplaceno"), d.get("soubor_url",""), fid)
+        )
+    return jsonify({"ok": True})
+
+@app.route("/api/vystavene-faktury/<int:fid>", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_vystavene_delete(fid):
+    if session.get("role") != "admin":
+        return jsonify({"error": "Přístup zamítnut"}), 403
+    with get_db() as conn:
+        conn.execute("DELETE FROM vystavene_faktury WHERE id=?", (fid,))
+    return jsonify({"ok": True})
+
+@app.route("/api/vystavene-faktury/<int:fid>/stav", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_vystavene_stav(fid):
+    if session.get("role") != "admin":
+        return jsonify({"error": "Přístup zamítnut"}), 403
+    stav = request.json.get("stav", "zaplaceno")
+    with get_db() as conn:
+        conn.execute("UPDATE vystavene_faktury SET stav=? WHERE id=?", (stav, fid))
+    return jsonify({"ok": True})
+
+@app.route("/api/vystavene-faktury/nahrat", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_vystavene_nahrat():
+    if session.get("role") != "admin":
+        return jsonify({"error": "Přístup zamítnut"}), 403
+    if "soubor" not in request.files:
+        return jsonify({"error": "Žádný soubor"}), 400
+    f = request.files["soubor"]
+    fname = secure_filename(f.filename or "faktura.pdf")
+    fpath = os.path.join(UPLOAD_FOLDER, fname)
+    f.save(fpath)
+    gcs_url = upload_to_gcs(fpath, f"vystavene/{fname}")
+    parsed = {}
+    try:
+        with open(fpath, "rb") as fh:
+            raw = fh.read()
+        b64 = base64.b64encode(raw).decode()
+        ext = fname.rsplit(".", 1)[-1].lower()
+        mt = "application/pdf" if ext == "pdf" else f"image/{ext if ext in ['jpeg','jpg','png','gif','webp'] else 'jpeg'}"
+        if mt == "image/jpg": mt = "image/jpeg"
+        msg_content = [
+            {"type": "image" if not mt.startswith("application") else "document",
+             "source": {"type": "base64", "media_type": mt, "data": b64}},
+            {"type": "text", "text": """Analyzuj tuto vystavenou fakturu a extrahuj:
+- cislo_faktury: číslo faktury (text)
+- datum: datum vystavení ve formátu YYYY-MM-DD
+- castka: celková částka v Kč (číslo bez měny)
+- odberatel: název odběratele
+- popis: stručný popis předmětu plnění (max 100 znaků)
+Odpověz POUZE jako JSON: {"cislo_faktury":"...","datum":"...","castka":0,"odberatel":"...","popis":"..."}"""}
+        ]
+        resp = anthropic_client.messages.create(
+            model="claude-sonnet-4-20250514", max_tokens=300,
+            messages=[{"role": "user", "content": msg_content}]
+        )
+        import json as _json
+        text = resp.content[0].text.strip().replace("```json","").replace("```","").strip()
+        parsed = _json.loads(text)
+    except Exception as e:
+        app.logger.warning(f"OCR vystavene failed: {e}")
+    return jsonify({
+        "cislo_faktury": parsed.get("cislo_faktury", ""),
+        "datum":         parsed.get("datum", ""),
+        "castka":        parsed.get("castka", 0),
+        "odberatel":     parsed.get("odberatel", ""),
+        "popis":         parsed.get("popis", ""),
+        "soubor_url":    gcs_url or "",
+    })
+
 
 # ── API: BANKOVNÍ VÝPISY ──────────────────────────────────────────────────────
 def parse_csv_airbank(content_bytes):
