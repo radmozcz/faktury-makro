@@ -455,16 +455,18 @@ def init_db():
             castka      REAL NOT NULL DEFAULT 0
         )"""),
         ("vystavene_faktury", """CREATE TABLE IF NOT EXISTS vystavene_faktury (
-            id              SERIAL PRIMARY KEY,
-            firma_zkratka   TEXT    NOT NULL,
-            cislo_faktury   TEXT    DEFAULT '',
-            datum           TEXT    DEFAULT '',
-            odberatel       TEXT    DEFAULT '',
-            popis           TEXT    DEFAULT '',
-            castka          REAL    NOT NULL DEFAULT 0,
-            stav            TEXT    DEFAULT 'nezaplaceno',
-            soubor_url      TEXT    DEFAULT '',
-            created_at      TEXT    DEFAULT NOW()
+            id                SERIAL PRIMARY KEY,
+            firma_zkratka     TEXT    NOT NULL,
+            cislo_faktury     TEXT    DEFAULT '',
+            datum             TEXT    DEFAULT '',
+            datum_splatnosti  TEXT    DEFAULT '',
+            odberatel         TEXT    DEFAULT '',
+            popis             TEXT    DEFAULT '',
+            castka            REAL    NOT NULL DEFAULT 0,
+            stav              TEXT    DEFAULT 'nezaplaceno',
+            soubor_url        TEXT    DEFAULT '',
+            duplicita_id      INTEGER DEFAULT NULL,
+            created_at        TEXT    DEFAULT NOW()
         )"""),
     ]
     with get_db() as conn:
@@ -529,6 +531,19 @@ def migrate_db():
             except Exception: pass
         if "datum_splatnosti" not in vydaj_cols:
             try: conn.execute("ALTER TABLE vydaje ADD COLUMN datum_splatnosti TEXT DEFAULT ''")
+            except Exception: pass
+    # Migrace vystavene_faktury
+    with get_db() as conn:
+        if _USE_PG:
+            cur4 = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='vystavene_faktury'")
+            vyst_cols = [r["column_name"] for r in cur4.fetchall()]
+        else:
+            vyst_cols = [row[1] for row in conn.execute("PRAGMA table_info(vystavene_faktury)").fetchall()]
+        if "datum_splatnosti" not in vyst_cols:
+            try: conn.execute("ALTER TABLE vystavene_faktury ADD COLUMN datum_splatnosti TEXT DEFAULT ''")
+            except Exception: pass
+        if "duplicita_id" not in vyst_cols:
+            try: conn.execute("ALTER TABLE vystavene_faktury ADD COLUMN duplicita_id INTEGER DEFAULT NULL")
             except Exception: pass
     print("migrate_db OK")
 
@@ -2048,16 +2063,29 @@ def api_vystavene_ulozit():
     if session.get("role") != "admin":
         return jsonify({"error": "Přístup zamítnut"}), 403
     d = request.json or {}
+    # Kontrola duplicity
+    duplicita = None
+    if d.get("cislo_faktury") and d.get("datum"):
+        with get_db() as conn:
+            row = conn.execute(
+                """SELECT id, firma_zkratka, datum, castka FROM vystavene_faktury
+                   WHERE cislo_faktury=? AND datum=? AND ABS(castka-?)< 0.01""",
+                (d.get("cislo_faktury"), d.get("datum"), float(d.get("castka",0)))
+            ).fetchone()
+            if row:
+                duplicita = {"id": row["id"], "firma": row["firma_zkratka"],
+                             "datum": row["datum"], "castka": row["castka"]}
     with get_db() as conn:
         conn.execute(
             """INSERT INTO vystavene_faktury
-               (firma_zkratka, cislo_faktury, datum, odberatel, popis, castka, stav, soubor_url)
-               VALUES (?,?,?,?,?,?,?,?)""",
+               (firma_zkratka, cislo_faktury, datum, datum_splatnosti, odberatel, popis, castka, stav, soubor_url)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
             (d.get("firma_zkratka",""), d.get("cislo_faktury",""),
-             d.get("datum",""), d.get("odberatel",""), d.get("popis",""),
+             d.get("datum",""), d.get("datum_splatnosti",""),
+             d.get("odberatel",""), d.get("popis",""),
              float(d.get("castka",0)), d.get("stav","nezaplaceno"), d.get("soubor_url",""))
         )
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "duplicita": duplicita})
 
 @app.route("/api/vystavene-faktury/<int:fid>", methods=["PUT"])
 @vyzaduj_prihlaseni
@@ -2068,9 +2096,10 @@ def api_vystavene_edit(fid):
     with get_db() as conn:
         conn.execute(
             """UPDATE vystavene_faktury SET firma_zkratka=?, cislo_faktury=?, datum=?,
-               odberatel=?, popis=?, castka=?, stav=?, soubor_url=? WHERE id=?""",
+               datum_splatnosti=?, odberatel=?, popis=?, castka=?, stav=?, soubor_url=? WHERE id=?""",
             (d.get("firma_zkratka",""), d.get("cislo_faktury",""),
-             d.get("datum",""), d.get("odberatel",""), d.get("popis",""),
+             d.get("datum",""), d.get("datum_splatnosti",""),
+             d.get("odberatel",""), d.get("popis",""),
              float(d.get("castka",0)), d.get("stav","nezaplaceno"), d.get("soubor_url",""), fid)
         )
     return jsonify({"ok": True})
@@ -2134,6 +2163,7 @@ Odpověz POUZE platným JSON objektem, žádný jiný text ani backticky.
 {
   "cislo_faktury": "číslo faktury (text)",
   "datum": "datum vystavení YYYY-MM-DD nebo null",
+  "datum_splatnosti": "datum splatnosti YYYY-MM-DD nebo null",
   "castka": číslo (celková částka v Kč bez symbolu),
   "odberatel": "název odběratele",
   "popis": "stručný popis předmětu plnění max 100 znaků"
@@ -2149,12 +2179,13 @@ Odpověz POUZE platným JSON objektem, žádný jiný text ani backticky.
         return jsonify({"error": str(e), "soubor_url": gcs_url or ""}), 200
 
     return jsonify({
-        "cislo_faktury": parsed.get("cislo_faktury") or "",
-        "datum":         parsed.get("datum") or "",
-        "castka":        float(parsed.get("castka") or 0),
-        "odberatel":     parsed.get("odberatel") or "",
-        "popis":         parsed.get("popis") or "",
-        "soubor_url":    gcs_url or "",
+        "cislo_faktury":    parsed.get("cislo_faktury") or "",
+        "datum":            parsed.get("datum") or "",
+        "datum_splatnosti": parsed.get("datum_splatnosti") or "",
+        "castka":           float(parsed.get("castka") or 0),
+        "odberatel":        parsed.get("odberatel") or "",
+        "popis":            parsed.get("popis") or "",
+        "soubor_url":       gcs_url or "",
     })
 
 
