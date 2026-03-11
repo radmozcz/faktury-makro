@@ -3806,6 +3806,13 @@ async function smazatVydaj(id) {
 // ═══════════════════════════════════════════════════════════════
 
 const VYST_ODBERATELE = ["Bauhaus"];
+let _vystSort = { col: "datum", dir: "desc" };
+
+function vystSort(col) {
+  if (_vystSort.col === col) _vystSort.dir = _vystSort.dir === "asc" ? "desc" : "asc";
+  else { _vystSort.col = col; _vystSort.dir = "asc"; }
+  loadVystavene();
+}
 
 async function renderVystavene() {
   const muzeEditovat = App.role === "admin";
@@ -3858,18 +3865,36 @@ async function loadVystavene() {
   const z = document.getElementById("vyst-zapl");   if (z) z.textContent = czMoney(zapl) + " Kč";
 
   if (!data.length) { el.innerHTML = "<p style='padding:1rem;color:var(--text-muted)'>Žádné vystavené faktury.</p>"; return; }
+
+  // Sortování
+  const sortFns = {
+    firma_zkratka:    (a,b) => (a.firma_zkratka||"").localeCompare(b.firma_zkratka||""),
+    cislo_faktury:    (a,b) => (a.cislo_faktury||"").localeCompare(b.cislo_faktury||""),
+    datum:            (a,b) => (a.datum||"").localeCompare(b.datum||""),
+    datum_splatnosti: (a,b) => (a.datum_splatnosti||"").localeCompare(b.datum_splatnosti||""),
+    odberatel:        (a,b) => (a.odberatel||"").localeCompare(b.odberatel||""),
+    castka:           (a,b) => (a.castka||0) - (b.castka||0),
+  };
+  if (sortFns[_vystSort.col]) {
+    data.sort((a,b) => { const r = sortFns[_vystSort.col](a,b); return _vystSort.dir === "asc" ? r : -r; });
+  }
+  const arrow = (col) => _vystSort.col === col ? (_vystSort.dir === "asc" ? " ▲" : " ▼") : " ⇅";
+  const th = (col, label) => `<th style="cursor:pointer;user-select:none" onclick="vystSort('${col}')">${label}${arrow(col)}</th>`;
   const muzeEditovat = App.role === "admin";
   el.innerHTML = `<table class="data-table">
     <thead><tr>
-      <th>Firma</th><th>Číslo faktury</th><th>Datum</th>
-      <th>Odběratel</th><th>Popis</th>
-      <th class="text-right">Částka</th><th class="text-center">Stav</th>
+      ${th("firma_zkratka","Firma")}${th("cislo_faktury","Číslo faktury")}
+      ${th("datum","Datum vystavení")}${th("datum_splatnosti","Datum splatnosti")}
+      ${th("odberatel","Odběratel")}<th>Popis</th>
+      ${th("castka","Částka")}<th class="text-center">Stav</th>
       ${muzeEditovat ? "<th class='text-center'>Akce</th>" : ""}
     </tr></thead>
     <tbody>${data.map(f => {
       const odkaz = f.soubor_url
-        ? `<a href="${f.soubor_url}" target="_blank">${f.cislo_faktury||"—"}</a>`
+        ? `<a href="${f.soubor_url}" target="_blank" title="Zobrazit originál">🔗 ${f.cislo_faktury||"—"}</a>`
         : (f.cislo_faktury||"—");
+      const dupBadge = f.duplicita_id
+        ? ` <small style="color:orange">⚠️ dup #${f.duplicita_id}</small>` : "";
       const stavBtn = muzeEditovat
         ? `<button class="btn btn-xs ${f.stav==="zaplaceno"?"btn-success":"btn-outline"}"
              onclick="toggleVystStav(${f.id},'${f.stav}')">${f.stav==="zaplaceno"?"✓ Zaplaceno":"✗ Nezaplaceno"}</button>`
@@ -3881,7 +3906,8 @@ async function loadVystavene() {
            </td>` : "";
       return `<tr>
         <td><span class="badge">${f.firma_zkratka}</span></td>
-        <td>${odkaz}</td><td>${f.datum||"—"}</td><td>${f.odberatel||"—"}</td>
+        <td>${odkaz}${dupBadge}</td><td>${f.datum||"—"}</td><td>${f.datum_splatnosti||"—"}</td>
+        <td>${f.odberatel||"—"}</td>
         <td style="color:var(--text-muted);font-size:0.85rem">${f.popis||"—"}</td>
         <td class="text-right fw-bold">${czMoney(f.castka)} Kč</td>
         <td class="text-center">${stavBtn}</td>${akce}
@@ -3906,9 +3932,15 @@ function vystFormHtml(f = {}) {
     </div>
     <div class="form-row">
       <div class="form-group">
-        <label>Datum</label>
+        <label>Datum vystavení</label>
         <input type="date" id="vystDatum" class="form-control" value="${f.datum||""}">
       </div>
+      <div class="form-group">
+        <label>Datum splatnosti</label>
+        <input type="date" id="vystDatumSpl" class="form-control" value="${f.datum_splatnosti||""}">
+      </div>
+    </div>
+    <div class="form-row">
       <div class="form-group">
         <label>Částka (Kč)</label>
         <input type="number" id="vystCastka" class="form-control" step="0.01" min="0" value="${f.castka||""}">
@@ -3999,6 +4031,7 @@ async function spustVystOCR() {
     document.getElementById("vystFormFields").style.display = "";
     if (data.cislo_faktury) document.getElementById("vystCislo").value = data.cislo_faktury;
     if (data.datum)         document.getElementById("vystDatum").value = data.datum;
+    if (data.datum_splatnosti) document.getElementById("vystDatumSpl").value = data.datum_splatnosti;
     if (data.castka)        document.getElementById("vystCastka").value = data.castka;
     if (data.popis)         document.getElementById("vystPopis").value = data.popis;
     if (data.soubor_url)    document.getElementById("vystSouborUrl").value = data.soubor_url;
@@ -4016,19 +4049,24 @@ async function saveVystavena(editId = null) {
   const odberatel = sel === "__jiny__"
     ? (document.getElementById("vystOdbRucne").value||"").trim() : sel;
   const payload = {
-    firma_zkratka: document.getElementById("vystFirma").value,
-    cislo_faktury: document.getElementById("vystCislo").value.trim(),
-    datum:         document.getElementById("vystDatum").value,
+    firma_zkratka:    document.getElementById("vystFirma").value,
+    cislo_faktury:    document.getElementById("vystCislo").value.trim(),
+    datum:            document.getElementById("vystDatum").value,
+    datum_splatnosti: document.getElementById("vystDatumSpl").value,
     odberatel,
-    popis:         document.getElementById("vystPopis").value.trim(),
-    castka:        parseFloat(document.getElementById("vystCastka").value)||0,
-    stav:          document.getElementById("vystStav").value,
-    soubor_url:    document.getElementById("vystSouborUrl").value,
+    popis:            document.getElementById("vystPopis").value.trim(),
+    castka:           parseFloat(document.getElementById("vystCastka").value)||0,
+    stav:             document.getElementById("vystStav").value,
+    soubor_url:       document.getElementById("vystSouborUrl").value,
   };
   const url    = editId ? `/api/vystavene-faktury/${editId}` : "/api/vystavene-faktury";
   const method = editId ? "PUT" : "POST";
-  await api(url, {method, headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload)});
-  toast(editId ? "Faktura upravena ✓" : "Faktura uložena ✓");
+  const res = await api(url, {method, headers:{"Content-Type":"application/json"}, body: JSON.stringify(payload)});
+  if (res.duplicita) {
+    toast(`⚠️ Možný duplikát! Faktura č. ${res.duplicita.id} (${res.duplicita.firma}, ${res.duplicita.datum}, ${czMoney(res.duplicita.castka)}) již existuje.`, 6000);
+  } else {
+    toast(editId ? "Faktura upravena ✓" : "Faktura uložena ✓");
+  }
   closeModal(); loadVystavene();
 }
 
