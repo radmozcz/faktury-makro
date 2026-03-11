@@ -1073,13 +1073,32 @@ function naplnFormular(data, appendMode = false) {
   const dupEl = document.getElementById("duplicitaWarning");
   if (dupEl) dupEl.remove();
   if (data.duplicita) {
-    const warn = document.createElement("div");
-    warn.id = "duplicitaWarning";
-    warn.style.cssText = "background:#fee2e2;border:2px solid #ef4444;border-radius:6px;padding:.7rem 1rem;margin-bottom:1rem;color:#991b1b;font-size:.9rem";
-    warn.innerHTML = `🚨 <strong>DUPLIKÁT!</strong> Faktura č. <strong>${data.cislo_faktury}</strong> již existuje jako faktura #${data.duplicita.id} (${data.duplicita.firma}, ${czDate(data.duplicita.datum)}, ${czMoney(data.duplicita.celkem)}).
-      <br><small>Faktura bude uložena a označena jako duplikát s odkazem na originál #${data.duplicita.id}.</small>`;
-    warn.dataset.duplicitaId = data.duplicita.id;
-    document.getElementById("parsedForm").insertAdjacentElement("afterbegin", warn);
+    // Automaticky uložit jako duplikát bez zobrazení formuláře
+    const firma = document.getElementById("nahratFirma")?.value || data.firma_zkratka || "";
+    const dupPayload = {
+      firma_zkratka:   firma,
+      dodavatel:       data.dodavatel || "MAKRO Cash & Carry ČR s.r.o.",
+      cislo_faktury:   data.cislo_faktury || "",
+      datum_vystaveni: data.datum_vystaveni || "",
+      datum_splatnosti:data.datum_splatnosti || "",
+      zpusob_uhrady:   "Hotovost",
+      stav:            "duplikat",
+      celkem_s_dph:    data.celkem_s_dph || 0,
+      soubor_cesta:    data.soubor_cesta || "",
+      soubor_url:      data.soubor_gcs_url || "",
+      zdroj:           "makro",
+      duplicita_id:    data.duplicita.id,
+      polozky:         data.polozky || []
+    };
+    await api("/api/faktury", { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(dupPayload) });
+    document.getElementById("parsedForm").style.display = "none";
+    const statusDiv = document.getElementById("nahratStatus") || document.createElement("div");
+    statusDiv.id = "nahratStatus";
+    statusDiv.style.cssText = "background:#fee2e2;border:2px solid #ef4444;border-radius:6px;padding:.7rem 1rem;margin-top:1rem;color:#991b1b;font-size:.9rem";
+    statusDiv.innerHTML = `🚨 <strong>DUPLIKÁT uložen!</strong> Faktura č. <strong>${data.cislo_faktury}</strong> je duplikát faktury #${data.duplicita.id} (${data.duplicita.firma}, ${czDate(data.duplicita.datum)}, ${czMoney(data.duplicita.celkem)}). Uložena s označením duplikátu.`;
+    document.querySelector(".dropzone")?.insertAdjacentElement("afterend", statusDiv);
+    uploadedFilePath = null;
+    return;
   }
 
   const tbody = document.getElementById("polozkyBody");
