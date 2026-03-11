@@ -2103,43 +2103,57 @@ def api_vystavene_nahrat():
         return jsonify({"error": "Žádný soubor"}), 400
     f = request.files["soubor"]
     fname = secure_filename(f.filename or "faktura.pdf")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_")
+    fname = ts + fname
     fpath = os.path.join(UPLOAD_FOLDER, fname)
     f.save(fpath)
     gcs_url = upload_to_gcs(fpath, f"vystavene/{fname}")
-    parsed = {}
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return jsonify({"error": "ANTHROPIC_API_KEY není nastaven", "soubor_url": gcs_url or ""}), 200
+
     try:
+        ext = fname.rsplit(".", 1)[-1].lower()
         with open(fpath, "rb") as fh:
             raw = fh.read()
-        b64 = base64.b64encode(raw).decode()
-        ext = fname.rsplit(".", 1)[-1].lower()
-        mt = "application/pdf" if ext == "pdf" else f"image/{ext if ext in ['jpeg','jpg','png','gif','webp'] else 'jpeg'}"
-        if mt == "image/jpg": mt = "image/jpeg"
-        msg_content = [
-            {"type": "image" if not mt.startswith("application") else "document",
-             "source": {"type": "base64", "media_type": mt, "data": b64}},
-            {"type": "text", "text": """Analyzuj tuto vystavenou fakturu a extrahuj:
-- cislo_faktury: číslo faktury (text)
-- datum: datum vystavení ve formátu YYYY-MM-DD
-- castka: celková částka v Kč (číslo bez měny)
-- odberatel: název odběratele
-- popis: stručný popis předmětu plnění (max 100 znaků)
-Odpověz POUZE jako JSON: {"cislo_faktury":"...","datum":"...","castka":0,"odberatel":"...","popis":"..."}"""}
-        ]
-        resp = anthropic_client.messages.create(
-            model="claude-sonnet-4-20250514", max_tokens=300,
-            messages=[{"role": "user", "content": msg_content}]
+        b64 = base64.standard_b64encode(raw).decode("utf-8")
+        if ext == "pdf":
+            content_block = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}}
+        else:
+            media_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
+            content_block = {"type": "image", "source": {"type": "base64", "media_type": media_map.get(ext, "image/jpeg"), "data": b64}}
+
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model="claude-sonnet-4-20250514", max_tokens=500,
+            messages=[{"role": "user", "content": [
+                content_block,
+                {"type": "text", "text": """Analyzuj tuto vystavenou fakturu a extrahuj tyto hodnoty.
+Odpověz POUZE platným JSON objektem, žádný jiný text ani backticky.
+{
+  "cislo_faktury": "číslo faktury (text)",
+  "datum": "datum vystavení YYYY-MM-DD nebo null",
+  "castka": číslo (celková částka v Kč bez symbolu),
+  "odberatel": "název odběratele",
+  "popis": "stručný popis předmětu plnění max 100 znaků"
+}"""}
+            ]}]
         )
-        import json as _json
-        text = resp.content[0].text.strip().replace("```json","").replace("```","").strip()
-        parsed = _json.loads(text)
+        text = msg.content[0].text.strip()
+        text = re.sub(r"^```json\s*", "", text)
+        text = re.sub(r"```$", "", text).strip()
+        parsed = json.loads(text)
     except Exception as e:
         app.logger.warning(f"OCR vystavene failed: {e}")
+        return jsonify({"error": str(e), "soubor_url": gcs_url or ""}), 200
+
     return jsonify({
-        "cislo_faktury": parsed.get("cislo_faktury", ""),
-        "datum":         parsed.get("datum", ""),
-        "castka":        parsed.get("castka", 0),
-        "odberatel":     parsed.get("odberatel", ""),
-        "popis":         parsed.get("popis", ""),
+        "cislo_faktury": parsed.get("cislo_faktury") or "",
+        "datum":         parsed.get("datum") or "",
+        "castka":        float(parsed.get("castka") or 0),
+        "odberatel":     parsed.get("odberatel") or "",
+        "popis":         parsed.get("popis") or "",
         "soubor_url":    gcs_url or "",
     })
 
