@@ -137,6 +137,9 @@ DEFAULT_PRAVA = {
         "vyplaty_zobrazit":  True,
         "vyplaty_upravit":   False,
         "zbozi_zobrazit":    True,
+        "vydaje_zobrazit":   True,
+        "vydaje_upravit":    True,
+        "vydaje_smazat":     False,
         "naklady_zobrazit":  False,
         "bankovni_vypisy":   False,
         "statistiky":        False,
@@ -152,6 +155,9 @@ DEFAULT_PRAVA = {
         "vyplaty_zobrazit":  False,
         "vyplaty_upravit":   False,
         "zbozi_zobrazit":    False,
+        "vydaje_zobrazit":   True,
+        "vydaje_upravit":    False,
+        "vydaje_smazat":     False,
         "naklady_zobrazit":  True,
         "bankovni_vypisy":   True,
         "statistiky":        False,
@@ -420,6 +426,19 @@ def init_db():
             zprava          TEXT DEFAULT '',
             id_transakce    TEXT UNIQUE,
             firma_zkratka   TEXT DEFAULT '',
+            created_at      TEXT DEFAULT NOW()
+        )"""),
+        ("vydaje", """CREATE TABLE IF NOT EXISTS vydaje (
+            id              SERIAL PRIMARY KEY,
+            firma_zkratka   TEXT NOT NULL,
+            dodavatel       TEXT DEFAULT '',
+            datum           TEXT DEFAULT '',
+            castka          REAL NOT NULL DEFAULT 0,
+            zpusob_uhrady   TEXT DEFAULT 'hotovost',
+            poznamka        TEXT DEFAULT '',
+            soubor_cesta    TEXT DEFAULT '',
+            soubor_url      TEXT DEFAULT '',
+            zdroj           TEXT DEFAULT 'rucni',
             created_at      TEXT DEFAULT NOW()
         )"""),
     ]
@@ -1805,6 +1824,128 @@ def api_pausalni_save(jmeno):
     return jsonify({"ok": True})
 
 
+# ── API: VÝDAJE ───────────────────────────────────────────────────────────────
+@app.route("/api/vydaje")
+@vyzaduj_prihlaseni
+def api_vydaje_list():
+    firma = request.args.get("firma", "")
+    od    = request.args.get("od", "")
+    do_   = request.args.get("do", "")
+    clauses, params = [], []
+    if firma: clauses.append("firma_zkratka=?"); params.append(firma)
+    if od:    clauses.append("datum>=?"); params.append(od)
+    if do_:   clauses.append("datum<=?"); params.append(do_)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    with get_db() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM vydaje {where} ORDER BY datum DESC, id DESC", params
+        ).fetchall()
+        total = conn.execute(
+            f"SELECT COALESCE(SUM(castka),0) as t FROM vydaje {where}", params
+        ).fetchone()
+    return jsonify({"vydaje": [dict(r) for r in rows], "celkem": round(_first_val(total), 2)})
+
+@app.route("/api/vydaje", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_vydaje_ulozit():
+    data = request.json
+    if not data.get("firma_zkratka"):
+        return jsonify({"error": "Chybí firma"}), 400
+    with get_db() as conn:
+        cur = conn.execute("""
+            INSERT INTO vydaje (firma_zkratka, dodavatel, datum, castka, zpusob_uhrady, poznamka, soubor_cesta, soubor_url, zdroj)
+            VALUES (?,?,?,?,?,?,?,?,?)
+        """, (
+            data.get("firma_zkratka"),
+            data.get("dodavatel", ""),
+            data.get("datum", ""),
+            float(data.get("castka", 0)),
+            data.get("zpusob_uhrady", "hotovost"),
+            data.get("poznamka", ""),
+            data.get("soubor_cesta", ""),
+            data.get("soubor_url", ""),
+            data.get("zdroj", "rucni"),
+        ))
+    return jsonify({"ok": True, "id": cur.lastrowid})
+
+@app.route("/api/vydaje/<int:vid>", methods=["PUT"])
+@vyzaduj_prihlaseni
+def api_vydaje_edit(vid):
+    data = request.json
+    with get_db() as conn:
+        conn.execute("""
+            UPDATE vydaje SET dodavatel=?, datum=?, castka=?, zpusob_uhrady=?, poznamka=?, firma_zkratka=?
+            WHERE id=?
+        """, (
+            data.get("dodavatel", ""),
+            data.get("datum", ""),
+            float(data.get("castka", 0)),
+            data.get("zpusob_uhrady", "hotovost"),
+            data.get("poznamka", ""),
+            data.get("firma_zkratka", ""),
+            vid,
+        ))
+    return jsonify({"ok": True})
+
+@app.route("/api/vydaje/<int:vid>", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_vydaje_delete(vid):
+    with get_db() as conn:
+        conn.execute("DELETE FROM vydaje WHERE id=?", (vid,))
+    return jsonify({"ok": True})
+
+@app.route("/api/vydaje/nahrat", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_vydaje_nahrat():
+    """Nahraje doklad výdaje (foto/PDF) přes OCR."""
+    if "soubor" not in request.files:
+        return jsonify({"error": "Žádný soubor"}), 400
+    f = request.files["soubor"]
+    firma = request.form.get("firma_zkratka", "")
+    fname = secure_filename(f.filename or "vydaj")
+    fpath = os.path.join(UPLOAD_FOLDER, fname)
+    f.save(fpath)
+    gcs_url = upload_to_gcs(fpath, f"vydaje/{fname}")
+
+    # OCR přes Claude
+    try:
+        with open(fpath, "rb") as fh:
+            raw = fh.read()
+        b64 = base64.b64encode(raw).decode()
+        ext = fname.rsplit(".", 1)[-1].lower()
+        mt = "application/pdf" if ext == "pdf" else f"image/{ext if ext in ['jpeg','jpg','png','gif','webp'] else 'jpeg'}"
+        if mt == "image/jpg": mt = "image/jpeg"
+        msg_content = [
+            {"type": "image" if not mt.startswith("application") else "document",
+             "source": {"type": "base64", "media_type": mt, "data": b64}},
+            {"type": "text", "text": """Analyzuj tento doklad/účtenku a extrahuj:
+- dodavatel: název obchodu/firmy
+- datum: datum nákupu ve formátu YYYY-MM-DD
+- castka: celková částka v Kč (číslo bez měny)
+- poznamka: krátký popis co bylo nakoupeno (max 80 znaků)
+Odpověz POUZE jako JSON: {"dodavatel":"...","datum":"...","castka":0,"poznamka":"..."}"""}
+        ]
+        resp = anthropic_client.messages.create(
+            model="claude-sonnet-4-20250514", max_tokens=300,
+            messages=[{"role": "user", "content": msg_content}]
+        )
+        import json as _json
+        text = resp.content[0].text.strip()
+        text = text.replace("```json","").replace("```","").strip()
+        parsed = _json.loads(text)
+    except Exception as e:
+        parsed = {}
+
+    return jsonify({
+        "dodavatel":     parsed.get("dodavatel", ""),
+        "datum":         parsed.get("datum", ""),
+        "castka":        parsed.get("castka", 0),
+        "poznamka":      parsed.get("poznamka", ""),
+        "soubor_cesta":  fname,
+        "soubor_gcs_url": gcs_url or "",
+        "firma_zkratka": firma,
+    })
+
 # ── API: BANKOVNÍ VÝPISY ──────────────────────────────────────────────────────
 def parse_csv_airbank(content_bytes):
     """Parsuje CSV výpis z Air Bank (cp1250, ; oddělovač, datum DD/MM/YYYY)."""
@@ -1876,19 +2017,19 @@ def api_banky_import():
         return jsonify({"error": "Žádný soubor"}), 400
     f = request.files["soubor"]
     firma = request.form.get("firma_zkratka", "")
+    banka_hint = request.form.get("banka_hint", "")
     content = f.read()
     fname = (f.filename or "").lower()
 
-    # Detekce banky podle obsahu nebo názvu souboru
+    # Detekce banky podle hintu, názvu souboru nebo BOM
     try:
-        if "airbank" in fname or "air_bank" in fname:
+        if banka_hint == "AirBank" or "airbank" in fname or "air_bank" in fname:
             pohyby = parse_csv_airbank(content)
             banka = "AirBank"
-        elif "pohyby_" in fname:
+        elif banka_hint == "RB" or "pohyby_" in fname:
             pohyby = parse_csv_rb(content)
             banka = "RB"
         else:
-            # Zkus podle BOM
             if content[:3] == b'\xef\xbb\xbf':
                 pohyby = parse_csv_rb(content)
                 banka = "RB"
@@ -1947,6 +2088,59 @@ def api_banky_pohyby():
         "pohyby": [dict(r) for r in rows],
         "celkem": round(_first_val(total_row), 2)
     })
+
+@app.route("/api/banky/export")
+@vyzaduj_prihlaseni
+def api_banky_export():
+    """Export měsíčního výpisu jako CSV nebo PDF."""
+    banka  = request.args.get("banka", "")
+    mesic  = request.args.get("mesic", "")   # YYYY-MM
+    fmt    = request.args.get("format", "csv")
+    if not banka or not mesic:
+        return jsonify({"error": "Chybí parametry"}), 400
+    od = mesic + "-01"
+    import calendar
+    rok, mes = int(mesic[:4]), int(mesic[5:7])
+    posledni = calendar.monthrange(rok, mes)[1]
+    do_ = f"{mesic}-{posledni:02d}"
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM bankovni_pohyby WHERE banka=? AND datum>=? AND datum<=? ORDER BY datum",
+            (banka, od, do_)
+        ).fetchall()
+    if fmt == "csv":
+        import csv, io
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(["Datum","Protistrana","Číslo účtu","Typ transakce","Zpráva","Částka"])
+        for r in rows:
+            w.writerow([r["datum"], r["nazev_protiucet"], r["protiucet"], r["typ_transakce"], r["zprava"], r["castka"]])
+        resp = make_response(out.getvalue().encode("utf-8-sig"))
+        resp.headers["Content-Type"] = "text/csv; charset=utf-8"
+        resp.headers["Content-Disposition"] = f'attachment; filename="{banka}_{mesic}.csv"'
+        return resp
+    else:
+        # PDF – jednoduchá HTML→PDF přes weasyprint nebo jen HTML
+        nazev_banky = "Air Bank" if banka == "AirBank" else "Raiffeisenbank"
+        rows_html = "".join(f"""<tr>
+            <td>{r['datum']}</td><td>{r['nazev_protiucet'] or ''}</td>
+            <td>{r['typ_transakce'] or ''}</td><td>{r['zprava'] or ''}</td>
+            <td style="text-align:right;color:{'green' if r['castka']>=0 else 'red'}">{r['castka']:,.2f}</td>
+        </tr>""" for r in rows)
+        prichozi = sum(r["castka"] for r in rows if r["castka"] > 0)
+        odchozi  = sum(r["castka"] for r in rows if r["castka"] < 0)
+        html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
+        <style>body{{font-family:Arial,sans-serif;font-size:12px;margin:20px}}
+        table{{width:100%;border-collapse:collapse}}th,td{{border:1px solid #ddd;padding:5px}}
+        th{{background:#f0f0f0}}h2{{margin-bottom:5px}}.summary{{margin:10px 0;font-size:13px}}</style></head>
+        <body><h2>{nazev_banky} – {mesic}</h2>
+        <div class="summary">Příchozí: <b>{prichozi:,.2f} Kč</b> | Odchozí: <b>{abs(odchozi):,.2f} Kč</b> | Saldo: <b>{(prichozi+odchozi):,.2f} Kč</b></div>
+        <table><thead><tr><th>Datum</th><th>Protistrana</th><th>Typ</th><th>Zpráva</th><th>Částka</th></tr></thead>
+        <tbody>{rows_html}</tbody></table></body></html>"""
+        resp = make_response(html.encode("utf-8"))
+        resp.headers["Content-Type"] = "text/html; charset=utf-8"
+        resp.headers["Content-Disposition"] = f'attachment; filename="{banka}_{mesic}.html"'
+        return resp
 
 @app.route("/api/banky/pohyby/<int:pid>", methods=["DELETE"])
 @vyzaduj_prihlaseni
