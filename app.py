@@ -2051,9 +2051,17 @@ Odpověz POUZE jako JSON: {"dodavatel":"...","datum":"...","castka":0,"poznamka"
 def api_vystavene_list():
     if session.get("role") == "verunka":
         return jsonify({"error": "Přístup zamítnut"}), 403
+    firma = request.args.get("firma", "")
+    od    = request.args.get("od", "")
+    do_   = request.args.get("do", "")
+    clauses, params = [], []
+    if firma: clauses.append("firma_zkratka=?"); params.append(firma)
+    if od:    clauses.append("datum>=?"); params.append(od)
+    if do_:   clauses.append("datum<=?"); params.append(do_)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     with get_db() as conn:
         rows = conn.execute(
-            "SELECT * FROM vystavene_faktury ORDER BY datum DESC, id DESC"
+            f"SELECT * FROM vystavene_faktury {where} ORDER BY datum DESC, id DESC", params
         ).fetchall()
     return jsonify([dict(r) for r in rows])
 
