@@ -2435,6 +2435,81 @@ async function ulozitPrava() {
   }
 }
 
+// ===== GOOGLE DRIVE PICKER =====
+let _driveClientId = null;
+let _driveAccessToken = null;
+let _drivePickerCallback = null;
+
+async function getDriveClientId() {
+  if (_driveClientId) return _driveClientId;
+  const cfg = await api("/api/drive-config");
+  _driveClientId = cfg.client_id;
+  return _driveClientId;
+}
+
+function loadGapiIfNeeded() {
+  return new Promise((resolve) => {
+    if (window.gapi && window.gapi.load) { resolve(); return; }
+    const check = setInterval(() => {
+      if (window.gapi && window.gapi.load) { clearInterval(check); resolve(); }
+    }, 100);
+  });
+}
+
+async function openDrivePicker(callback) {
+  _drivePickerCallback = callback;
+  const clientId = await getDriveClientId();
+  if (!clientId) { toast("Google Drive není nakonfigurováno", true); return; }
+
+  // Pokud již máme token, rovnou otevřít picker
+  if (_driveAccessToken) { _openPickerWithToken(_driveAccessToken); return; }
+
+  // Přihlásit přes Google OAuth
+  try {
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: "https://www.googleapis.com/auth/drive.readonly",
+      callback: (resp) => {
+        if (resp.error) { toast("Přihlášení Google selhalo: " + resp.error, true); return; }
+        _driveAccessToken = resp.access_token;
+        _openPickerWithToken(_driveAccessToken);
+      }
+    });
+    client.requestAccessToken();
+  } catch(e) {
+    toast("Chyba Google přihlášení: " + e.message, true);
+  }
+}
+
+async function _openPickerWithToken(token) {
+  await loadGapiIfNeeded();
+  gapi.load("picker", () => {
+    const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+      .setMimeTypes("application/pdf")
+      .setMode(google.picker.DocsViewMode.LIST);
+    const picker = new google.picker.PickerBuilder()
+      .addView(view)
+      .setOAuthToken(token)
+      .setTitle("Vyberte PDF fakturu z Google Drive")
+      .setCallback(async (data) => {
+        if (data.action !== google.picker.Action.PICKED) return;
+        const file = data.docs[0];
+        toast("⏳ Stahuji z Google Drive...");
+        try {
+          const res = await api("/api/drive-download", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ file_id: file.id, access_token: token, filename: file.name })
+          });
+          if (res.error) { toast("Chyba: " + res.error, true); return; }
+          if (_drivePickerCallback) _drivePickerCallback(res);
+        } catch(e) { toast("Chyba stahování: " + e.message, true); }
+      })
+      .build();
+    picker.setVisible(true);
+  });
+}
+
 async function stahnoutZalohu() {
   const statusEl = document.getElementById("zalohaStatus");
   if (statusEl) statusEl.textContent = "⏳ Připravuji zálohu...";
@@ -3818,6 +3893,9 @@ function openVydajNahrat() {
       <div class="dropzone-text"><strong>Přetáhněte foto nebo PDF dokladu</strong> nebo klikněte</div>
       <input type="file" id="vydajFileInput" accept="image/*,.pdf">
     </div>
+    <div style="margin-top:.75rem;text-align:center">
+      <button class="btn btn-secondary btn-sm" onclick="openDrivePicker(drivePickerVydaj)">📂 Vybrat z Google Drive</button>
+    </div>
     <div id="vydajNahratStatus" style="margin-top:1rem;font-size:.9rem"></div>
     <div id="vydajNahratForm" style="display:none;margin-top:1rem"></div>`);
 
@@ -3834,6 +3912,25 @@ function openVydajNahrat() {
   });
 }
 
+async function drivePickerVydaj(res) {
+  const statusEl = document.getElementById("vydajNahratStatus");
+  if (statusEl) statusEl.innerHTML = `<span class="spinner"></span> Zpracovávám z Google Drive...`;
+  const fd = new FormData();
+  fd.append("firma_zkratka", document.getElementById("vNahratFirma")?.value || "");
+  fd.append("soubor_url", res.soubor_url || "");
+  fd.append("from_drive_path", res.tmp_path || "");
+  try {
+    const data = await api("/api/vydaje/nahrat-path", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ path: res.tmp_path, soubor_url: res.soubor_url, filename: res.filename, firma_zkratka: document.getElementById("vNahratFirma")?.value || "" })
+    });
+    if (statusEl) statusEl.innerHTML = "✅ Doklad rozpoznán z Drive";
+    const formEl = document.getElementById("vydajNahratForm");
+    if (formEl) { formEl.style.display = "block"; _renderVydajForm(formEl, data); }
+  } catch(e) { if (statusEl) statusEl.innerHTML = "❌ Chyba: " + e.message; }
+}
+
 async function doVydajNahrat(file) {
   const statusEl = document.getElementById("vydajNahratStatus");
   statusEl.innerHTML = `<span class="spinner"></span> Zpracovávám doklad...`;
@@ -3845,32 +3942,36 @@ async function doVydajNahrat(file) {
     statusEl.innerHTML = `✅ Doklad rozpoznán`;
     const formEl = document.getElementById("vydajNahratForm");
     formEl.style.display = "block";
-    formEl.innerHTML = `
-      <div class="grid-2" style="gap:1rem">
-        <div class="form-group"><label class="form-label">Dodavatel</label>
-          <input id="vnDodavatel" class="form-control" value="${escHtml(data.dodavatel||'')}">
-        </div>
-        <div class="form-group"><label class="form-label">Datum</label>
-          <input type="date" id="vnDatum" class="form-control" value="${data.datum||''}">
-        </div>
-        <div class="form-group"><label class="form-label">Částka (Kč)</label>
-          <input type="number" step="0.01" id="vnCastka" class="form-control" value="${data.castka||''}">
-        </div>
-        <div class="form-group"><label class="form-label">Způsob úhrady</label>
-          <select id="vnUhrada" class="form-control">
-            <option>hotovost</option><option>karta</option><option>převodem</option>
-          </select>
-        </div>
-        <div class="form-group" style="grid-column:1/-1"><label class="form-label">Popis / účel</label>
-          <input id="vnPopis" class="form-control" value="${escHtml(data.poznamka||'')}">
-        </div>
-      </div>
-      <div style="text-align:right;margin-top:1rem">
-        <button class="btn btn-primary" onclick="ulozitVydajZDokladu('${data.soubor_cesta}','${data.soubor_gcs_url}')">💾 Uložit výdaj</button>
-      </div>`;
+    _renderVydajForm(formEl, data);
   } catch(e) {
     statusEl.innerHTML = `❌ Chyba: ${e.message}`;
   }
+}
+
+function _renderVydajForm(formEl, data) {
+  formEl.innerHTML = `
+    <div class="grid-2" style="gap:1rem">
+      <div class="form-group"><label class="form-label">Dodavatel</label>
+        <input id="vnDodavatel" class="form-control" value="${escHtml(data.dodavatel||'')}">
+      </div>
+      <div class="form-group"><label class="form-label">Datum</label>
+        <input type="date" id="vnDatum" class="form-control" value="${data.datum||''}">
+      </div>
+      <div class="form-group"><label class="form-label">Částka (Kč)</label>
+        <input type="number" step="0.01" id="vnCastka" class="form-control" value="${data.castka||''}">
+      </div>
+      <div class="form-group"><label class="form-label">Způsob úhrady</label>
+        <select id="vnUhrada" class="form-control">
+          <option>hotovost</option><option>karta</option><option>převodem</option>
+        </select>
+      </div>
+      <div class="form-group" style="grid-column:1/-1"><label class="form-label">Popis / účel</label>
+        <input id="vnPopis" class="form-control" value="${escHtml(data.poznamka||'')}">
+      </div>
+    </div>
+    <div style="text-align:right;margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitVydajZDokladu('${data.soubor_cesta}','${data.soubor_gcs_url}')">💾 Uložit výdaj</button>
+    </div>`;
 }
 
 async function ulozitVydajZDokladu(soubor_cesta, soubor_url) {
@@ -4099,9 +4200,11 @@ function openVystNahrat() {
       <input type="file" id="vystSoubor" accept=".pdf,image/*" class="form-control">
     </div>
     <button class="btn btn-primary" onclick="spustVystOCR()">🔍 Rozpoznat z PDF</button>
+    <button class="btn btn-secondary" onclick="openDrivePicker(drivePickerVyst)" style="margin-left:.5rem">📂 Z Google Drive</button>
     <span id="vystOcrStatus" style="margin-left:0.5rem;font-size:0.85rem;color:var(--text-muted)"></span>
     <hr>
     <div id="vystFormFields" style="display:none">
+      <div id="vystDuplikátWarning" style="display:none;margin-bottom:1rem;padding:.75rem 1rem;border-radius:8px;background:#fff3cd;border:1px solid #ffc107;color:#856404"></div>
       ${vystFormHtml()}
       <div style="margin-top:1rem;display:flex;gap:0.5rem;justify-content:flex-end">
         <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
@@ -4135,6 +4238,49 @@ async function openVystEdit(id) {
   document.getElementById("vystFirma").value = f.firma_zkratka || "";
 }
 
+async function drivePickerVyst(res) {
+  // Zavolá OCR na soubor stažený z Drive
+  const status = document.getElementById("vystOcrStatus");
+  if (status) status.textContent = "⏳ Rozpoznávám…";
+  document.getElementById("vystFormFields").style.display = "";
+  if (res.soubor_url) document.getElementById("vystSouborUrl").value = res.soubor_url;
+  try {
+    const data = await api("/api/vystavene-faktury/nahrat-path", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ path: res.tmp_path, soubor_url: res.soubor_url, filename: res.filename })
+    });
+    if (data.error) { if (status) status.textContent = "Chyba: " + data.error; return; }
+    if (data.cislo_faktury) document.getElementById("vystCislo").value = data.cislo_faktury;
+    if (data.datum)         document.getElementById("vystDatum").value = data.datum;
+    if (data.datum_splatnosti) document.getElementById("vystDatumSpl").value = data.datum_splatnosti;
+    if (data.castka)        document.getElementById("vystCastka").value = data.castka;
+    if (data.popis)         document.getElementById("vystPopis").value = data.popis;
+    if (data.soubor_url)    document.getElementById("vystSouborUrl").value = data.soubor_url;
+    if (status) status.textContent = "✓ Rozpoznáno z Drive";
+    await _zkontrolujVystDuplicit(data);
+  } catch(e) { if (status) status.textContent = "Chyba OCR"; }
+}
+
+async function _zkontrolujVystDuplicit(data) {
+  const dupWarnEl = document.getElementById("vystDuplikátWarning");
+  if (!data.cislo_faktury || !data.datum || !dupWarnEl) return;
+  try {
+    const dup = await api("/api/vystavene-faktury/zkontroluj", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ cislo_faktury: data.cislo_faktury, datum: data.datum, castka: data.castka || 0 })
+    });
+    if (dup.duplicita) {
+      dupWarnEl.style.display = "";
+      dupWarnEl.innerHTML = `⚠️ <strong>Možný duplikát!</strong> Faktura s číslem <strong>${escHtml(data.cislo_faktury)}</strong> již existuje jako FA #${dup.duplicita.id} (${escHtml(dup.duplicita.firma)}, ${czDate(dup.duplicita.datum)}, ${czMoney(dup.duplicita.castka)}). Faktura bude uložena a označena jako duplikát.`;
+    } else {
+      dupWarnEl.style.display = "none";
+      dupWarnEl.innerHTML = "";
+    }
+  } catch(e) {}
+}
+
 async function spustVystOCR() {
   const fi = document.getElementById("vystSoubor");
   if (!fi?.files.length) { toast("Vyberte soubor."); return; }
@@ -4158,6 +4304,7 @@ async function spustVystOCR() {
       else { sel.value = "__jiny__"; toggleVystOdb(); document.getElementById("vystOdbRucne").value = data.odberatel; }
     }
     status.textContent = "✓ Rozpoznáno";
+    await _zkontrolujVystDuplicit(data);
   } catch(e) { status.textContent = "Chyba OCR"; }
 }
 
