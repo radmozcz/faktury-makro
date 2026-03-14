@@ -2004,8 +2004,23 @@ def api_vydaje_nahrat():
     fpath = os.path.join(UPLOAD_DIR, fname)
     f.save(fpath)
     gcs_url = upload_to_gcs(fpath, f"vydaje/{fname}")
+    return _vydaje_ocr(fpath, fname, gcs_url or "", firma)
 
-    # OCR přes Claude
+@app.route("/api/vydaje/nahrat-path", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_vydaje_nahrat_path():
+    """OCR na souboru již uloženém (z Drive Picker)."""
+    d = request.json or {}
+    fpath = d.get("path", "")
+    soubor_url = d.get("soubor_url", "")
+    filename = d.get("filename", "vydaj.pdf")
+    firma = d.get("firma_zkratka", "")
+    if not fpath or not os.path.exists(fpath):
+        return jsonify({"error": "Soubor nenalezen"}), 400
+    return _vydaje_ocr(fpath, filename, soubor_url, firma)
+
+def _vydaje_ocr(fpath, fname, gcs_url, firma):
+    """Spustí OCR na souboru výdaje."""
     try:
         with open(fpath, "rb") as fh:
             raw = fh.read()
@@ -2033,15 +2048,14 @@ Odpověz POUZE jako JSON: {"dodavatel":"...","datum":"...","castka":0,"poznamka"
         parsed = _json.loads(text)
     except Exception as e:
         parsed = {}
-
     return jsonify({
-        "dodavatel":     parsed.get("dodavatel", ""),
-        "datum":         parsed.get("datum", ""),
-        "castka":        parsed.get("castka", 0),
-        "poznamka":      parsed.get("poznamka", ""),
-        "soubor_cesta":  fname,
-        "soubor_gcs_url": gcs_url or "",
-        "firma_zkratka": firma,
+        "dodavatel":      parsed.get("dodavatel", ""),
+        "datum":          parsed.get("datum", ""),
+        "castka":         parsed.get("castka", 0),
+        "poznamka":       parsed.get("poznamka", ""),
+        "soubor_cesta":   fname,
+        "soubor_gcs_url": gcs_url,
+        "firma_zkratka":  firma,
     })
 
 # ── API: VYSTAVENÉ FAKTURY ────────────────────────────────────────────────────
@@ -2064,6 +2078,24 @@ def api_vystavene_list():
             f"SELECT * FROM vystavene_faktury {where} ORDER BY datum DESC, id DESC", params
         ).fetchall()
     return jsonify([dict(r) for r in rows])
+
+@app.route("/api/vystavene-faktury/zkontroluj", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_vystavene_zkontroluj():
+    """Zkontroluje duplicitu bez uložení — volá se po OCR."""
+    d = request.json or {}
+    duplicita = None
+    if d.get("cislo_faktury") and d.get("datum"):
+        with get_db() as conn:
+            row = conn.execute(
+                """SELECT id, firma_zkratka, datum, castka FROM vystavene_faktury
+                   WHERE cislo_faktury=? AND datum=? AND ABS(castka-?)<0.01""",
+                (d.get("cislo_faktury"), d.get("datum"), float(d.get("castka", 0)))
+            ).fetchone()
+            if row:
+                duplicita = {"id": row["id"], "firma": row["firma_zkratka"],
+                             "datum": row["datum"], "castka": row["castka"]}
+    return jsonify({"duplicita": duplicita})
 
 @app.route("/api/vystavene-faktury", methods=["POST"])
 @vyzaduj_prihlaseni
@@ -2134,27 +2166,26 @@ def api_vystavene_stav(fid):
         conn.execute("UPDATE vystavene_faktury SET stav=? WHERE id=?", (stav, fid))
     return jsonify({"ok": True})
 
-@app.route("/api/vystavene-faktury/nahrat", methods=["POST"])
+@app.route("/api/vystavene-faktury/nahrat-path", methods=["POST"])
 @vyzaduj_prihlaseni
-def api_vystavene_nahrat():
+def api_vystavene_nahrat_path():
+    """OCR na souboru již uloženém (z Drive Picker)."""
     if session.get("role") != "admin":
         return jsonify({"error": "Přístup zamítnut"}), 403
-    if "soubor" not in request.files:
-        return jsonify({"error": "Žádný soubor"}), 400
-    f = request.files["soubor"]
-    fname = secure_filename(f.filename or "faktura.pdf")
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S_")
-    fname = ts + fname
-    fpath = os.path.join(UPLOAD_DIR, fname)
-    f.save(fpath)
-    gcs_url = upload_to_gcs(fpath, f"vystavene/{fname}")
+    d = request.json or {}
+    fpath = d.get("path", "")
+    soubor_url = d.get("soubor_url", "")
+    if not fpath or not os.path.exists(fpath):
+        return jsonify({"error": "Soubor nenalezen"}), 400
+    return _vystavene_ocr(fpath, soubor_url)
 
+def _vystavene_ocr(fpath, soubor_url=""):
+    """Spustí OCR na souboru a vrátí data vystavené faktury."""
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
-        return jsonify({"error": "ANTHROPIC_API_KEY není nastaven", "soubor_url": gcs_url or ""}), 200
-
+        return jsonify({"error": "ANTHROPIC_API_KEY není nastaven", "soubor_url": soubor_url}), 200
     try:
-        ext = fname.rsplit(".", 1)[-1].lower()
+        ext = fpath.rsplit(".", 1)[-1].lower()
         with open(fpath, "rb") as fh:
             raw = fh.read()
         b64 = base64.standard_b64encode(raw).decode("utf-8")
@@ -2163,7 +2194,6 @@ def api_vystavene_nahrat():
         else:
             media_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
             content_block = {"type": "image", "source": {"type": "base64", "media_type": media_map.get(ext, "image/jpeg"), "data": b64}}
-
         client = anthropic.Anthropic(api_key=api_key)
         msg = client.messages.create(
             model="claude-sonnet-4-20250514", max_tokens=500,
@@ -2187,8 +2217,7 @@ Odpověz POUZE platným JSON objektem, žádný jiný text ani backticky.
         parsed = json.loads(text)
     except Exception as e:
         app.logger.warning(f"OCR vystavene failed: {e}")
-        return jsonify({"error": str(e), "soubor_url": gcs_url or ""}), 200
-
+        return jsonify({"error": str(e), "soubor_url": soubor_url}), 200
     return jsonify({
         "cislo_faktury":    parsed.get("cislo_faktury") or "",
         "datum":            parsed.get("datum") or "",
@@ -2196,8 +2225,24 @@ Odpověz POUZE platným JSON objektem, žádný jiný text ani backticky.
         "castka":           float(parsed.get("castka") or 0),
         "odberatel":        parsed.get("odberatel") or "",
         "popis":            parsed.get("popis") or "",
-        "soubor_url":       gcs_url or "",
+        "soubor_url":       soubor_url,
     })
+
+@app.route("/api/vystavene-faktury/nahrat", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_vystavene_nahrat():
+    if session.get("role") != "admin":
+        return jsonify({"error": "Přístup zamítnut"}), 403
+    if "soubor" not in request.files:
+        return jsonify({"error": "Žádný soubor"}), 400
+    f = request.files["soubor"]
+    fname = secure_filename(f.filename or "faktura.pdf")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S_")
+    fname = ts + fname
+    fpath = os.path.join(UPLOAD_DIR, fname)
+    f.save(fpath)
+    gcs_url = upload_to_gcs(fpath, f"vystavene/{fname}")
+    return _vystavene_ocr(fpath, gcs_url or "")
 
 
 # ── API: BANKOVNÍ VÝPISY ──────────────────────────────────────────────────────
@@ -3382,7 +3427,59 @@ init_db()
 migrate_db()
 
 
-@app.route("/api/zaloha-db")
+@app.route("/api/drive-config")
+@vyzaduj_prihlaseni
+def api_drive_config():
+    """Vrátí Google OAuth Client ID pro Drive Picker."""
+    client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
+    return jsonify({"client_id": client_id})
+
+@app.route("/api/drive-download", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_drive_download():
+    """Stáhne soubor z Google Drive pomocí access tokenu a vrátí ho jako PDF."""
+    import requests as _req
+    d = request.json or {}
+    file_id    = d.get("file_id", "")
+    access_token = d.get("access_token", "")
+    filename   = d.get("filename", "dokument.pdf")
+    if not file_id or not access_token:
+        return jsonify({"error": "Chybí file_id nebo access_token"}), 400
+    # Stáhnout soubor z Drive
+    url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    resp = _req.get(url, headers=headers, timeout=30)
+    if resp.status_code != 200:
+        return jsonify({"error": f"Chyba stahování z Drive: {resp.status_code}"}), 400
+    # Uložit dočasně a zpracovat jako normální upload
+    import tempfile, os as _os
+    suffix = ".pdf" if filename.lower().endswith(".pdf") else ""
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(resp.content)
+        tmp_path = tmp.name
+    try:
+        from flask import g
+        # Simuluj FileStorage objekt pro stávající OCR logiku
+        from werkzeug.datastructures import FileStorage
+        import io
+        fs = FileStorage(
+            stream=io.BytesIO(resp.content),
+            filename=filename,
+            content_type="application/pdf"
+        )
+        # Uložit do upload adresáře
+        safe = filename.replace(" ", "_")
+        dest = os.path.join(UPLOAD_DIR, safe)
+        fs.save(dest)
+        gcs_url = upload_to_gcs(dest, safe)
+        return jsonify({"ok": True, "tmp_path": dest, "soubor_url": gcs_url or "", "filename": safe})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        try: _os.unlink(tmp_path)
+        except: pass
+
+
 @vyzaduj_prihlaseni
 def api_zaloha_db():
     if session.get("role") != "admin":
