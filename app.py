@@ -3587,12 +3587,13 @@ def api_drive_webhook():
 
 def _zpracuj_nove_faktury_z_drive():
     """Stáhne nové PDF ze složky faktury-nahrat a zpracuje OCR."""
+    print("🔄 Drive: zahájeno zpracování")
     try:
         service = get_drive_service()
         if not service:
-            print("⚠ Drive service není dostupný")
+            print("⚠ Drive: service není dostupný")
             return
-        # Načíst soubory ze složky
+        print("✓ Drive: service OK, načítám soubory")
         result = service.files().list(
             q=f"'{DRIVE_FOLDER_ID}' in parents and mimeType='application/pdf' and trashed=false",
             orderBy="createdTime desc",
@@ -3600,8 +3601,8 @@ def _zpracuj_nove_faktury_z_drive():
             pageSize=20
         ).execute()
         files = result.get("files", [])
+        print(f"✓ Drive: nalezeno {len(files)} souborů ve složce")
 
-        # Zjistit které soubory již byly zpracovány
         with get_db() as conn:
             try:
                 conn.execute("""CREATE TABLE IF NOT EXISTS drive_zpracovane (
@@ -3612,7 +3613,9 @@ def _zpracuj_nove_faktury_z_drive():
 
         for f in files:
             if f["id"] in zpracovane:
+                print(f"⏭ Drive: přeskakuji {f['name']} (již zpracováno)")
                 continue
+            print(f"📥 Drive: stahuji {f['name']} ({f['id']})")
             try:
                 request_dl = service.files().get_media(fileId=f["id"])
                 content = request_dl.execute()
