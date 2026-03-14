@@ -3555,9 +3555,10 @@ def api_drive_registruj():
         # Uložit channel info pro pozdější stop
         with get_db() as conn:
             try:
-                conn.execute("CREATE TABLE IF NOT EXISTS drive_channels (id TEXT, resource_id TEXT, expiration TEXT)")
+                conn.execute("""CREATE TABLE IF NOT EXISTS drive_channels (
+                    id SERIAL PRIMARY KEY, channel_id TEXT, resource_id TEXT, expiration TEXT)""")
             except: pass
-            conn.execute("INSERT INTO drive_channels VALUES (?,?,?)",
+            conn.execute("INSERT INTO drive_channels (channel_id, resource_id, expiration) VALUES (?,?,?)",
                 (channel_id, result.get("resourceId",""), result.get("expiration","")))
         return jsonify({"ok": True, "channel_id": channel_id, "expiration": result.get("expiration")})
     except Exception as e:
@@ -3598,9 +3599,11 @@ def _zpracuj_nove_faktury_z_drive():
             # Zjistit které soubory již byly zpracovány
             with get_db() as conn:
                 try:
-                    conn.execute("CREATE TABLE IF NOT EXISTS drive_zpracovane (file_id TEXT PRIMARY KEY, zpracovano_at TEXT)")
+                    conn.execute("""CREATE TABLE IF NOT EXISTS drive_zpracovane (
+                        id SERIAL PRIMARY KEY, file_id TEXT UNIQUE, zpracovano_at TEXT)""")
                 except: pass
-                zpracovane = {r[0] for r in conn.execute("SELECT file_id FROM drive_zpracovane").fetchall()}
+                rows = conn.execute("SELECT file_id FROM drive_zpracovane").fetchall()
+                zpracovane = {r[0] for r in rows}
 
             for f in files:
                 if f["id"] in zpracovane:
