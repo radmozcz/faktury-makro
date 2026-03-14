@@ -318,7 +318,7 @@ function czDateShort(s) {
   return d.toLocaleDateString("cs-CZ", { day: "numeric", month: "numeric" }) + rok;
 }
 function stavBadge(s) {
-  const m = { zaplaceno: "Zaplaceno", ceka: "Čeká", po_splatnosti: "Po splatnosti" };
+  const m = { zaplaceno: "Zaplaceno", ceka: "Čeká", po_splatnosti: "Po splatnosti", ke_zpracovani: "📱 Ke zpracování" };
   return `<span class="badge badge-${s}">${m[s] || s}</span>`;
 }
 
@@ -615,14 +615,19 @@ async function loadFaktury() {
       </tr></thead>
       <tbody>
        ${data.faktury.map(f => `
-            <tr class="faktura-row" data-id="${f.id}" style="${f.duplicita_id ? 'opacity:0.55' : ''}">
+            <tr class="faktura-row" data-id="${f.id}" style="${f.duplicita_id ? 'opacity:0.55' : f.stav==='ke_zpracovani' ? 'background:#fffbeb' : ''}">
               <td><span class="badge badge-zaplaceno" style="background:var(--green-pale)">${f.firma_zkratka}</span></td>
               <td>${escHtml(f.dodavatel)}</td>
               <td>${escHtml(f.cislo_faktury||"–")}${f.duplicita_id ? " <small style='color:orange'>⚠️ dup #" + f.duplicita_id + "</small>" : ""}</td>
               <td>${czDate(f.datum_vystaveni)}</td>
               <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
               <td>${f.duplicita_id ? '<span class="badge" style="background:#0d6efd;color:#fff;cursor:pointer" onclick="event.stopPropagation();openFakturaDetail(' + f.duplicita_id + ')">🔗 Duplikát</span>' : stavBadge(f.stav)}</td>
-              ${maPravo("faktury_smazat") ? `<td onclick="event.stopPropagation()"><button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:.2rem .5rem;border-radius:4px;cursor:pointer" onclick="smazatFakturu(${f.id})">🗑</button></td>` : ""}
+              <td onclick="event.stopPropagation()" style="white-space:nowrap">
+                ${f.stav === 'ke_zpracovani' ? `
+                  <button class="btn btn-xs btn-success" onclick="potvrdFakturu(${f.id})" title="Potvrdit — zůstane v Faktury">✅</button>
+                  <button class="btn btn-xs btn-outline" onclick="premistFakturu(${f.id})" title="Přemístit jinam">↪</button>
+                ` : maPravo("faktury_smazat") ? `<button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:.2rem .5rem;border-radius:4px;cursor:pointer" onclick="smazatFakturu(${f.id})">🗑</button>` : ""}
+              </td>
               </tr>`).join("") ||
           "<tr><td colspan='7' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"}
       </tbody>
@@ -790,6 +795,56 @@ async function deleteFaktura(id) {
   toast("Faktura smazána");
   closeModal();
   loadFaktury();
+}
+
+async function potvrdFakturu(id) {
+  await api(`/api/faktury/${id}/stav`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({stav:"ceka"})});
+  toast("Faktura potvrzena ✓");
+  loadFaktury();
+}
+
+async function premistFakturu(id) {
+  openModal("Přemístit doklad", `
+    <p style="color:var(--txt2);margin-bottom:1rem">Kam chceš přemístit tento doklad?</p>
+    <div style="display:flex;flex-direction:column;gap:.5rem">
+      <button class="btn btn-outline" onclick="_premistDo(${id},'vydaje','provozni')">💸 Výdaje (provozní)</button>
+      <button class="btn btn-outline" onclick="_premistDo(${id},'vydaje','soukrome')">🏠 Soukromé výdaje</button>
+    </div>
+    <div style="text-align:right;margin-top:1rem">
+      <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
+    </div>`);
+}
+
+async function _premistDo(id, sekce, typ) {
+  try {
+    // Načíst data faktury
+    const data = await api(`/api/faktury/${id}`);
+    // Uložit jako výdaj
+    await api("/api/vydaje", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        firma_zkratka: data.firma_zkratka || "",
+        dodavatel:     data.dodavatel || "",
+        datum:         data.datum_vystaveni || "",
+        castka:        data.celkem_s_dph || 0,
+        zpusob_uhrady: "převodem",
+        stav:          "nezaplaceno",
+        popis:         data.cislo_faktury ? `FA ${data.cislo_faktury}` : "",
+        soubor_url:    data.soubor_url || "",
+        zdroj:         "drive_auto",
+        typ:           typ,
+        polozky:       [],
+      })
+    });
+    // Smazat z faktur
+    await api(`/api/faktury/${id}`, {method:"DELETE"});
+    closeModal();
+    toast(`Přemístěno do ${typ === 'soukrome' ? 'Soukromých výdajů' : 'Výdajů'} ✓`);
+    loadFaktury();
+  } catch(e) {
+    toast("Chyba: " + e.message, true);
+  }
 }
 
 async function smazatFakturu(id) {
