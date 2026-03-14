@@ -563,6 +563,8 @@ def migrate_db():
             except Exception: pass
     # Drive tabulky
     with get_db() as conn:
+        conn.execute("DROP TABLE IF EXISTS drive_channels")
+        conn.execute("DROP TABLE IF EXISTS drive_zpracovane")
         conn.execute("""CREATE TABLE IF NOT EXISTS drive_zpracovane (
             id SERIAL PRIMARY KEY, file_id TEXT UNIQUE, zpracovano_at TEXT)""")
         conn.execute("""CREATE TABLE IF NOT EXISTS drive_channels (
