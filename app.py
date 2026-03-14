@@ -2038,7 +2038,7 @@ def _vydaje_ocr(fpath, fname, gcs_url, firma):
 - poznamka: krátký popis co bylo nakoupeno (max 80 znaků)
 Odpověz POUZE jako JSON: {"dodavatel":"...","datum":"...","castka":0,"poznamka":"..."}"""}
         ]
-        resp = anthropic_client.messages.create(
+        resp = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY","")).messages.create(
             model="claude-sonnet-4-20250514", max_tokens=300,
             messages=[{"role": "user", "content": msg_content}]
         )
