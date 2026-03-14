@@ -178,7 +178,7 @@ function navigateTo(page) {
     dashboard:  renderDashboard,
     faktury:    renderFaktury,
     nahrat:     renderNahrat,
-    rucni:      renderRucni,
+    rucni:      () => { navigateTo('nahrat'); setTimeout(()=>switchTab('rucni'),100); },
     polozky:    renderPolozky,
     vyplaty:    renderVyplaty,
     reporty:    renderReporty,
@@ -829,6 +829,7 @@ function renderNahrat() {
         <button id="tabPdf" class="tab-btn tab-active" onclick="switchTab('pdf')">📄 PDF soubor</button>
         <button id="tabText" class="tab-btn" onclick="switchTab('text')">📋 Vložit text</button>
         <button id="tabHromadne" class="tab-btn" onclick="switchTab('hromadne')">📦 Hromadné nahrání</button>
+        <button id="tabRucni" class="tab-btn" onclick="switchTab('rucni')">✏️ Ruční zadání</button>
       </div>
 
       <div id="tabPanelPdf">
@@ -886,17 +887,60 @@ function renderNahrat() {
           <button class="btn btn-primary" onclick="ulozitFakturuMakro()">💾 Uložit fakturu</button>
         </div>
       </div>
+
+      <div id="tabPanelRucni" style="display:none">
+        <div class="grid-2" style="gap:1rem;margin-top:1rem">
+          <div class="form-group"><label class="form-label">Dodavatel *</label><input id="rDodavatel" class="form-control" placeholder="Název firmy dodavatele"></div>
+          <div class="form-group"><label class="form-label">Číslo faktury</label><input id="rCislo" class="form-control"></div>
+          <div class="form-group"><label class="form-label">Způsob úhrady</label><input id="rUhrada" class="form-control" placeholder="převodem / hotově"></div>
+          <div class="form-group"><label class="form-label">Datum vystavení</label><input type="date" id="rDatVys" class="form-control"></div>
+          <div class="form-group"><label class="form-label">Datum splatnosti</label><input type="date" id="rDatSpl" class="form-control"></div>
+          <div class="form-group"><label class="form-label">Stav</label>
+            <select id="rStav" class="form-control">
+              <option value="ceka">Čeká na zaplacení</option>
+              <option value="zaplaceno">Zaplaceno</option>
+            </select>
+          </div>
+          <div class="form-group"><label class="form-label">Příloha (volitelné)</label>
+            <input type="file" id="rSoubor" class="form-control" accept=".pdf,.png,.jpg,.jpeg">
+          </div>
+        </div>
+        <h4 style="font-family:var(--font-head);margin:1rem 0 .7rem">Položky</h4>
+        <div class="table-wrap">
+          <table class="items-table">
+            <thead><tr><th>Název</th><th>Množství</th><th>Jednotka</th><th>Cena/jedn. s DPH</th><th>Celkem s DPH</th><th></th></tr></thead>
+            <tbody id="rPolozkyBody">
+              <tr>
+                <td><input class="p-nazev" placeholder="Název položky"></td>
+                <td><input class="p-mnozstvi" type="number" step="0.001" value="1" style="width:80px" oninput="rUpdateTotal();rCalcCelkem(this)"></td>
+                <td><input class="p-jednotka" value="ks" style="width:55px"></td>
+                <td><input class="p-cena-j" type="number" step="0.01" value="0" style="width:100px" oninput="rUpdateTotal();rCalcCelkem(this)"></td>
+                <td><input class="p-celkem" type="number" step="0.01" value="0" style="width:110px" oninput="rUpdateTotal()"></td>
+                <td><button class="remove-row" onclick="this.closest('tr').remove();rUpdateTotal()">✕</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <button class="btn btn-secondary btn-sm" style="margin-top:.5rem" onclick="rAddRow()">+ Přidat položku</button>
+        <div style="margin-top:1rem;font-weight:600" id="rTotal"></div>
+        <div class="btn-group" style="margin-top:1.2rem">
+          <button class="btn btn-primary" onclick="ulozitRucni()">💾 Uložit fakturu</button>
+        </div>
+      </div>
+
     </div>`;
 
   setupDropzone();
   setupDropzoneHromadne();
+  rUpdateTotal();
 }
 
 function switchTab(tab) {
-  ['pdf','text','hromadne'].forEach(t => {
+  ['pdf','text','hromadne','rucni'].forEach(t => {
     document.getElementById('tabPanel' + t.charAt(0).toUpperCase() + t.slice(1)).style.display = t === tab ? '' : 'none';
     document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1)).classList.toggle('tab-active', t === tab);
   });
+  if (tab === 'rucni') rUpdateTotal();
 }
 
 async function zpracovatText() {
