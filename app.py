@@ -3508,6 +3508,192 @@ def api_drive_download():
         except: pass
 
 
+# ── GOOGLE DRIVE WEBHOOK ──────────────────────────────────────────────────────
+DRIVE_FOLDER_ID = "1Oopnqi_IDwqWOKb--u9gGQ3ds1RwhjKh"
+DRIVE_CHANNEL_ID = "faktury-makro-channel-1"
+
+def get_drive_service():
+    """Vrátí Google Drive service pomocí service account credentials."""
+    creds_json = os.environ.get("GCS_CREDENTIALS_JSON", "")
+    if not creds_json:
+        return None
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+        creds_info = json.loads(creds_json)
+        scopes = ["https://www.googleapis.com/auth/drive.readonly"]
+        creds = service_account.Credentials.from_service_account_info(creds_info, scopes=scopes)
+        return build("drive", "v3", credentials=creds)
+    except Exception as e:
+        print(f"⚠ Drive service error: {e}")
+        return None
+
+@app.route("/api/drive-registruj", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_drive_registruj():
+    """Zaregistruje sledování složky faktury-nahrat u Google Drive."""
+    if session.get("role") != "admin":
+        return jsonify({"error": "Pouze admin"}), 403
+    import uuid
+    try:
+        from googleapiclient.discovery import build
+        service = get_drive_service()
+        if not service:
+            return jsonify({"error": "Drive service není dostupný"}), 500
+        webhook_url = f"{os.environ.get('APP_URL', 'https://faktury-makro.onrender.com')}/api/drive-webhook"
+        channel_id = str(uuid.uuid4())
+        body = {
+            "id": channel_id,
+            "type": "web_hook",
+            "address": webhook_url,
+            "expiration": str(int((__import__("time").time() + 604800) * 1000))  # 7 dní
+        }
+        result = service.files().watch(
+            fileId=DRIVE_FOLDER_ID,
+            body=body
+        ).execute()
+        # Uložit channel info pro pozdější stop
+        with get_db() as conn:
+            try:
+                conn.execute("CREATE TABLE IF NOT EXISTS drive_channels (id TEXT, resource_id TEXT, expiration TEXT)")
+            except: pass
+            conn.execute("INSERT INTO drive_channels VALUES (?,?,?)",
+                (channel_id, result.get("resourceId",""), result.get("expiration","")))
+        return jsonify({"ok": True, "channel_id": channel_id, "expiration": result.get("expiration")})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/drive-webhook", methods=["POST"])
+def api_drive_webhook():
+    """Příjem notifikací od Google Drive — stáhne nové soubory ze složky."""
+    # Google posílá notifikaci při každé změně
+    resource_state = request.headers.get("X-Goog-Resource-State", "")
+    if resource_state == "sync":
+        # Pouze synchronizační ping — ignoruj
+        return "", 200
+
+    # Spustit zpracování nových souborů na pozadí
+    import threading
+    t = threading.Thread(target=_zpracuj_nove_faktury_z_drive)
+    t.daemon = True
+    t.start()
+    return "", 200
+
+def _zpracuj_nove_faktury_z_drive():
+    """Stáhne nové PDF ze složky faktury-nahrat a zpracuje OCR."""
+    with app.app_context():
+        try:
+            service = get_drive_service()
+            if not service:
+                return
+            # Načíst soubory ze složky (seřazené od nejnovějšího)
+            result = service.files().list(
+                q=f"'{DRIVE_FOLDER_ID}' in parents and mimeType='application/pdf' and trashed=false",
+                orderBy="createdTime desc",
+                fields="files(id,name,createdTime)",
+                pageSize=20
+            ).execute()
+            files = result.get("files", [])
+
+            # Zjistit které soubory již byly zpracovány
+            with get_db() as conn:
+                try:
+                    conn.execute("CREATE TABLE IF NOT EXISTS drive_zpracovane (file_id TEXT PRIMARY KEY, zpracovano_at TEXT)")
+                except: pass
+                zpracovane = {r[0] for r in conn.execute("SELECT file_id FROM drive_zpracovane").fetchall()}
+
+            for f in files:
+                if f["id"] in zpracovane:
+                    continue
+                # Stáhnout soubor
+                try:
+                    import io as _io
+                    request_dl = service.files().get_media(fileId=f["id"])
+                    content = request_dl.execute()
+                    # Uložit lokálně
+                    safe_name = f["name"].replace(" ", "_")
+                    ts = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S_")
+                    fname = ts + safe_name
+                    fpath = os.path.join(UPLOAD_DIR, fname)
+                    with open(fpath, "wb") as fh:
+                        fh.write(content)
+                    # Nahrát do GCS
+                    gcs_url = upload_to_gcs(fpath, f"faktury/{fname}")
+                    # OCR
+                    ocr_data = _ocr_faktura(fpath)
+                    # Uložit jako ke_zpracovani
+                    with get_db() as conn:
+                        conn.execute("""
+                            INSERT INTO faktury (firma_zkratka, dodavatel, cislo_faktury,
+                                datum_vystaveni, datum_splatnosti, celkem_s_dph,
+                                stav, soubor_cesta, soubor_url, zdroj)
+                            VALUES (?,?,?,?,?,?,?,?,?,?)
+                        """, (
+                            ocr_data.get("firma_zkratka", ""),
+                            ocr_data.get("dodavatel", ""),
+                            ocr_data.get("cislo_faktury", ""),
+                            ocr_data.get("datum_vystaveni", ""),
+                            ocr_data.get("datum_splatnosti", ""),
+                            float(ocr_data.get("celkem_s_dph", 0)),
+                            "ke_zpracovani",
+                            fname,
+                            gcs_url or "",
+                            "drive_auto"
+                        ))
+                        conn.execute("INSERT INTO drive_zpracovane VALUES (?,?)",
+                            (f["id"], __import__("datetime").datetime.now().isoformat()))
+                    print(f"✅ Drive auto: zpracována FA {fname}")
+                except Exception as e:
+                    print(f"⚠ Drive auto error pro {f['name']}: {e}")
+        except Exception as e:
+            print(f"⚠ Drive webhook error: {e}")
+
+def _ocr_faktura(fpath):
+    """OCR faktury — vrátí dict s daty."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return {}
+    try:
+        ext = fpath.rsplit(".", 1)[-1].lower()
+        with open(fpath, "rb") as fh:
+            raw = fh.read()
+        b64 = base64.standard_b64encode(raw).decode("utf-8")
+        if ext == "pdf":
+            block = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}}
+        else:
+            mt = {"jpg":"image/jpeg","jpeg":"image/jpeg","png":"image/png"}.get(ext,"image/jpeg")
+            block = {"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}}
+        client = anthropic.Anthropic(api_key=api_key)
+        # Zjistit firmu z IČO
+        ico_map = json.loads(os.environ.get("ICO_MAP_JSON", "{}"))
+        msg = client.messages.create(
+            model="claude-sonnet-4-20250514", max_tokens=600,
+            messages=[{"role": "user", "content": [block, {"type": "text", "text": f"""Analyzuj tuto fakturu.
+Odpověz POUZE platným JSON, žádný jiný text.
+{{
+  "dodavatel": "název dodavatele",
+  "cislo_faktury": "číslo faktury",
+  "datum_vystaveni": "YYYY-MM-DD nebo null",
+  "datum_splatnosti": "YYYY-MM-DD nebo null",
+  "celkem_s_dph": číslo,
+  "ico_odberatele": "IČO odběratele nebo null"
+}}
+Známá IČO firem: {json.dumps(ico_map)}"""
+            }]}]
+        )
+        text = msg.content[0].text.strip()
+        text = re.sub(r"^```json\s*", "", text); text = re.sub(r"```$", "", text).strip()
+        parsed = json.loads(text)
+        # Přiřadit firmu podle IČO
+        ico_odb = parsed.get("ico_odberatele", "")
+        firma = ico_map.get(str(ico_odb), "")
+        parsed["firma_zkratka"] = firma
+        return parsed
+    except Exception as e:
+        print(f"⚠ OCR error: {e}")
+        return {}
+
+
 @vyzaduj_prihlaseni
 def api_zaloha_db():
     if session.get("role") != "admin":
