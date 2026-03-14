@@ -3567,89 +3567,82 @@ def api_drive_registruj():
 @app.route("/api/drive-webhook", methods=["POST"])
 def api_drive_webhook():
     """Příjem notifikací od Google Drive — stáhne nové soubory ze složky."""
-    # Google posílá notifikaci při každé změně
     resource_state = request.headers.get("X-Goog-Resource-State", "")
     if resource_state == "sync":
-        # Pouze synchronizační ping — ignoruj
         return "", 200
-
-    # Spustit zpracování nových souborů na pozadí
-    import threading
-    t = threading.Thread(target=_zpracuj_nove_faktury_z_drive)
-    t.daemon = True
-    t.start()
+    # Zpracovat synchronně
+    try:
+        _zpracuj_nove_faktury_z_drive()
+    except Exception as e:
+        print(f"⚠ Webhook zpracování error: {e}")
     return "", 200
 
 def _zpracuj_nove_faktury_z_drive():
     """Stáhne nové PDF ze složky faktury-nahrat a zpracuje OCR."""
-    with app.app_context():
-        try:
-            service = get_drive_service()
-            if not service:
-                return
-            # Načíst soubory ze složky (seřazené od nejnovějšího)
-            result = service.files().list(
-                q=f"'{DRIVE_FOLDER_ID}' in parents and mimeType='application/pdf' and trashed=false",
-                orderBy="createdTime desc",
-                fields="files(id,name,createdTime)",
-                pageSize=20
-            ).execute()
-            files = result.get("files", [])
+    try:
+        service = get_drive_service()
+        if not service:
+            print("⚠ Drive service není dostupný")
+            return
+        # Načíst soubory ze složky
+        result = service.files().list(
+            q=f"'{DRIVE_FOLDER_ID}' in parents and mimeType='application/pdf' and trashed=false",
+            orderBy="createdTime desc",
+            fields="files(id,name,createdTime)",
+            pageSize=20
+        ).execute()
+        files = result.get("files", [])
 
-            # Zjistit které soubory již byly zpracovány
-            with get_db() as conn:
-                try:
-                    conn.execute("""CREATE TABLE IF NOT EXISTS drive_zpracovane (
-                        id SERIAL PRIMARY KEY, file_id TEXT UNIQUE, zpracovano_at TEXT)""")
-                except: pass
-                rows = conn.execute("SELECT file_id FROM drive_zpracovane").fetchall()
-                zpracovane = {r[0] for r in rows}
+        # Zjistit které soubory již byly zpracovány
+        with get_db() as conn:
+            try:
+                conn.execute("""CREATE TABLE IF NOT EXISTS drive_zpracovane (
+                    id SERIAL PRIMARY KEY, file_id TEXT UNIQUE, zpracovano_at TEXT)""")
+            except: pass
+            rows = conn.execute("SELECT file_id FROM drive_zpracovane").fetchall()
+            zpracovane = {r[0] for r in rows}
 
-            for f in files:
-                if f["id"] in zpracovane:
-                    continue
-                # Stáhnout soubor
-                try:
-                    import io as _io
-                    request_dl = service.files().get_media(fileId=f["id"])
-                    content = request_dl.execute()
-                    # Uložit lokálně
-                    safe_name = f["name"].replace(" ", "_")
-                    ts = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S_")
-                    fname = ts + safe_name
-                    fpath = os.path.join(UPLOAD_DIR, fname)
-                    with open(fpath, "wb") as fh:
-                        fh.write(content)
-                    # Nahrát do GCS
-                    gcs_url = upload_to_gcs(fpath, f"faktury/{fname}")
-                    # OCR
-                    ocr_data = _ocr_faktura(fpath)
-                    # Uložit jako ke_zpracovani
-                    with get_db() as conn:
-                        conn.execute("""
-                            INSERT INTO faktury (firma_zkratka, dodavatel, cislo_faktury,
-                                datum_vystaveni, datum_splatnosti, celkem_s_dph,
-                                stav, soubor_cesta, soubor_url, zdroj)
-                            VALUES (?,?,?,?,?,?,?,?,?,?)
-                        """, (
-                            ocr_data.get("firma_zkratka", ""),
-                            ocr_data.get("dodavatel", ""),
-                            ocr_data.get("cislo_faktury", ""),
-                            ocr_data.get("datum_vystaveni", ""),
-                            ocr_data.get("datum_splatnosti", ""),
-                            float(ocr_data.get("celkem_s_dph", 0)),
-                            "ke_zpracovani",
-                            fname,
-                            gcs_url or "",
-                            "drive_auto"
-                        ))
-                        conn.execute("INSERT INTO drive_zpracovane VALUES (?,?)",
-                            (f["id"], __import__("datetime").datetime.now().isoformat()))
-                    print(f"✅ Drive auto: zpracována FA {fname}")
-                except Exception as e:
-                    print(f"⚠ Drive auto error pro {f['name']}: {e}")
-        except Exception as e:
-            print(f"⚠ Drive webhook error: {e}")
+        for f in files:
+            if f["id"] in zpracovane:
+                continue
+            try:
+                request_dl = service.files().get_media(fileId=f["id"])
+                content = request_dl.execute()
+                safe_name = f["name"].replace(" ", "_")
+                ts = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S_")
+                fname = ts + safe_name
+                fpath = os.path.join(UPLOAD_DIR, fname)
+                with open(fpath, "wb") as fh:
+                    fh.write(content)
+                gcs_url = upload_to_gcs(fpath, f"faktury/{fname}")
+                ocr_data = _ocr_faktura(fpath)
+                with get_db() as conn:
+                    conn.execute("""
+                        INSERT INTO faktury (firma_zkratka, dodavatel, cislo_faktury,
+                            datum_vystaveni, datum_splatnosti, celkem_s_dph,
+                            stav, soubor_cesta, soubor_url, zdroj)
+                        VALUES (?,?,?,?,?,?,?,?,?,?)
+                    """, (
+                        ocr_data.get("firma_zkratka", ""),
+                        ocr_data.get("dodavatel", ""),
+                        ocr_data.get("cislo_faktury", ""),
+                        ocr_data.get("datum_vystaveni", ""),
+                        ocr_data.get("datum_splatnosti", ""),
+                        float(ocr_data.get("celkem_s_dph", 0)),
+                        "ke_zpracovani",
+                        fname,
+                        gcs_url or "",
+                        "drive_auto"
+                    ))
+                    conn.execute(
+                        "INSERT INTO drive_zpracovane (file_id, zpracovano_at) VALUES (?,?)",
+                        (f["id"], __import__("datetime").datetime.now().isoformat())
+                    )
+                print(f"✅ Drive auto: zpracována FA {fname}")
+            except Exception as e:
+                print(f"⚠ Drive auto error pro {f['name']}: {e}")
+    except Exception as e:
+        print(f"⚠ Drive webhook error: {e}")
 
 def _ocr_faktura(fpath):
     """OCR faktury — vrátí dict s daty."""
