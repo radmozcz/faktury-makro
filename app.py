@@ -3596,6 +3596,7 @@ def _zpracuj_nove_faktury_z_drive():
         # Zjistit které soubory již byly zpracovány
         with get_db() as conn:
             try:
+                conn.execute("DROP TABLE IF EXISTS drive_zpracovane")
                 conn.execute("""CREATE TABLE IF NOT EXISTS drive_zpracovane (
                     id SERIAL PRIMARY KEY, file_id TEXT UNIQUE, zpracovano_at TEXT)""")
             except: pass
