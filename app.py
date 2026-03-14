@@ -561,6 +561,12 @@ def migrate_db():
         if "duplicita_id" not in vyst_cols:
             try: conn.execute("ALTER TABLE vystavene_faktury ADD COLUMN duplicita_id INTEGER DEFAULT NULL")
             except Exception: pass
+    # Drive tabulky
+    with get_db() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS drive_zpracovane (
+            id SERIAL PRIMARY KEY, file_id TEXT UNIQUE, zpracovano_at TEXT)""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS drive_channels (
+            id SERIAL PRIMARY KEY, channel_id TEXT, resource_id TEXT, expiration TEXT)""")
     print("migrate_db OK")
 
 
@@ -3596,7 +3602,6 @@ def _zpracuj_nove_faktury_z_drive():
         # Zjistit které soubory již byly zpracovány
         with get_db() as conn:
             try:
-                conn.execute("DROP TABLE IF EXISTS drive_zpracovane")
                 conn.execute("""CREATE TABLE IF NOT EXISTS drive_zpracovane (
                     id SERIAL PRIMARY KEY, file_id TEXT UNIQUE, zpracovano_at TEXT)""")
             except: pass
@@ -3635,6 +3640,23 @@ def _zpracuj_nove_faktury_z_drive():
                         gcs_url or "",
                         "drive_auto"
                     ))
+                    fid = conn.execute("SELECT id FROM faktury WHERE soubor_cesta=? ORDER BY id DESC LIMIT 1", (fname,)).fetchone()
+                    if fid:
+                        for p in ocr_data.get("polozky", []):
+                            nazev = (p.get("nazev") or "").strip()
+                            if not nazev: continue
+                            conn.execute("""
+                                INSERT INTO polozky (faktura_id, nazev, mnozstvi, jednotka,
+                                    cena_za_jednotku_s_dph, celkem_s_dph)
+                                VALUES (?,?,?,?,?,?)
+                            """, (
+                                fid[0],
+                                nazev,
+                                float(p.get("mnozstvi") or 1),
+                                p.get("jednotka") or "ks",
+                                float(p.get("cena_za_jednotku_s_dph") or 0),
+                                float(p.get("celkem_s_dph") or 0),
+                            ))
                     conn.execute(
                         "INSERT INTO drive_zpracovane (file_id, zpracovano_at) VALUES (?,?)",
                         (f["id"], __import__("datetime").datetime.now().isoformat())
@@ -3664,16 +3686,28 @@ def _ocr_faktura(fpath):
         # Zjistit firmu z IČO
         ico_map = json.loads(os.environ.get("ICO_MAP_JSON", "{}"))
         msg = client.messages.create(
-            model="claude-sonnet-4-20250514", max_tokens=600,
-            messages=[{"role": "user", "content": [block, {"type": "text", "text": f"""Analyzuj tuto fakturu.
+            model="claude-sonnet-4-20250514", max_tokens=2000,
+            messages=[{"role": "user", "content": [block, {"type": "text", "text": f"""Analyzuj tuto MAKRO fakturu (daňový doklad).
 Odpověz POUZE platným JSON, žádný jiný text.
+
+Důležité pro číslo faktury: hledej pole "Faktura č." nebo "Faktura č. / VS" — to je správné číslo faktury (např. 0466005189). IGNORUJ číslo vpravo nahoře které vypadá jako 0066/0955 — to je číslo objednávky.
+
 {{
-  "dodavatel": "název dodavatele",
-  "cislo_faktury": "číslo faktury",
+  "dodavatel": "název dodavatele (obvykle MAKRO Cash & Carry ČR s.r.o.)",
+  "cislo_faktury": "číslo z pole Faktura č. nebo Faktura č. / VS",
   "datum_vystaveni": "YYYY-MM-DD nebo null",
   "datum_splatnosti": "YYYY-MM-DD nebo null",
-  "celkem_s_dph": číslo,
-  "ico_odberatele": "IČO odběratele nebo null"
+  "celkem_s_dph": číslo (celková částka včetně DPH),
+  "ico_odberatele": "IČO odběratele nebo null",
+  "polozky": [
+    {{
+      "nazev": "název zboží",
+      "mnozstvi": číslo,
+      "jednotka": "PC/CA/KG atd.",
+      "cena_za_jednotku_s_dph": číslo,
+      "celkem_s_dph": číslo
+    }}
+  ]
 }}
 Známá IČO firem: {json.dumps(ico_map)}"""
             }]}]
