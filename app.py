@@ -3834,6 +3834,11 @@ def api_oprav_duplicity():
         return jsonify({"ok": False, "chyba": str(e)}), 500
 
 
+@app.route("/ping")
+def ping():
+    return "pong", 200
+
+
 if __name__ == "__main__":
     print("=" * 55)
     print("  Správa faktur – spouštím server")
