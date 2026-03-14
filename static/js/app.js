@@ -131,6 +131,7 @@ function skryjNepovoleneMenu() {
     "nastaveni":  "nastaveni",
     "banky":      "bankovni_vypisy",
     "vydaje":          "vydaje_zobrazit",
+    "soukrome_vydaje": "soukrome_vydaje_zobrazit",
     "vystavene":       "vystavene_zobrazit",
   };
   document.querySelectorAll(".nav-item[data-page]").forEach(el => {
@@ -184,8 +185,9 @@ function navigateTo(page) {
     statistiky: renderStatistiky,
     nastaveni:  renderNastaveni,
     banky:      renderBanky,
-    vydaje:        renderVydaje,
-    vystavene:     renderVystavene,
+    vydaje:          renderVydaje,
+    soukrome_vydaje: () => renderVydaje("soukrome"),
+    vystavene:       renderVystavene,
   };
   if (pages[page]) pages[page]();
 }
@@ -2300,9 +2302,12 @@ async function renderNastaveni() {
     { klic: "vyplaty_zobrazit",  label: "Výplaty — zobrazit" },
     { klic: "vyplaty_upravit",   label: "Výplaty — upravit" },
     { klic: "zbozi_zobrazit",    label: "Zboží — zobrazit" },
-    { klic: "vydaje_zobrazit",   label: "Výdaje — zobrazit" },
-    { klic: "vydaje_upravit",    label: "Výdaje — přidat/upravit" },
-    { klic: "vydaje_smazat",     label: "Výdaje — mazat" },
+    { klic: "vydaje_zobrazit",          label: "Výdaje — zobrazit" },
+    { klic: "vydaje_upravit",           label: "Výdaje — přidat/upravit" },
+    { klic: "vydaje_smazat",            label: "Výdaje — mazat" },
+    { klic: "soukrome_vydaje_zobrazit", label: "Soukromé výdaje — zobrazit" },
+    { klic: "soukrome_vydaje_upravit",  label: "Soukromé výdaje — přidat/upravit" },
+    { klic: "soukrome_vydaje_smazat",   label: "Soukromé výdaje — mazat" },
     { klic: "naklady_zobrazit",  label: "Náklady — zobrazit" },
     { klic: "bankovni_vypisy",   label: "Bankovní výpisy" },
     { klic: "statistiky",        label: "Statistiky" },
@@ -3603,14 +3608,17 @@ async function smazatBankovniPohyb(id) {
 // ═══════════════════════════════════════════════════════════════
 //  VÝDAJE
 // ═══════════════════════════════════════════════════════════════
-async function renderVydaje() {
-  const tlacitka = maPravo("vydaje_upravit")
-    ? `<button class="btn btn-primary btn-sm" onclick="openVydajNahrat()">📷 Nahrát doklad</button>
-       <button class="btn btn-sm" onclick="openVydajRucni()">✏️ Ruční zadání</button>`
+async function renderVydaje(typ = "provozni") {
+  const jeSoukrome = typ === "soukrome";
+  const nazev = jeSoukrome ? "Soukromé výdaje" : "Výdaje";
+  const pravoUpravit = jeSoukrome ? "soukrome_vydaje_upravit" : "vydaje_upravit";
+  const tlacitka = maPravo(pravoUpravit)
+    ? `<button class="btn btn-primary btn-sm" onclick="openVydajNahrat('${typ}')">📷 Nahrát doklad</button>
+       <button class="btn btn-sm" onclick="openVydajRucni('${typ}')">✏️ Ruční zadání</button>`
     : "";
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
-      <h1 class="page-title">Výdaje</h1>
+      <h1 class="page-title">${nazev}</h1>
       <div class="btn-group">${tlacitka}</div>
     </div>
     <div id="vydajeNezaplacene"></div>
@@ -3636,6 +3644,8 @@ async function renderVydaje() {
     <div class="card">
       <div class="table-wrap" id="vydajeList"><div class="loading-center"><span class="spinner"></span></div></div>
     </div>`;
+  // Uložit aktuální typ pro loadVydaje
+  window._vydajTyp = typ;
   aplikujRokFiltr('vRok','vOd','vDo', null);
   loadVydajeNezaplacene();
   loadVydaje();
@@ -3644,7 +3654,8 @@ async function renderVydaje() {
 async function loadVydajeNezaplacene() {
   const el = document.getElementById("vydajeNezaplacene");
   if (!el) return;
-  const data = await api("/api/vydaje?stav=nezaplaceno").catch(()=>({vydaje:[]}));
+  const typ = window._vydajTyp || "provozni";
+  const data = await api(`/api/vydaje?stav=nezaplaceno&typ=${typ}`).catch(()=>({vydaje:[]}));
   if (!data.vydaje.length) { el.innerHTML = ""; return; }
   const dnes = new Date().toISOString().slice(0,10);
   // Seřadit: nejdříve po splatnosti, pak podle data splatnosti
@@ -3705,14 +3716,43 @@ async function loadVydajeNezaplacene() {
 
 async function toggleVydajStav(id, zaplaceno, reload) {
   const stav = zaplaceno ? "zaplaceno" : "nezaplaceno";
-  await api(`/api/vydaje/${id}/stav`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({stav})});
-  toast(zaplaceno ? "Označeno jako zaplaceno ✓" : "Označeno jako nezaplaceno");
-  if (reload === "nezaplacene") {
-    loadVydajeNezaplacene();
-    loadVydaje();
+  if (zaplaceno) {
+    // Otevřít mini dialog pro datum úhrady a banku
+    openModal("Označit jako zaplaceno", `
+      <div class="form-group">
+        <label class="form-label">Datum úhrady</label>
+        <input type="date" id="uhradaDatum" class="form-control" value="${new Date().toISOString().split('T')[0]}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Banka / způsob platby</label>
+        <select id="uhradaBanka" class="form-control">
+          <option value="">— nevyplněno —</option>
+          <option value="AirBank">AirBank</option>
+          <option value="RB">Raiffeisenbank</option>
+          <option value="hotovost">Hotovost</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
+        <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
+        <button class="btn btn-primary" onclick="_potvrdUhradu(${id},'${reload}')">✓ Potvrdit úhradu</button>
+      </div>`);
   } else {
-    loadVydaje();
+    await api(`/api/vydaje/${id}/stav`, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({stav:"nezaplaceno", datum_uhrady:"", banka_uhrady:""})});
+    toast("Označeno jako nezaplaceno");
+    if (reload === "nezaplacene") { loadVydajeNezaplacene(); loadVydaje(); }
+    else loadVydaje();
   }
+}
+
+async function _potvrdUhradu(id, reload) {
+  const datum_uhrady = document.getElementById("uhradaDatum")?.value || "";
+  const banka_uhrady = document.getElementById("uhradaBanka")?.value || "";
+  await api(`/api/vydaje/${id}/stav`, {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({stav:"zaplaceno", datum_uhrady, banka_uhrady})});
+  closeModal();
+  toast("Označeno jako zaplaceno ✓");
+  if (reload === "nezaplacene") { loadVydajeNezaplacene(); loadVydaje(); }
+  else loadVydaje();
 }
 
 async function loadVydaje() {
@@ -3721,18 +3761,21 @@ async function loadVydaje() {
     stav:  document.getElementById("vStav")?.value || "",
     od:    document.getElementById("vOd")?.value || "",
     do:    document.getElementById("vDo")?.value || "",
+    typ:   window._vydajTyp || "provozni",
   });
   const data = await api(`/api/vydaje?${params}`);
   const el = document.getElementById("vydajeList");
   if (!el) return;
-  const mozeUpravit = maPravo("vydaje_upravit");
-  const mozeSmazat  = maPravo("vydaje_smazat");
+  const typ = window._vydajTyp || "provozni";
+  const jeSoukrome = typ === "soukrome";
+  const mozeUpravit = maPravo(jeSoukrome ? "soukrome_vydaje_upravit" : "vydaje_upravit");
+  const mozeSmazat  = maPravo(jeSoukrome ? "soukrome_vydaje_smazat"  : "vydaje_smazat");
   el.innerHTML = `
     <table>
       <thead><tr>
         <th>Stav</th><th>Datum</th><th>Firma</th><th>Dodavatel</th>
         <th>Popis / účel</th><th>Položky</th>
-        <th>Způsob úhrady</th><th style="text-align:right">Částka</th><th>Doklad</th><th></th>
+        <th>Způsob úhrady</th><th>Uhrazeno</th><th style="text-align:right">Částka</th><th>Doklad</th><th></th>
       </tr></thead>
       <tbody>
         ${data.vydaje.length ? data.vydaje.map(v=>`
@@ -3753,6 +3796,9 @@ async function loadVydaje() {
             ${(v.polozky||[]).map(p=>`${escHtml(p.nazev)} ${czMoney(p.castka)}`).join("<br>")||"—"}
           </td>
           <td><span class="badge" style="background:#f3f4f6">${escHtml(v.zpusob_uhrady||"")}</span></td>
+          <td style="font-size:.85rem;color:var(--txt2)">
+            ${v.datum_uhrady ? `${czDate(v.datum_uhrady)}${v.banka_uhrady ? `<br><small>${escHtml(v.banka_uhrady)}</small>` : ""}` : "—"}
+          </td>
           <td style="text-align:right;font-weight:600;color:${v.stav==='zaplaceno'?'var(--txt2)':'#dc2626'}">${czMoney(v.castka)}</td>
           <td>${v.soubor_url?`<a href="${v.soubor_url}" target="_blank" onclick="event.stopPropagation()" style="font-size:.85rem">📎</a>`:""}</td>
           <td onclick="event.stopPropagation()">
@@ -3763,7 +3809,7 @@ async function loadVydaje() {
       </tbody>
       ${data.vydaje.length ? `
       <tfoot><tr class="table-footer">
-        <td colspan="7">Celkem (${data.vydaje.length} výdajů)</td>
+        <td colspan="8">Celkem (${data.vydaje.length} výdajů)</td>
         <td style="text-align:right"><strong style="color:#dc2626">${czMoney(data.celkem)}</strong></td>
         <td colspan="2"></td>
       </tr></tfoot>` : ""}
@@ -3806,6 +3852,17 @@ function _vydajModal(titul, v, onSave) {
         <select id="evStav" class="form-control">
           <option value="nezaplaceno" ${(v.stav||'nezaplaceno')==='nezaplaceno'?'selected':''}>Nezaplaceno</option>
           <option value="zaplaceno"   ${v.stav==='zaplaceno'?'selected':''}>Zaplaceno</option>
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Datum úhrady</label>
+        <input type="date" id="evDatumUhrady" class="form-control" value="${v.datum_uhrady||''}">
+      </div>
+      <div class="form-group"><label class="form-label">Banka / způsob platby</label>
+        <select id="evBankaUhrady" class="form-control">
+          <option value="" ${!v.banka_uhrady?'selected':''}>— nevyplněno —</option>
+          <option value="AirBank" ${v.banka_uhrady==='AirBank'?'selected':''}>AirBank</option>
+          <option value="RB" ${v.banka_uhrady==='RB'?'selected':''}>Raiffeisenbank</option>
+          <option value="hotovost" ${v.banka_uhrady==='hotovost'?'selected':''}>Hotovost</option>
         </select>
       </div>
       <div class="form-group" style="grid-column:1/-1"><label class="form-label">Popis / účel</label>
@@ -3854,6 +3911,8 @@ function _vydajGetPayload() {
     castka:           parseFloat(document.getElementById("evCastka").value||0),
     zpusob_uhrady:    document.getElementById("evUhrada").value,
     stav:             document.getElementById("evStav").value,
+    datum_uhrady:     document.getElementById("evDatumUhrady")?.value || "",
+    banka_uhrady:     document.getElementById("evBankaUhrady")?.value || "",
     popis:            document.getElementById("evPopis").value,
     poznamka:         document.getElementById("evPoznamka").value,
     polozky,
@@ -3862,7 +3921,7 @@ function _vydajGetPayload() {
 
 function openVydajRucni() {
   _vydajModal("Nový výdaj", { firma_zkratka: App.config.firmy[0]||"", polozky:[] }, async function() {
-    const payload = { ..._vydajGetPayload(), zdroj:"rucni" };
+    const payload = { ..._vydajGetPayload(), zdroj:"rucni", typ: window._vydajTyp || "provozni" };
     if (!payload.firma_zkratka || !payload.castka) { toast("Vyplň firmu a částku"); return; }
     await api("/api/vydaje", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
     toast("Výdaj uložen ✓"); closeModal(); loadVydaje(); loadVydajeNezaplacene();
@@ -3880,7 +3939,8 @@ async function openVydajEdit(id) {
   });
 }
 
-function openVydajNahrat() {
+function openVydajNahrat(typ = null) {
+  const t = typ || window._vydajTyp || "provozni";
   openModal("Nahrát doklad výdaje", `
     <div class="form-group" style="margin-bottom:1rem">
       <label class="form-label">Firma</label>
@@ -3985,6 +4045,7 @@ async function ulozitVydajZDokladu(soubor_cesta, soubor_url) {
     stav:          "nezaplaceno",
     soubor_cesta, soubor_url,
     zdroj: "ocr",
+    typ:   window._vydajTyp || "provozni",
     polozky: [],
   };
   if (!payload.firma_zkratka || !payload.castka) { toast("Vyplň firmu a částku"); return; }
