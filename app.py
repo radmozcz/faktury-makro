@@ -3574,15 +3574,15 @@ def api_drive_registruj():
 
 @app.route("/api/drive-webhook", methods=["POST"])
 def api_drive_webhook():
-    """Příjem notifikací od Google Drive — stáhne nové soubory ze složky."""
+    """Příjem notifikací od Google Drive."""
     resource_state = request.headers.get("X-Goog-Resource-State", "")
     if resource_state == "sync":
         return "", 200
-    # Zpracovat synchronně
-    try:
-        _zpracuj_nove_faktury_z_drive()
-    except Exception as e:
-        print(f"⚠ Webhook zpracování error: {e}")
+    # Vrátit odpověď okamžitě, pak zpracovat na pozadí
+    import threading
+    t = threading.Thread(target=_zpracuj_nove_faktury_z_drive)
+    t.daemon = True
+    t.start()
     return "", 200
 
 def _zpracuj_nove_faktury_z_drive():
