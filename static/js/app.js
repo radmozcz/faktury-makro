@@ -532,6 +532,7 @@ async function renderFaktury() {
         <option value="zaplaceno">Zaplaceno</option>
         <option value="po_splatnosti">Po splatnosti</option>
         <option value="duplikat">Duplikát</option>
+        <option value="ke_zpracovani">📱 Ke zpracování</option>
       </select>
       <label>Rok:</label>
       <select id="fRok" onchange="aplikujRokFiltr('fRok','fOd','fDo',loadFaktury)">
@@ -2440,6 +2441,16 @@ async function renderNastaveni() {
 
       <hr style="margin:1.5rem 0">
       <div style="border:1px solid var(--border);border-radius:8px;padding:1rem">
+        <div style="font-weight:600;margin-bottom:.5rem">📱 Automatické nahrávání z mobilu</div>
+        <div style="color:var(--txt2);font-size:.9rem;margin-bottom:.75rem">
+          Sleduje složku <strong>faktury-nahrat</strong> v Google Drive. Nové PDF se automaticky zpracují OCR a objeví se v sekci Faktury se stavem <em>Ke zpracování</em>.
+        </div>
+        <button class="btn btn-primary" onclick="registrovatDriveWebhook()">🔗 Aktivovat sledování Drive složky</button>
+        <span id="driveWebhookStatus" style="margin-left:.75rem;font-size:.9rem;color:var(--txt2)"></span>
+      </div>
+
+      <hr style="margin:1.5rem 0">
+      <div style="border:1px solid var(--border);border-radius:8px;padding:1rem">
         <div style="font-weight:600;margin-bottom:.5rem">💾 Záloha databáze</div>
         <div style="color:var(--txt2);font-size:.9rem;margin-bottom:.75rem">
           Stáhne kompletní SQL dump celé databáze (PostgreSQL). Doporučujeme zálohovat pravidelně.
@@ -2557,6 +2568,19 @@ async function _openPickerWithToken(token) {
       .build();
     picker.setVisible(true);
   });
+}
+
+async function registrovatDriveWebhook() {
+  const statusEl = document.getElementById("driveWebhookStatus");
+  if (statusEl) statusEl.textContent = "⏳ Aktivuji...";
+  try {
+    const res = await api("/api/drive-registruj", { method: "POST" });
+    if (res.error) { if (statusEl) statusEl.textContent = "❌ " + res.error; return; }
+    const exp = res.expiration ? new Date(parseInt(res.expiration)).toLocaleDateString("cs-CZ") : "7 dní";
+    if (statusEl) statusEl.textContent = `✅ Aktivováno (platí do ${exp})`;
+  } catch(e) {
+    if (statusEl) statusEl.textContent = "❌ " + e.message;
+  }
 }
 
 async function stahnoutZalohu() {
