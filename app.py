@@ -137,15 +137,18 @@ DEFAULT_PRAVA = {
         "vyplaty_zobrazit":  True,
         "vyplaty_upravit":   False,
         "zbozi_zobrazit":    True,
-        "vydaje_zobrazit":      True,
-        "vydaje_upravit":       True,
-        "vydaje_smazat":        False,
-        "naklady_zobrazit":     False,
-        "bankovni_vypisy":      False,
-        "statistiky":           False,
-        "nastaveni":            False,
-        "vystavene_zobrazit":   False,
-        "vystavene_upravit":    False,
+        "vydaje_zobrazit":              True,
+        "vydaje_upravit":               True,
+        "vydaje_smazat":                False,
+        "soukrome_vydaje_zobrazit":     False,
+        "soukrome_vydaje_upravit":      False,
+        "soukrome_vydaje_smazat":       False,
+        "naklady_zobrazit":             False,
+        "bankovni_vypisy":              False,
+        "statistiky":                   False,
+        "nastaveni":                    False,
+        "vystavene_zobrazit":           False,
+        "vystavene_upravit":            False,
     },
     "ucetni": {
         "faktury_zobrazit":  True,
@@ -157,15 +160,18 @@ DEFAULT_PRAVA = {
         "vyplaty_zobrazit":  False,
         "vyplaty_upravit":   False,
         "zbozi_zobrazit":    False,
-        "vydaje_zobrazit":      True,
-        "vydaje_upravit":       False,
-        "vydaje_smazat":        False,
-        "naklady_zobrazit":     True,
-        "bankovni_vypisy":      True,
-        "statistiky":           False,
-        "nastaveni":            False,
-        "vystavene_zobrazit":   True,
-        "vystavene_upravit":    False,
+        "vydaje_zobrazit":              True,
+        "vydaje_upravit":               False,
+        "vydaje_smazat":                False,
+        "soukrome_vydaje_zobrazit":     False,
+        "soukrome_vydaje_upravit":      False,
+        "soukrome_vydaje_smazat":       False,
+        "naklady_zobrazit":             True,
+        "bankovni_vypisy":              True,
+        "statistiky":                   False,
+        "nastaveni":                    False,
+        "vystavene_zobrazit":           True,
+        "vystavene_upravit":            False,
     },
 }
 
@@ -446,6 +452,7 @@ def init_db():
             soubor_cesta    TEXT DEFAULT '',
             soubor_url      TEXT DEFAULT '',
             zdroj           TEXT DEFAULT 'rucni',
+            typ             TEXT DEFAULT 'provozni',
             created_at      TEXT DEFAULT NOW()
         )"""),
         ("vydaje_polozky", """CREATE TABLE IF NOT EXISTS vydaje_polozky (
@@ -531,6 +538,15 @@ def migrate_db():
             except Exception: pass
         if "datum_splatnosti" not in vydaj_cols:
             try: conn.execute("ALTER TABLE vydaje ADD COLUMN datum_splatnosti TEXT DEFAULT ''")
+            except Exception: pass
+        if "datum_uhrady" not in vydaj_cols:
+            try: conn.execute("ALTER TABLE vydaje ADD COLUMN datum_uhrady TEXT DEFAULT ''")
+            except Exception: pass
+        if "banka_uhrady" not in vydaj_cols:
+            try: conn.execute("ALTER TABLE vydaje ADD COLUMN banka_uhrady TEXT DEFAULT ''")
+            except Exception: pass
+        if "typ" not in vydaj_cols:
+            try: conn.execute("ALTER TABLE vydaje ADD COLUMN typ TEXT DEFAULT 'provozni'")
             except Exception: pass
     # Migrace vystavene_faktury
     with get_db() as conn:
@@ -1887,11 +1903,13 @@ def api_vydaje_list():
     od    = request.args.get("od", "")
     do_   = request.args.get("do", "")
     stav  = request.args.get("stav", "")
+    typ   = request.args.get("typ", "provozni")
     clauses, params = [], []
     if firma: clauses.append("firma_zkratka=?"); params.append(firma)
     if od:    clauses.append("datum>=?"); params.append(od)
     if do_:   clauses.append("datum<=?"); params.append(do_)
     if stav:  clauses.append("stav=?"); params.append(stav)
+    clauses.append("COALESCE(typ,'provozni')=?"); params.append(typ)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     with get_db() as conn:
         rows = conn.execute(
@@ -1920,8 +1938,8 @@ def api_vydaje_ulozit():
     polozky = data.pop("polozky", [])
     with get_db() as conn:
         cur = conn.execute("""
-            INSERT INTO vydaje (firma_zkratka, dodavatel, datum, datum_splatnosti, castka, zpusob_uhrady, stav, popis, poznamka, soubor_cesta, soubor_url, zdroj)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO vydaje (firma_zkratka, dodavatel, datum, datum_splatnosti, castka, zpusob_uhrady, stav, popis, poznamka, soubor_cesta, soubor_url, zdroj, typ)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             data.get("firma_zkratka"),
             data.get("dodavatel", ""),
@@ -1935,6 +1953,7 @@ def api_vydaje_ulozit():
             data.get("soubor_cesta", ""),
             data.get("soubor_url", ""),
             data.get("zdroj", "rucni"),
+            data.get("typ", "provozni"),
         ))
         vid = cur.lastrowid
         for p in polozky:
@@ -1952,7 +1971,8 @@ def api_vydaje_edit(vid):
     with get_db() as conn:
         conn.execute("""
             UPDATE vydaje SET dodavatel=?, datum=?, datum_splatnosti=?, castka=?,
-                zpusob_uhrady=?, stav=?, popis=?, poznamka=?, firma_zkratka=?
+                zpusob_uhrady=?, stav=?, popis=?, poznamka=?, firma_zkratka=?,
+                datum_uhrady=?, banka_uhrady=?
             WHERE id=?
         """, (
             data.get("dodavatel", ""),
@@ -1964,6 +1984,8 @@ def api_vydaje_edit(vid):
             data.get("popis", ""),
             data.get("poznamka", ""),
             data.get("firma_zkratka", ""),
+            data.get("datum_uhrady", ""),
+            data.get("banka_uhrady", ""),
             vid,
         ))
         if polozky is not None:
@@ -1979,9 +2001,15 @@ def api_vydaje_edit(vid):
 @vyzaduj_prihlaseni
 def api_vydaje_stav(vid):
     """Rychlá změna stavu zaplaceno/nezaplaceno."""
-    stav = request.json.get("stav", "zaplaceno")
+    d = request.json or {}
+    stav = d.get("stav", "zaplaceno")
+    datum_uhrady = d.get("datum_uhrady", "")
+    banka_uhrady = d.get("banka_uhrady", "")
     with get_db() as conn:
-        conn.execute("UPDATE vydaje SET stav=? WHERE id=?", (stav, vid))
+        conn.execute(
+            "UPDATE vydaje SET stav=?, datum_uhrady=?, banka_uhrady=? WHERE id=?",
+            (stav, datum_uhrady, banka_uhrady, vid)
+        )
     return jsonify({"ok": True})
 
 @app.route("/api/vydaje/<int:vid>", methods=["DELETE"])
