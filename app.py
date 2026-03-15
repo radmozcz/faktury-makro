@@ -3617,8 +3617,18 @@ def _zpracuj_nove_faktury_z_drive():
                 continue
             print(f"📥 Drive: stahuji {f['name']} ({f['id']})")
             try:
+                import io as _io
+                from googleapiclient.http import MediaIoBaseDownload
                 request_dl = service.files().get_media(fileId=f["id"])
-                content = request_dl.execute()
+                buf = _io.BytesIO()
+                downloader = MediaIoBaseDownload(buf, request_dl)
+                done = False
+                while not done:
+                    _, done = downloader.next_chunk()
+                content = buf.getvalue()
+                if not content:
+                    print(f"⚠ Drive: prázdný obsah pro {f['name']}, přeskakuji")
+                    continue
                 safe_name = f["name"].replace(" ", "_")
                 ts = __import__("datetime").datetime.now().strftime("%Y%m%d_%H%M%S_")
                 fname = ts + safe_name
