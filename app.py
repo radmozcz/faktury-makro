@@ -3619,13 +3619,13 @@ def _zpracuj_nove_faktury_z_drive():
             try:
                 import io as _io
                 from googleapiclient.http import MediaIoBaseDownload
-                request_dl = service.files().get_media(fileId=f["id"])
                 buf = _io.BytesIO()
-                downloader = MediaIoBaseDownload(buf, request_dl)
+                request_dl = service.files().get_media(fileId=f["id"])
+                downloader = MediaIoBaseDownload(buf, request_dl, chunksize=1024*1024)
                 done = False
                 while not done:
-                    _, done = downloader.next_chunk()
-                content = buf.getvalue()
+                    status, done = downloader.next_chunk(num_retries=3)
+                content = buf.getvalue()  
                 if not content:
                     print(f"⚠ Drive: prázdný obsah pro {f['name']}, přeskakuji")
                     continue
