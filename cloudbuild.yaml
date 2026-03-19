@@ -15,3 +15,5 @@ steps:
   - 'europe-west1'
 images:
 - 'europe-west1-docker.pkg.dev/provozovna-488511/cloud-run-source-deploy/faktury-makro:$COMMIT_SHA'
+options:
+  logging: CLOUD_LOGGING_ONLY
