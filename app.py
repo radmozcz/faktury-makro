@@ -3548,7 +3548,7 @@ def api_drive_registruj():
         service = get_drive_service()
         if not service:
             return jsonify({"error": "Drive service není dostupný"}), 500
-        webhook_url = f"{os.environ.get('APP_URL', 'https://faktury-makro.onrender.com')}/api/drive-webhook"
+        webhook_url = f"{os.environ.get('APP_URL', 'https://faktury-makro-git-904528626460.europe-west1.run.app')}/api/drive-webhook"
         channel_id = str(uuid.uuid4())
         body = {
             "id": channel_id,
