@@ -3579,11 +3579,10 @@ def api_drive_registruj():
 @vyzaduj_prihlaseni
 def api_drive_zkontrolovat():
     """Ručně spustí stažení nových souborů z Google Drive."""
-    import threading
-    t = threading.Thread(target=_zpracuj_nove_faktury_z_drive)
-    t.daemon = True
-    t.start()
-    return jsonify({"ok": True, "stazeno": "spuštěno na pozadí"})
+        print("DRIVE_ZKONTROLOVAT_SPUSTENO")
+        _zpracuj_nove_faktury_z_drive()
+        return jsonify({"ok": True, "stazeno": "hotovo"})
+    
 @app.route("/api/drive-webhook", methods=["POST"])
 def api_drive_webhook():
     """Příjem notifikací od Google Drive."""
