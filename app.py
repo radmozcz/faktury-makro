@@ -563,8 +563,6 @@ def migrate_db():
             except Exception: pass
     # Drive tabulky
     with get_db() as conn:
-        conn.execute("DROP TABLE IF EXISTS drive_channels")
-        conn.execute("DROP TABLE IF EXISTS drive_zpracovane")
         conn.execute("""CREATE TABLE IF NOT EXISTS drive_zpracovane (
             id SERIAL PRIMARY KEY, file_id TEXT UNIQUE, zpracovano_at TEXT)""")
         conn.execute("""CREATE TABLE IF NOT EXISTS drive_channels (
@@ -1478,7 +1476,6 @@ def api_prava_set():
     if session.get("role") != "admin":
         return jsonify({"error": "Pouze admin"}), 403
     data = request.json or {}
-    # data = {"verunka": {"faktury_zobrazit": true, ...}, "ucetni": {...}}
     try:
         with get_db() as conn:
             for role, sekce_dict in data.items():
@@ -1519,13 +1516,11 @@ def api_config():
     if "dph_limit" in data:
         cfg["dph_limit"] = int(data["dph_limit"] or 2000000)
     if "terminal_prepnout" in data:
-        # Přepnutí aktivní firmy - nastaví datum od
         firma = data["terminal_prepnout"]
         if not cfg.get("terminal_od"):
             cfg["terminal_od"] = {}
         from datetime import date as _date
         cfg["terminal_od"][firma] = _date.today().isoformat()
-        # Označit tuto firmu jako aktivní (ostatní deaktivovat)
         cfg["terminal_aktivni"] = {f: (f == firma) for f in cfg.get("firmy", [])}
     save_config(cfg)
     return jsonify({"ok": True})
@@ -1533,7 +1528,6 @@ def api_config():
 @app.route("/api/reporty/karty-stats")
 @vyzaduj_prihlaseni
 def api_karty_stats():
-    """Statistiky karet pro info panel - měsíční a roční součty per firma."""
     import datetime as _dt
     cfg = load_config()
     firmy = cfg.get("firmy", [])
@@ -1544,7 +1538,6 @@ def api_karty_stats():
     result = {}
     with get_db() as conn:
         for firma in firmy:
-            # Roční karty (od 1.1. aktuálního roku)
             row = conn.execute("""
                 SELECT COALESCE(SUM(karty),0) as total
                 FROM reporty
@@ -1552,7 +1545,6 @@ def api_karty_stats():
             """, (firma, f"{rok}-01-01")).fetchone()
             rocni = float((row or {}).get("total", 0))
 
-            # Měsíční karty (od data přepnutí na tuto firmu)
             od = terminal_od.get(firma, f"{rok}-01-01")
             row2 = conn.execute("""
                 SELECT COALESCE(SUM(karty),0) as total
@@ -1582,8 +1574,6 @@ def api_dashboard():
         where_firma = "AND firma_zkratka=?" if firma else ""
         params_base = (firma,) if firma else ()
 
-        # ── OPRAVA: pojmenované sloupce místo indexů [0],[1]
-        # ── OPRAVA2: PostgreSQL potřebuje cast pro LIKE na textovém sloupci
         like_cond = "AND datum_vystaveni::text LIKE ?" if _USE_PG else "AND datum_vystaveni LIKE ?"
         row = conn.execute(f"""
             SELECT COUNT(*) as pocet, COALESCE(SUM(celkem_s_dph),0) as vydaje
@@ -1692,7 +1682,6 @@ def api_faktura_detail(fid):
             WHERE p.faktura_id=?
         """, (fid,)).fetchall()
     faktura_dict = dict(f)
-    # Pokud nemáme uloženou URL, vygeneruj čerstvou GCS URL
     if not faktura_dict.get("soubor_url") and faktura_dict.get("soubor_cesta"):
         gcs_url = get_gcs_url(faktura_dict["soubor_cesta"])
         if gcs_url:
@@ -1734,11 +1723,9 @@ def api_faktura_update(fid):
         with get_db() as conn:
             conn.execute(f"UPDATE faktury SET {','.join(set_parts)} WHERE id=?", vals)
 
-    # Zpracovat položky pokud jsou v datech
     polozky = data.get("polozky")
     if polozky is not None:
         with get_db() as conn:
-            # Smazat staré položky a vložit nové
             conn.execute("DELETE FROM polozky WHERE faktura_id=?", (fid,))
             for p in polozky:
                 nazev = (p.get("nazev") or "").strip()
@@ -1784,7 +1771,6 @@ def api_vyplaty():
             rows = conn.execute(f"""
                 SELECT * FROM vyplaty {where} ORDER BY datum DESC, created_at DESC
             """, params).fetchall()
-            # ── OPRAVA: pojmenovaný sloupec – funguje v PG i SQLite
             total_row = conn.execute(
                 f"SELECT COALESCE(SUM(castka),0) as total FROM vyplaty {where}", params
             ).fetchone()
@@ -1845,7 +1831,6 @@ def api_vyplata_update(vid):
 @app.route("/api/vyplaty/souhrn/<jmeno>")
 @vyzaduj_prihlaseni
 def api_vyplaty_souhrn(jmeno):
-    """Vrátí součet výplat za aktuální měsíc a rok pro daného zaměstnance."""
     from datetime import date as _date
     dnes = _date.today()
     mesic_od = f"{dnes.year}-{dnes.month:02d}-01"
@@ -1888,7 +1873,6 @@ def api_pausalni_get(jmeno):
 @app.route("/api/pausalni-odvody/<jmeno>", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_pausalni_save(jmeno):
-    """Uloží seznam paušálních odvodů pro zaměstnance (replace all)."""
     data = request.json or []
     with get_db() as conn:
         conn.execute("DELETE FROM pausalni_odvody WHERE jmeno=?", (jmeno,))
@@ -1926,7 +1910,6 @@ def api_vydaje_list():
         total = conn.execute(
             f"SELECT COALESCE(SUM(castka),0) as t FROM vydaje {where}", params
         ).fetchone()
-        # Přidat položky ke každému výdaji
         result = []
         for r in rows:
             d = dict(r)
@@ -2008,7 +1991,6 @@ def api_vydaje_edit(vid):
 @app.route("/api/vydaje/<int:vid>/stav", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_vydaje_stav(vid):
-    """Rychlá změna stavu zaplaceno/nezaplaceno."""
     d = request.json or {}
     stav = d.get("stav", "zaplaceno")
     datum_uhrady = d.get("datum_uhrady", "")
@@ -2031,7 +2013,6 @@ def api_vydaje_delete(vid):
 @app.route("/api/vydaje/nahrat", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_vydaje_nahrat():
-    """Nahraje doklad výdaje (foto/PDF) přes OCR."""
     if "soubor" not in request.files:
         return jsonify({"error": "Žádný soubor"}), 400
     f = request.files["soubor"]
@@ -2045,7 +2026,6 @@ def api_vydaje_nahrat():
 @app.route("/api/vydaje/nahrat-path", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_vydaje_nahrat_path():
-    """OCR na souboru již uloženém (z Drive Picker)."""
     d = request.json or {}
     fpath = d.get("path", "")
     soubor_url = d.get("soubor_url", "")
@@ -2056,7 +2036,6 @@ def api_vydaje_nahrat_path():
     return _vydaje_ocr(fpath, filename, soubor_url, firma)
 
 def _vydaje_ocr(fpath, fname, gcs_url, firma):
-    """Spustí OCR na souboru výdaje."""
     try:
         with open(fpath, "rb") as fh:
             raw = fh.read()
@@ -2118,7 +2097,6 @@ def api_vystavene_list():
 @app.route("/api/vystavene-faktury/zkontroluj", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_vystavene_zkontroluj():
-    """Zkontroluje duplicitu bez uložení — volá se po OCR."""
     d = request.json or {}
     duplicita = None
     if d.get("cislo_faktury") and d.get("datum"):
@@ -2139,7 +2117,6 @@ def api_vystavene_ulozit():
     if session.get("role") != "admin":
         return jsonify({"error": "Přístup zamítnut"}), 403
     d = request.json or {}
-    # Kontrola duplicity
     duplicita = None
     if d.get("cislo_faktury") and d.get("datum"):
         with get_db() as conn:
@@ -2205,7 +2182,6 @@ def api_vystavene_stav(fid):
 @app.route("/api/vystavene-faktury/nahrat-path", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_vystavene_nahrat_path():
-    """OCR na souboru již uloženém (z Drive Picker)."""
     if session.get("role") != "admin":
         return jsonify({"error": "Přístup zamítnut"}), 403
     d = request.json or {}
@@ -2216,7 +2192,6 @@ def api_vystavene_nahrat_path():
     return _vystavene_ocr(fpath, soubor_url)
 
 def _vystavene_ocr(fpath, soubor_url=""):
-    """Spustí OCR na souboru a vrátí data vystavené faktury."""
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         return jsonify({"error": "ANTHROPIC_API_KEY není nastaven", "soubor_url": soubor_url}), 200
@@ -2283,7 +2258,6 @@ def api_vystavene_nahrat():
 
 # ── API: BANKOVNÍ VÝPISY ──────────────────────────────────────────────────────
 def parse_csv_airbank(content_bytes):
-    """Parsuje CSV výpis z Air Bank (cp1250, ; oddělovač, datum DD/MM/YYYY)."""
     import csv, io
     text = content_bytes.decode("cp1250")
     reader = csv.DictReader(io.StringIO(text), delimiter=";")
@@ -2295,7 +2269,6 @@ def parse_csv_airbank(content_bytes):
         if not datum_raw or not castka_raw:
             continue
         try:
-            # DD/MM/YYYY → YYYY-MM-DD
             d, m, y = datum_raw.split("/")
             datum = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
             castka = float(castka_raw)
@@ -2314,7 +2287,6 @@ def parse_csv_airbank(content_bytes):
     return pohyby
 
 def parse_csv_rb(content_bytes):
-    """Parsuje CSV výpis z Raiffeisenbank (utf-8 BOM, ; oddělovač, datum DD.MM.YYYY)."""
     import csv, io
     text = content_bytes.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text), delimiter=";")
@@ -2326,7 +2298,6 @@ def parse_csv_rb(content_bytes):
         if not datum_raw or not castka_raw:
             continue
         try:
-            # DD.MM.YYYY → YYYY-MM-DD
             d, m, y = datum_raw.split(".")
             datum = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
             castka = float(castka_raw)
@@ -2347,7 +2318,6 @@ def parse_csv_rb(content_bytes):
 @app.route("/api/banky/import", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_banky_import():
-    """Importuje CSV výpis z banky."""
     if "soubor" not in request.files:
         return jsonify({"error": "Žádný soubor"}), 400
     f = request.files["soubor"]
@@ -2356,7 +2326,6 @@ def api_banky_import():
     content = f.read()
     fname = (f.filename or "").lower()
 
-    # Detekce banky podle hintu, názvu souboru nebo BOM
     try:
         if banka_hint == "AirBank" or "airbank" in fname or "air_bank" in fname:
             pohyby = parse_csv_airbank(content)
@@ -2391,13 +2360,12 @@ def api_banky_import():
                 ))
                 naimportovano += 1
             except Exception:
-                duplicity += 1  # UNIQUE constraint = duplikát
+                duplicity += 1
     return jsonify({"ok": True, "banka": banka, "naimportovano": naimportovano, "duplicity": duplicity})
 
 @app.route("/api/banky/pohyby")
 @vyzaduj_prihlaseni
 def api_banky_pohyby():
-    """Vrátí seznam bankovních pohybů s filtry."""
     banka  = request.args.get("banka", "")
     firma  = request.args.get("firma", "")
     od     = request.args.get("od", "")
@@ -2427,9 +2395,8 @@ def api_banky_pohyby():
 @app.route("/api/banky/export")
 @vyzaduj_prihlaseni
 def api_banky_export():
-    """Export měsíčního výpisu jako CSV nebo PDF."""
     banka  = request.args.get("banka", "")
-    mesic  = request.args.get("mesic", "")   # YYYY-MM
+    mesic  = request.args.get("mesic", "")
     fmt    = request.args.get("format", "csv")
     if not banka or not mesic:
         return jsonify({"error": "Chybí parametry"}), 400
@@ -2450,20 +2417,19 @@ def api_banky_export():
         w.writerow(["Datum","Protistrana","Číslo účtu","Typ transakce","Zpráva","Částka"])
         for r in rows:
             w.writerow([r["datum"], r["nazev_protiucet"], r["protiucet"], r["typ_transakce"], r["zprava"], r["castka"]])
+        from flask import make_response
         resp = make_response(out.getvalue().encode("utf-8-sig"))
         resp.headers["Content-Type"] = "text/csv; charset=utf-8"
         resp.headers["Content-Disposition"] = f'attachment; filename="{banka}_{mesic}.csv"'
         return resp
     else:
-        # Skutečné PDF přes reportlab
         from reportlab.lib.pagesizes import A4
         from reportlab.lib import colors
         from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.styles import getSampleStyleSheet
         from reportlab.lib.units import mm
-        from reportlab.pdfbase import pdfmetrics
-        from reportlab.pdfbase.ttfonts import TTFont
         import io as _io
+        from flask import make_response
 
         nazev_banky = "Air Bank" if banka == "AirBank" else "Raiffeisenbank"
         prichozi = sum(r["castka"] for r in rows if r["castka"] > 0)
@@ -2476,12 +2442,9 @@ def api_banky_export():
             topMargin=15*mm, bottomMargin=15*mm)
         styles = getSampleStyleSheet()
         story = []
-
-        # Nadpis
         story.append(Paragraph(f"<b>{nazev_banky}</b> – výpis {mesic}", styles["Title"]))
         story.append(Spacer(1, 4*mm))
 
-        # Souhrn
         souhrn = [
             ["Příchozí", "Odchozí", "Saldo"],
             [f"{prichozi:,.2f} Kč", f"{abs(odchozi):,.2f} Kč", f"{saldo:,.2f} Kč"],
@@ -2492,16 +2455,12 @@ def api_banky_export():
             ("ALIGN",      (0,0), (-1,-1), "CENTER"),
             ("GRID",       (0,0), (-1,-1), 0.5, colors.grey),
             ("FONTSIZE",   (0,0), (-1,-1), 9),
-            ("TEXTCOLOR",  (0,1), (0,1), colors.HexColor("#16a34a")),
-            ("TEXTCOLOR",  (1,1), (1,1), colors.HexColor("#dc2626")),
-            ("FONTNAME",   (0,1), (-1,1), "Helvetica-Bold"),
         ])
         t = Table(souhrn, colWidths=[55*mm, 55*mm, 55*mm])
         t.setStyle(ts)
         story.append(t)
         story.append(Spacer(1, 5*mm))
 
-        # Tabulka transakcí
         hlavicka = ["Datum", "Protistrana", "Typ transakce", "Zpráva", "Částka"]
         data_rows = [hlavicka] + [
             [r["datum"], (r["nazev_protiucet"] or "")[:35],
@@ -2522,12 +2481,6 @@ def api_banky_export():
             ("TOPPADDING",  (0,0), (-1,-1), 3),
             ("BOTTOMPADDING",(0,0), (-1,-1), 3),
         ])
-        # Obarvit záporné částky červeně
-        for i, r in enumerate(rows, start=1):
-            if r["castka"] < 0:
-                tbl_style.add("TEXTCOLOR", (4,i), (4,i), colors.HexColor("#dc2626"))
-            else:
-                tbl_style.add("TEXTCOLOR", (4,i), (4,i), colors.HexColor("#16a34a"))
         tbl.setStyle(tbl_style)
         story.append(tbl)
 
@@ -2567,7 +2520,6 @@ def api_report_nahrat_foto():
 
     report = build_report_from_parsed(parsed)
 
-    # Nahrát fotku do GCS
     gcs_url = None
     try:
         gcs_url = upload_to_gcs(fpath, f"reporty/{fname}")
@@ -3075,7 +3027,6 @@ def api_nahrat():
     fpath  = os.path.join(UPLOAD_DIR, fname)
     f.save(fpath)
 
-    # Nahrát do GCS (pokud je nakonfigurováno)
     gcs_url = upload_to_gcs(fpath, fname)
 
     ext = fname.rsplit(".", 1)[1].lower()
@@ -3466,14 +3417,12 @@ migrate_db()
 @app.route("/api/drive-config")
 @vyzaduj_prihlaseni
 def api_drive_config():
-    """Vrátí Google OAuth Client ID pro Drive Picker."""
     client_id = os.environ.get("GOOGLE_CLIENT_ID", "")
     return jsonify({"client_id": client_id})
 
 @app.route("/api/drive-download", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_drive_download():
-    """Stáhne soubor z Google Drive pomocí access tokenu a vrátí ho jako PDF."""
     import requests as _req
     d = request.json or {}
     file_id    = d.get("file_id", "")
@@ -3481,21 +3430,17 @@ def api_drive_download():
     filename   = d.get("filename", "dokument.pdf")
     if not file_id or not access_token:
         return jsonify({"error": "Chybí file_id nebo access_token"}), 400
-    # Stáhnout soubor z Drive
     url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media"
     headers = {"Authorization": f"Bearer {access_token}"}
     resp = _req.get(url, headers=headers, timeout=30)
     if resp.status_code != 200:
         return jsonify({"error": f"Chyba stahování z Drive: {resp.status_code}"}), 400
-    # Uložit dočasně a zpracovat jako normální upload
     import tempfile, os as _os
     suffix = ".pdf" if filename.lower().endswith(".pdf") else ""
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(resp.content)
         tmp_path = tmp.name
     try:
-        from flask import g
-        # Simuluj FileStorage objekt pro stávající OCR logiku
         from werkzeug.datastructures import FileStorage
         import io
         fs = FileStorage(
@@ -3503,7 +3448,6 @@ def api_drive_download():
             filename=filename,
             content_type="application/pdf"
         )
-        # Uložit do upload adresáře
         safe = filename.replace(" ", "_")
         dest = os.path.join(UPLOAD_DIR, safe)
         fs.save(dest)
@@ -3542,7 +3486,6 @@ def get_drive_service():
 @app.route("/api/drive-registruj", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_drive_registruj():
-    """Zaregistruje sledování složky faktury-nahrat u Google Drive."""
     if session.get("role") != "admin":
         return jsonify({"error": "Pouze admin"}), 403
     import uuid
@@ -3557,13 +3500,12 @@ def api_drive_registruj():
             "id": channel_id,
             "type": "web_hook",
             "address": webhook_url,
-            "expiration": str(int((__import__("time").time() + 604800) * 1000))  # 7 dní
+            "expiration": str(int((__import__("time").time() + 604800) * 1000))
         }
         result = service.files().watch(
             fileId=DRIVE_FOLDER_ID,
             body=body
         ).execute()
-        # Uložit channel info pro pozdější stop
         with get_db() as conn:
             try:
                 conn.execute("""CREATE TABLE IF NOT EXISTS drive_channels (
@@ -3582,14 +3524,13 @@ def api_drive_zkontrolovat():
     print("DRIVE_ZKONTROLOVAT_SPUSTENO")
     _zpracuj_nove_faktury_z_drive()
     return jsonify({"ok": True, "stazeno": "hotovo"})
-    
+
 @app.route("/api/drive-webhook", methods=["POST"])
 def api_drive_webhook():
     """Příjem notifikací od Google Drive."""
     resource_state = request.headers.get("X-Goog-Resource-State", "")
     if resource_state == "sync":
         return "", 200
-    # Vrátit odpověď okamžitě, pak zpracovat na pozadí
     import threading
     t = threading.Thread(target=_zpracuj_nove_faktury_z_drive)
     t.daemon = True
@@ -3598,6 +3539,7 @@ def api_drive_webhook():
 
 def _zpracuj_nove_faktury_z_drive():
     """Stáhne nové PDF ze složky faktury-nahrat a zpracuje OCR."""
+    import google.auth.transport.requests
     print("DRIVE_START")
     print(f"DRIVE_FOLDER_ID={DRIVE_FOLDER_ID}")
     try:
@@ -3621,7 +3563,8 @@ def _zpracuj_nove_faktury_z_drive():
                     id SERIAL PRIMARY KEY, file_id TEXT UNIQUE, zpracovano_at TEXT)""")
             except: pass
             rows = conn.execute("SELECT file_id FROM drive_zpracovane").fetchall()
-            zpracovane = {r[0] for r in rows}
+            # OPRAVA: funguje pro PostgreSQL (dict) i SQLite (tuple)
+            zpracovane = {r["file_id"] if isinstance(r, dict) else r[0] for r in rows}
 
         for f in files:
             if f["id"] in zpracovane:
@@ -3629,15 +3572,17 @@ def _zpracuj_nove_faktury_z_drive():
                 continue
             print(f"📥 Drive: stahuji {f['name']} ({f['id']})")
             try:
+                # Obnovit token před každým stažením
+                creds.refresh(google.auth.transport.requests.Request())
                 print(f"DEBUG_TOKEN: {creds.token[:20] if creds.token else 'PRAZDNY'}")
                 import requests as _req
-                creds.refresh(google.auth.transport.requests.Request())
                 headers = {"Authorization": f"Bearer {creds.token}"}
                 dl_url = f"https://www.googleapis.com/drive/v3/files/{f['id']}?alt=media"
                 resp = _req.get(dl_url, headers=headers, timeout=60)
-                content = resp.content if resp.status_code == 200 else None
                 if resp.status_code != 200:
-                    print(f"⚠ Drive stahování chyba {resp.status_code}: {resp.text[:200]}")     
+                    print(f"⚠ Drive stahování chyba {resp.status_code}: {resp.text[:200]}")
+                    continue
+                content = resp.content
                 if not content:
                     print(f"⚠ Drive: prázdný obsah pro {f['name']}, přeskakuji")
                     continue
@@ -3647,8 +3592,10 @@ def _zpracuj_nove_faktury_z_drive():
                 fpath = os.path.join(UPLOAD_DIR, fname)
                 with open(fpath, "wb") as fh:
                     fh.write(content)
+                print(f"✓ Drive: soubor uložen jako {fname}")
                 gcs_url = upload_to_gcs(fpath, f"faktury/{fname}")
                 ocr_data = _ocr_faktura(fpath)
+                print(f"✓ Drive: OCR dokončeno pro {fname}")
                 with get_db() as conn:
                     conn.execute("""
                         INSERT INTO faktury (firma_zkratka, dodavatel, cislo_faktury,
@@ -3669,6 +3616,7 @@ def _zpracuj_nove_faktury_z_drive():
                     ))
                     fid = conn.execute("SELECT id FROM faktury WHERE soubor_cesta=? ORDER BY id DESC LIMIT 1", (fname,)).fetchone()
                     if fid:
+                        fid_val = fid["id"] if isinstance(fid, dict) else fid[0]
                         for p in ocr_data.get("polozky", []):
                             nazev = (p.get("nazev") or "").strip()
                             if not nazev: continue
@@ -3677,7 +3625,7 @@ def _zpracuj_nove_faktury_z_drive():
                                     cena_za_jednotku_s_dph, celkem_s_dph)
                                 VALUES (?,?,?,?,?,?)
                             """, (
-                                fid[0],
+                                fid_val,
                                 nazev,
                                 float(p.get("mnozstvi") or 1),
                                 p.get("jednotka") or "ks",
@@ -3690,9 +3638,13 @@ def _zpracuj_nove_faktury_z_drive():
                     )
                 print(f"✅ Drive auto: zpracována FA {fname}")
             except Exception as e:
+                import traceback
                 print(f"⚠ Drive auto error pro {f['name']}: {e}")
+                print(traceback.format_exc())
     except Exception as e:
+        import traceback
         print(f"⚠ Drive webhook error: {e}")
+        print(traceback.format_exc())
 
 def _ocr_faktura(fpath):
     """OCR faktury — vrátí dict s daty."""
@@ -3710,7 +3662,6 @@ def _ocr_faktura(fpath):
             mt = {"jpg":"image/jpeg","jpeg":"image/jpeg","png":"image/png"}.get(ext,"image/jpeg")
             block = {"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}}
         client = anthropic.Anthropic(api_key=api_key)
-        # Zjistit firmu z IČO
         ico_map = json.loads(os.environ.get("ICO_MAP_JSON", "{}"))
         msg = client.messages.create(
             model="claude-sonnet-4-20250514", max_tokens=2000,
@@ -3742,7 +3693,6 @@ Známá IČO firem: {json.dumps(ico_map)}"""
         text = msg.content[0].text.strip()
         text = re.sub(r"^```json\s*", "", text); text = re.sub(r"```$", "", text).strip()
         parsed = json.loads(text)
-        # Přiřadit firmu podle IČO
         ico_odb = parsed.get("ico_odberatele", "")
         firma = ico_map.get(str(ico_odb), "")
         parsed["firma_zkratka"] = firma
@@ -3752,6 +3702,7 @@ Známá IČO firem: {json.dumps(ico_map)}"""
         return {}
 
 
+@app.route("/api/zaloha-db")
 @vyzaduj_prihlaseni
 def api_zaloha_db():
     if session.get("role") != "admin":
@@ -3776,14 +3727,13 @@ def api_zaloha_db():
     except subprocess.TimeoutExpired:
         return jsonify({"error": "Záloha trvá příliš dlouho"}), 500
 
-    # Uložit do GCS (složka zalohy/)
     gcs_url = None
     try:
         bucket = get_gcs_client()
         if bucket:
             blob = bucket.blob(f"zalohy/{filename}")
             blob.upload_from_string(sql_data, content_type="application/sql")
-            gcs_url = f"gs://{_os.environ.get('GCS_BUCKET_NAME','')}/zalohy/{filename}"
+            gcs_url = f"gs://{os.environ.get('GCS_BUCKET_NAME','')}/zalohy/{filename}"
             print(f"✅ Záloha uložena do GCS: {gcs_url}")
     except Exception as e:
         print(f"⚠  GCS záloha error: {e}")
@@ -3811,8 +3761,6 @@ def api_smazat_vse_faktury():
 @app.route("/api/normalizuj-nazvy", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_normalizuj_nazvy():
-    """Odstraní prefixy ARO, MC, FL z nazev_canonical v tabulce zbozi.
-    Názvy položek na fakturách zůstanou nedotčeny."""
     import re as _re
     prefix_re = _re.compile(r'^(ARO|MC|FL)\s+', _re.IGNORECASE)
     with get_db() as conn:
@@ -3825,10 +3773,10 @@ def api_normalizuj_nazvy():
                 conn.execute("UPDATE zbozi SET nazev_canonical=? WHERE id=?", (novy, z["id"]))
                 opraveno += 1
     return jsonify({"ok": True, "opraveno": opraveno})
+
 @app.route("/api/oprav-duplicity", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_oprav_duplicity():
-    """Jednorázový endpoint – doplní duplicita_id zpětně pro existující duplicitní faktury."""
     try:
         with get_db() as conn:
             faktury = conn.execute(
@@ -3838,7 +3786,6 @@ def api_oprav_duplicity():
         opraveno = 0
         with get_db() as conn:
             for f in faktury:
-                # Hledáme starší fakturu se stejným VS + datum + částka
                 original = conn.execute(
                     """SELECT id FROM faktury
                        WHERE cislo_faktury = ? AND datum_vystaveni = ? AND celkem_s_dph = ?
