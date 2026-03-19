@@ -2502,6 +2502,8 @@ async function renderNastaveni() {
         </div>
         <button class="btn btn-primary" onclick="registrovatDriveWebhook()">🔗 Aktivovat sledování Drive složky</button>
         <span id="driveWebhookStatus" style="margin-left:.75rem;font-size:.9rem;color:var(--txt2)"></span>
+        <button class="btn btn-secondary" onclick="zkontrolovatDriveNyni()" style="margin-top:.5rem">🔄 Zkontrolovat Drive nyní</button>
+        <span id="driveCheckStatus" style="margin-left:.75rem;font-size:.9rem;color:var(--txt2)"></span>
       </div>
 
       <hr style="margin:1.5rem 0">
@@ -2633,6 +2635,17 @@ async function registrovatDriveWebhook() {
     if (res.error) { if (statusEl) statusEl.textContent = "❌ " + res.error; return; }
     const exp = res.expiration ? new Date(parseInt(res.expiration)).toLocaleDateString("cs-CZ") : "7 dní";
     if (statusEl) statusEl.textContent = `✅ Aktivováno (platí do ${exp})`;
+  } catch(e) {
+    if (statusEl) statusEl.textContent = "❌ " + e.message;
+  }
+}
+async function zkontrolovatDriveNyni() {
+  const statusEl = document.getElementById("driveCheckStatus");
+  if (statusEl) statusEl.textContent = "⏳ Kontroluji...";
+  try {
+    const res = await api("/api/drive-zkontrolovat", { method: "POST" });
+    if (res.error) { if (statusEl) statusEl.textContent = "❌ " + res.error; return; }
+    if (statusEl) statusEl.textContent = `✅ Hotovo – staženo ${res.stazeno} souborů`;
   } catch(e) {
     if (statusEl) statusEl.textContent = "❌ " + e.message;
   }
