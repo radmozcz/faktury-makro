@@ -3530,7 +3530,7 @@ def get_drive_service():
         from googleapiclient.discovery import build
         import google.auth.transport.requests
         creds_info = json.loads(creds_json)
-        scopes = ["https://www.googleapis.com/auth/drive.readonly"]
+        scopes = ["https://www.googleapis.com/auth/drive"]
         creds = service_account.Credentials.from_service_account_info(creds_info, scopes=scopes)
         creds.refresh(google.auth.transport.requests.Request())
         service = build("drive", "v3", credentials=creds)
@@ -3629,7 +3629,9 @@ def _zpracuj_nove_faktury_z_drive():
                 continue
             print(f"📥 Drive: stahuji {f['name']} ({f['id']})")
             try:
+                print(f"DEBUG_TOKEN: {creds.token[:20] if creds.token else 'PRAZDNY'}")
                 import requests as _req
+                creds.refresh(google.auth.transport.requests.Request())
                 headers = {"Authorization": f"Bearer {creds.token}"}
                 dl_url = f"https://www.googleapis.com/drive/v3/files/{f['id']}?alt=media"
                 resp = _req.get(dl_url, headers=headers, timeout=60)
