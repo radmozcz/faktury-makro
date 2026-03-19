@@ -3521,20 +3521,23 @@ DRIVE_FOLDER_ID = "1Oopnqi_IDwqWOKb--u9gGQ3ds1RwhjKh"
 DRIVE_CHANNEL_ID = "faktury-makro-channel-1"
 
 def get_drive_service():
-    """Vrátí Google Drive service pomocí service account credentials."""
+    """Vrátí Google Drive service a credentials pomocí service account."""
     creds_json = os.environ.get("GCS_CREDENTIALS_JSON", "")
     if not creds_json:
-        return None
+        return None, None
     try:
         from google.oauth2 import service_account
         from googleapiclient.discovery import build
+        import google.auth.transport.requests
         creds_info = json.loads(creds_json)
         scopes = ["https://www.googleapis.com/auth/drive.readonly"]
         creds = service_account.Credentials.from_service_account_info(creds_info, scopes=scopes)
-        return build("drive", "v3", credentials=creds)
+        creds.refresh(google.auth.transport.requests.Request())
+        service = build("drive", "v3", credentials=creds)
+        return service, creds
     except Exception as e:
         print(f"⚠ Drive service error: {e}")
-        return None
+        return None, None
 
 @app.route("/api/drive-registruj", methods=["POST"])
 @vyzaduj_prihlaseni
@@ -3545,7 +3548,7 @@ def api_drive_registruj():
     import uuid
     try:
         from googleapiclient.discovery import build
-        service = get_drive_service()
+        service, creds = get_drive_service()
         if not service:
             return jsonify({"error": "Drive service není dostupný"}), 500
         webhook_url = f"{os.environ.get('APP_URL', 'https://faktury-makro-git-904528626460.europe-west1.run.app')}/api/drive-webhook"
@@ -3598,7 +3601,7 @@ def _zpracuj_nove_faktury_z_drive():
     """Stáhne nové PDF ze složky faktury-nahrat a zpracuje OCR."""
     print("🔄 Drive: zahájeno zpracování")
     try:
-        service = get_drive_service()
+        service, creds = get_drive_service()
         if not service:
             print("⚠ Drive: service není dostupný")
             return
@@ -3626,15 +3629,13 @@ def _zpracuj_nove_faktury_z_drive():
                 continue
             print(f"📥 Drive: stahuji {f['name']} ({f['id']})")
             try:
-                import io as _io
-                from googleapiclient.http import MediaIoBaseDownload
-                buf = _io.BytesIO()
-                request_dl = service.files().get_media(fileId=f["id"])
-                downloader = MediaIoBaseDownload(buf, request_dl, chunksize=1024*1024)
-                done = False
-                while not done:
-                    status, done = downloader.next_chunk(num_retries=3)
-                content = buf.getvalue()  
+                import requests as _req
+                headers = {"Authorization": f"Bearer {creds.token}"}
+                dl_url = f"https://www.googleapis.com/drive/v3/files/{f['id']}?alt=media"
+                resp = _req.get(dl_url, headers=headers, timeout=60)
+                content = resp.content if resp.status_code == 200 else None
+                if resp.status_code != 200:
+                    print(f"⚠ Drive stahování chyba {resp.status_code}: {resp.text[:200]}")     
                 if not content:
                     print(f"⚠ Drive: prázdný obsah pro {f['name']}, přeskakuji")
                     continue
