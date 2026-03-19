@@ -3579,9 +3579,9 @@ def api_drive_registruj():
 @vyzaduj_prihlaseni
 def api_drive_zkontrolovat():
     """Ručně spustí stažení nových souborů z Google Drive."""
-        print("DRIVE_ZKONTROLOVAT_SPUSTENO")
-        _zpracuj_nove_faktury_z_drive()
-        return jsonify({"ok": True, "stazeno": "hotovo"})
+    print("DRIVE_ZKONTROLOVAT_SPUSTENO")
+    _zpracuj_nove_faktury_z_drive()
+    return jsonify({"ok": True, "stazeno": "hotovo"})
     
 @app.route("/api/drive-webhook", methods=["POST"])
 def api_drive_webhook():
