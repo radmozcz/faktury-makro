@@ -3599,6 +3599,7 @@ def api_drive_webhook():
 def _zpracuj_nove_faktury_z_drive():
     """Stáhne nové PDF ze složky faktury-nahrat a zpracuje OCR."""
     print("DRIVE_START")
+    print(f"DRIVE_FOLDER_ID={DRIVE_FOLDER_ID}")
     try:
         service, creds = get_drive_service()
         if not service:
