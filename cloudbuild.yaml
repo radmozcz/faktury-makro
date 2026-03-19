@@ -1,0 +1,17 @@
+steps:
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'europe-west1-docker.pkg.dev/provozovna-488511/cloud-run-source-deploy/faktury-makro:$COMMIT_SHA', '.']
+- name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'europe-west1-docker.pkg.dev/provozovna-488511/cloud-run-source-deploy/faktury-makro:$COMMIT_SHA']
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: gcloud
+  args:
+  - 'run'
+  - 'deploy'
+  - 'faktury-makro-git'
+  - '--image'
+  - 'europe-west1-docker.pkg.dev/provozovna-488511/cloud-run-source-deploy/faktury-makro:$COMMIT_SHA'
+  - '--region'
+  - 'europe-west1'
+images:
+- 'europe-west1-docker.pkg.dev/provozovna-488511/cloud-run-source-deploy/faktury-makro:$COMMIT_SHA'
