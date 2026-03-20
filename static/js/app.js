@@ -3215,7 +3215,7 @@ function reportFormHtml(r = {}) {
       <div class="grid-2" style="gap:.8rem">
         <div class="form-group">
           <label class="form-label">Datum *</label>
-          <input type="date" id="rfDatum" class="form-control" value="${dnes}">
+          <input type="date" id="rfDatum" class="form-control" value="${dnes}" onchange="rfDatumZmenaDne(this.value)">
         </div>
         <div class="form-group">
           <label class="form-label">Den</label>
@@ -3338,6 +3338,16 @@ function openNovyReport() {
   openModal("Nový denní report", reportFormHtml());
   setupReportDropzone();
   rfRecalc();
+}
+
+function rfDatumZmenaDne(val) {
+  const dny = ["pondělí","úterý","středa","čtvrtek","pátek","sobota","neděle"];
+  const el = document.getElementById("rfDen");
+  if (!el || !val) return;
+  try {
+    const d = new Date(val);
+    el.value = dny[d.getDay() === 0 ? 6 : d.getDay() - 1];
+  } catch {}
 }
 
 async function editReport(id) {
