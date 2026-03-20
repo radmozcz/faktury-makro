@@ -1220,7 +1220,7 @@ def parse_report_image_claude(filepath):
 
         _t = date.today()
         today = f"{_t.day}.{_t.month}"
-        prompt = f"""Jsi expert na čtení ručně psaných restauračních reportů. Přečti tento denní report VELMI PEČLIVĚ.
+        prompt = f"""Jsi expert na čtení ručně psaných restauračních reportů z bistra.
 Odpověz POUZE platným JSON objektem, žádný jiný text, žádné backticky.
 
 Formát odpovědi:
@@ -1241,38 +1241,52 @@ Formát odpovědi:
   "burtgulas": celé číslo nebo 0
 }}
 
-PRAVIDLA PRO ČÍSLA:
-- Tečka nebo čárka UVNITŘ čísla = VŽDY oddělovač tisíců, NIKDY desetinná čárka
-- Příklady: 6.888 = 6888, 6.600 = 6600, 13.541 = 13541, 5.100 = 5100
-- Čísla zapisuj jako celá čísla bez teček a čárek
-- Pomlčka nebo lomítko za číslem (6.888,- nebo 6.888/) = ignoruj, je to jen styl zápisu
-- Číslo před "x" nebo "X" = počet kusů (6x = 6, 5X = 5) — "x" NENÍ číslice!
-- PK zápis: "6x/600" nebo "6x 100" znamená 6 kusů poukazek — zapiš jako pk50_ks nebo pk100_ks podle hodnoty
-- POZOR na záměnu číslic: "5" a "3" jsou si podobné při ručním psaní — čti kontext (53 je reálná hodnota KOV)
-- Pokud číslo vypadá jako "33" ale kontext říká KOV nebo KARTY → přečti znovu, může být "53" nebo "83"
-- BURGER: hledej slovo BURGER nebo BURGR na reportu a číslo za ním nebo před ním — nezapisuj 0 pokud tam číslo je
+=== DATUM ===
+- Hledej nahoře na lístku formát "D.M" nebo "D/M" — jen den a měsíc, bez roku
+- Příklad: "19.3" → "19.3", "5/2" → "5.2"
+- Neplést s jinými čísly na lístku (karty, tržba...)
+- Pokud datum není, vrať dnešní: "{today}"
 
-PRAVIDLA PRO JMÉNA (SMĚNA):
-- Jména jsou oddělena čárkou nebo mezerou
-- Ráďa, Rádá, Rada, Rado, Radi → "Ráďa"
-- Věrka, Verka, Věra, Vera → "Věrka" — POUZE pokud jméno začíná VĚ nebo VE a druhé písmeno je E nebo Ě
-- Renča, Renata, Renca → "Renča"
-- Vendy, Wendy, Vendi, Vendu, Vendy → "Vendy" — jméno začíná VEN nebo WEN
+=== ČÍSLA — OBECNĚ ===
+- Tečka nebo čárka uvnitř čísla = oddělovač tisíců: 9.582 = 9582, 4.900 = 4900
+- Pomlčka nebo lomítko za číslem (9.582,-) = ignoruj
+- Výsledek rovnice: "14.521 + 5 = 14.636" → ber číslo ZA "=" = 14636
+
+=== KARTY, KOV, PAPÍR, VÝDAJE ===
+- KARTY = platby kartou (větší číslo, typicky tisíce)
+- KOV = drobné mince (malé číslo, desítky až stovky)
+- PAPÍR = papírové bankovky (stovky až tisíce)
+- VÝDAJE = hotovost vydaná na nákupy — typicky prázdné nebo malé číslo
+- TRŽBA = karty + kov + papír — NEpatří do vydaje!
+- Pokud vidíš rovnici u TRŽBA → dej výsledek (číslo za "=") do tržby, NE do vydaje
+
+=== POUKAZKY (PK) — VELMI DŮLEŽITÉ ===
+- Hledej na lístku "PK" nebo "POUKAZ" nebo "POUKAZKA"
+- Formát "6x 100 = 600" nebo "6x/100" nebo "6x100" → pk100_ks = 6
+- Formát "3x 50 = 150" nebo "3x/50" nebo "3x50" → pk50_ks = 3
+- Číslo před "x" = počet kusů, číslo za "x" = hodnota (50 nebo 100 Kč)
+- NIKDY nezapisuj 0 pokud PK na lístku je!
+
+=== PIZZA — VELMI DŮLEŽITÉ ===
+- Hledej sekci PIZZA na lístku
+- CELÁ / CELÉ / C: → pizza_cela (číslo hned za tím, "2x" = 2)
+- ČTVRT / ČTVRŤ / 1/4 / Č: → pizza_ctvrt (číslo hned za tím, "8x" = 8)
+- NIKDY nezapisuj 0 pokud pizza na lístku je!
+
+=== BURGER, BUŘTGULÁŠ, TALÍŘE — VELMI DŮLEŽITÉ ===
+- BURGER / BURGR → burger (číslo za nebo před slovem)
+- BURTGULÁŠ / BURTGULAS / BURGULÁŠ / BUŘTGULÁŠ → burtgulas
+- TALÍŘ / TALIRE / POČET TALÍŘŮ / TAL: → talire
+- Formát "7x" nebo "7 X" nebo jen "7" za názvem = 7 kusů
+- NIKDY nezapisuj 0 pokud číslo na lístku je!
+
+=== JMÉNA (SMĚNA) ===
+- Ráďa, Rádá, Rada → "Ráďa"
+- Věrka, Věra, Verka → "Věrka" (začíná VĚ nebo VER, NE VEN!)
+- Vendy, Wendy, Vendi → "Vendy" (začíná VEN nebo WEN)
 - Vali, Valy → "Vali"
-- KRITICKÉ: "VENDY" a "Věrka" jsou RŮZNÉ osoby! Pokud vidíš VEN → VENDY. Pokud vidíš VĚR nebo VER → Věrka.
-- Na směně mohou být najednou: Ráďa, Vendy, Vali, Věrka, Renča — přečti KAŽDÉ jméno samostatně
-
-PRAVIDLA PRO DATUM:
-- Hledej datum ve formátu "D.M" nebo "D/M" nahoře na lístku
-- Pokud chybí, vrať dnešní datum: "{today}"
-
-PRAVIDLA PRO PIZZU A BURGERY:
-- "CELÁ" nebo "CELÉ" u pizzy = pizza_cela
-- "ČTVRT" nebo "1/4" u pizzy = pizza_ctvrt  
-- Číslo za názvem s "x" = počet kusů (5x = 5)
-- BURTGULÁŠ, BURTGULAS, BURGULÁŠ → burtgulas
-- BURGER, BURGR → burger
-- TALÍŘ, TALIRE, POČET TALÍŘŮ → talire
+- Renča, Renata, Renca → "Renča"
+- KRITICKÉ: VEN = Vendy, VĚR/VER = Věrka — jsou to RŮZNÉ osoby!
 """
 
         message = client.messages.create(
@@ -1380,7 +1394,7 @@ def build_report_from_parsed(parsed, year=None):
     papir   = float(parsed.get("papir", 0) or 0)
     vydaje  = float(parsed.get("vydaje", 0) or 0)
     hotovost = kov + papir
-    trzba    = karty + hotovost + vydaje
+    trzba    = karty + hotovost
 
     pk50_ks  = int(parsed.get("pk50_ks", 0) or 0)
     pk100_ks = int(parsed.get("pk100_ks", 0) or 0)
