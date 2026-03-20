@@ -3621,15 +3621,15 @@ def _zpracuj_nove_faktury_z_drive():
                 with get_db() as conn:
                     # Kontrola duplicity podle čísla faktury - jen označíme, nesmažeme
                     cislo = ocr_data.get("cislo_faktury", "")
-                    je_duplicita = False
+                    duplicita_id = None
                     if cislo:
                         dup = conn.execute(
-                            "SELECT id FROM faktury WHERE cislo_faktury=? AND dodavatel LIKE ?",
+                            "SELECT id FROM faktury WHERE cislo_faktury=? AND dodavatel LIKE ? AND (duplicita_id IS NULL OR duplicita_id=0)",
                             (cislo, "%MAKRO%")
                         ).fetchone()
                         if dup:
-                            je_duplicita = True
-                            print(f"⚠ Drive: duplicita č. {cislo}, ukládám s příznakem")
+                            duplicita_id = dup["id"] if isinstance(dup, dict) else dup[0]
+                            print(f"⚠ Drive: duplicita č. {cislo}, ukládám s příznakem duplicita_id={duplicita_id}")
                     conn.execute("""
                         INSERT INTO faktury (firma_zkratka, dodavatel, cislo_faktury,
                             datum_vystaveni, datum_splatnosti, celkem_s_dph,
@@ -3647,8 +3647,11 @@ def _zpracuj_nove_faktury_z_drive():
                         gcs_url or "",
                         "drive_auto"
                     ))
-                    if je_duplicita:
-                        conn.execute("UPDATE faktury SET stav='duplicita' WHERE soubor_cesta=?", (fname,))
+                    if duplicita_id:
+                        try:
+                            conn.execute("UPDATE faktury SET duplicita_id=? WHERE soubor_cesta=?", (duplicita_id, fname))
+                        except Exception:
+                            pass
                     fid = conn.execute("SELECT id FROM faktury WHERE soubor_cesta=? ORDER BY id DESC LIMIT 1", (fname,)).fetchone()
                     if fid:
                         fid_val = fid["id"] if isinstance(fid, dict) else fid[0]
