@@ -1919,16 +1919,19 @@ async function loadVyplatyKarty() {
     const z = zam[jmeno];
     const odv = sumOdvody(jmeno);
     const celkemVcOdvody = z.celkem_mesic + odv;
+    const rokVcOdvodu = z.celkem_rok + odv * 12;
     return `<tr style="cursor:pointer" onclick="renderZamestnanecDetail('${escHtml(jmeno)}')">
       <td><strong>${escHtml(jmeno)}</strong></td>
       <td style="text-align:center;font-size:.85rem">
         ${z.posledni?.datum ? czDate(z.posledni.datum) : "—"}
         ${z.posledni?.castka ? `<br><span style="color:var(--txt2);font-size:.78rem">${czInt(z.posledni.castka)}</span>` : ""}
       </td>
+      <td style="text-align:right">${czInt(z.celkem_mesic)}</td>
       <td style="text-align:right"><strong>${czInt(z.celkem_mesic)}</strong></td>
-      <td style="text-align:right;color:var(--txt2);font-size:.85rem">${odv > 0 ? czInt(odv) : '—'}</td>
+      <td style="text-align:right;color:var(--txt2)">${odv > 0 ? czInt(odv) : '—'}</td>
       <td style="text-align:right;font-weight:600">${czInt(celkemVcOdvody)}</td>
       <td style="text-align:right">${czInt(z.celkem_rok)}</td>
+      <td style="text-align:right;font-weight:600">${czInt(rokVcOdvodu)}</td>
       <td onclick="event.stopPropagation()">
         <button class="btn btn-primary btn-sm" style="font-size:.75rem"
           onclick="openNovVyplata('${escHtml(jmeno)}')">+ Výplata</button>
@@ -1944,9 +1947,11 @@ async function loadVyplatyKarty() {
           <th>Zaměstnanec</th>
           <th style="text-align:center">Poslední výplata</th>
           <th style="text-align:right">Tento měsíc</th>
+          <th style="text-align:right">Celkem</th>
           <th style="text-align:right">Odvody</th>
           <th style="text-align:right">Celkem vč. odvodů</th>
-          <th style="text-align:right">Rok ${zvolenyRok}</th>
+          <th style="text-align:right">Rok bez odvodů</th>
+          <th style="text-align:right">Rok vč. odvodů</th>
           <th></th>
         </tr></thead>
         <tbody>${rows}</tbody>
@@ -2186,28 +2191,56 @@ async function openPausalni(jmeno) {
   let odvody = [];
   try { odvody = await api(`/api/pausalni-odvody/${encodeURIComponent(jmeno)}`); } catch {}
 
+  // Předvyplnit standardní položky pokud jsou prázdné
+  const STANDARD = ["VZP", "PSSZ", "Daň", "Insolvence", "Pojistka"];
+  if (!odvody.length) {
+    odvody = STANDARD.map(n => ({nazev: n, castka: 0}));
+  } else {
+    // Přidat chybějící standardní položky
+    STANDARD.forEach(n => {
+      if (!odvody.find(o => o.nazev === n))
+        odvody.push({nazev: n, castka: 0});
+    });
+  }
+
   const renderRadky = (seznam) => seznam.map((o, i) => `
     <tr>
-      <td><input class="form-control po-nazev" data-i="${i}" value="${escHtml(o.nazev)}" placeholder="Název (VZP, PSSZ...)" style="min-width:120px"></td>
-      <td><input type="number" class="form-control po-castka" data-i="${i}" value="${o.castka}" style="max-width:110px"></td>
-      <td><button class="btn btn-sm" style="background:#fee2e2;color:#991b1b" onclick="removePausalniRadek(${i})">✕</button></td>
+      <td style="font-size:.88rem;padding:.3rem .4rem"><strong>${escHtml(o.nazev)}</strong></td>
+      <td><input type="number" class="form-control po-castka" data-nazev="${escHtml(o.nazev)}" data-i="${i}" value="${o.castka}" style="max-width:120px;text-align:right"></td>
     </tr>`).join("");
+
+  const celkem = odvody.reduce((s,o) => s+(o.castka||0), 0);
 
   openModal(`Paušální odvody — ${escHtml(jmeno)}`, `
     <p style="color:var(--txt2);font-size:.85rem;margin-bottom:1rem">
-      Pevné měsíční platby (VZP, PSSZ, exekuce, daň...). Zobrazují se jako "Náklady" v přehledu.
+      Pevné měsíční srážky a platby. Připočítávají se k výplatě jako náklady firmy.
     </p>
-    <table id="pausalniTable" style="width:100%;margin-bottom:.5rem">
-      <thead><tr><th>Název</th><th>Částka / měsíc (Kč)</th><th></th></tr></thead>
+    <table style="width:100%;margin-bottom:.5rem">
+      <thead><tr><th>Položka</th><th style="text-align:right">Kč / měsíc</th></tr></thead>
       <tbody id="pausalniBody">${renderRadky(odvody)}</tbody>
+      <tfoot><tr style="border-top:2px solid var(--border)">
+        <td style="font-weight:700;padding:.4rem">Celkem odvody</td>
+        <td style="text-align:right;font-weight:700;padding:.4rem" id="pausalniCelkem">${czInt(celkem)} Kč</td>
+      </tr></tfoot>
     </table>
-    <button class="btn btn-secondary btn-sm" onclick="addPausalniRadek()">+ Přidat řádek</button>
+    <button class="btn btn-secondary btn-sm" onclick="addPausalniRadek()">+ Další položka</button>
     <hr style="margin:1rem 0">
     <button class="btn btn-primary" onclick="ulozitPausalni('${escHtml(jmeno)}')">💾 Uložit odvody</button>
   `);
-  // Ulož aktuální seznam do dočasné proměnné
   window._pausalniData = odvody.map(o => ({...o}));
   window._pausalniJmeno = jmeno;
+
+  // Live součet
+  setTimeout(() => {
+    document.querySelectorAll(".po-castka").forEach(inp => {
+      inp.addEventListener("input", () => {
+        const total = [...document.querySelectorAll(".po-castka")]
+          .reduce((s,el) => s+(parseFloat(el.value)||0), 0);
+        const cel = document.getElementById("pausalniCelkem");
+        if (cel) cel.textContent = czInt(total) + " Kč";
+      });
+    });
+  }, 100);
 }
 
 function addPausalniRadek() {
@@ -2234,9 +2267,9 @@ async function ulozitPausalni(jmeno) {
   const nazvy   = document.querySelectorAll(".po-nazev");
   const castky  = document.querySelectorAll(".po-castka");
   const seznam  = [];
-  nazvy.forEach((el, i) => {
-    const nazev  = el.value.trim();
-    const castka = parseFloat(castky[i]?.value || 0) || 0;
+  castky.forEach((el) => {
+    const nazev  = el.getAttribute("data-nazev") || "";
+    const castka = parseFloat(el.value || 0) || 0;
     if (nazev) seznam.push({nazev, castka});
   });
   await api(`/api/pausalni-odvody/${encodeURIComponent(jmeno)}`, {
