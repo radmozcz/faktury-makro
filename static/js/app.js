@@ -2383,12 +2383,12 @@ async function renderStatistiky() {
     <div class="page-header"><h1 class="page-title">Statistiky</h1></div>
     <div class="filters" style="margin-bottom:1rem">
       <label>Firma:</label>
-      <select id="sFirma" class="firma-select">
+      <select id="sFirma" class="firma-select" onchange="loadPrehledStatistik();loadMesicniStatistiky()">
         <option value="">Všechny</option>
         ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
       </select>
       <label>Rok:</label>
-      <select id="sRok" onchange="aplikujRokFiltr('sRok','sOd','sDo',loadStatistiky)">
+      <select id="sRok" onchange="aplikujRokFiltr('sRok','sOd','sDo',loadStatistiky);loadPrehledStatistik()">
         ${rokOptions("")}
       </select>
       <label>Od:</label><input type="date" id="sOd" value="${odStr}">
@@ -2396,9 +2396,11 @@ async function renderStatistiky() {
       <button class="btn btn-primary btn-sm" onclick="loadStatistiky()">Zobrazit</button>
     </div>
     <div id="statContent"><div class="loading-center"><span class="spinner"></span></div></div>
+    <div id="statPrehled" style="margin-top:1.5rem"></div>
     <div id="statReporty" style="margin-top:1.5rem"></div>`;
 
   loadStatistiky();
+  loadPrehledStatistik();
   loadMesicniStatistiky();
 }
 
@@ -2860,6 +2862,61 @@ async function saveConfig() {
 // ═══════════════════════════════════════════════════════════════
 //  Util
 // ═══════════════════════════════════════════════════════════════
+async function loadPrehledStatistik() {
+  const rok   = document.getElementById("sRok")?.value || new Date().getFullYear();
+  const firma = document.getElementById("sFirma")?.value || "";
+  const el = document.getElementById("statPrehled");
+  if (!el) return;
+  el.innerHTML = `<div class="loading-center"><span class="spinner"></span></div>`;
+  let data;
+  try { data = await api(`/api/statistiky/prehled?rok=${rok}&firma=${encodeURIComponent(firma)}`); } catch { return; }
+
+  const MCZ = ["","Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
+  const sum = {karty:0, hotovost:0, trzba:0, naklady:0, poukazky:0};
+
+  const rows = data.map(d => {
+    const mInt = parseInt(d.mesic);
+    const mame = d.trzba > 0 || d.karty > 0 || d.hotovost > 0;
+    sum.karty     += d.karty     || 0;
+    sum.hotovost  += d.hotovost  || 0;
+    sum.trzba     += d.trzba     || 0;
+    sum.naklady   += d.naklady   || 0;
+    sum.poukazky  += d.poukazky  || 0;
+    return `<tr style="${mame ? '' : 'color:var(--txt2)'}">
+      <td><strong>${MCZ[mInt]}</strong></td>
+      <td style="text-align:right">${mame ? czInt(d.karty||0) : '—'}</td>
+      <td style="text-align:right">${mame ? czInt(d.hotovost||0) : '—'}</td>
+      <td style="text-align:right">${mame ? '<strong>'+czInt(d.trzba||0)+'</strong>' : '—'}</td>
+      <td style="text-align:right">${mame ? czInt(d.naklady||0) : '—'}</td>
+      <td style="text-align:right">${mame ? czInt(d.poukazky||0) : '—'}</td>
+    </tr>`;
+  }).join("");
+
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title">📋 Měsíční přehled – ${rok} ${firma ? '· '+firma : ''}</div>
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Měsíc</th>
+          <th style="text-align:right">Karty</th>
+          <th style="text-align:right">Hotovost</th>
+          <th style="text-align:right">Tržba</th>
+          <th style="text-align:right">Náklady</th>
+          <th style="text-align:right">Poukazky</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+        <tfoot><tr style="border-top:2px solid var(--border);font-weight:600">
+          <td>Celkem</td>
+          <td style="text-align:right">${czInt(sum.karty)}</td>
+          <td style="text-align:right">${czInt(sum.hotovost)}</td>
+          <td style="text-align:right"><strong>${czInt(sum.trzba)}</strong></td>
+          <td style="text-align:right">${czInt(sum.naklady)}</td>
+          <td style="text-align:right">${czInt(sum.poukazky)}</td>
+        </tr></tfoot>
+      </table></div>
+    </div>`;
+}
+
 async function loadMesicniStatistiky() {
   const firma = document.getElementById("sFirma")?.value || "";
   let mesice, roky;

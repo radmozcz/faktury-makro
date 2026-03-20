@@ -2954,6 +2954,62 @@ def api_statistiky_roky():
     return jsonify([dict(r) for r in rows])
 
 
+@app.route("/api/statistiky/prehled")
+@vyzaduj_prihlaseni
+def api_statistiky_prehled():
+    import datetime as _dt
+    rok  = request.args.get("rok", str(_dt.date.today().year))
+    firma = request.args.get("firma", "")
+    od = f"{rok}-01-01"
+    do = f"{rok}-12-31"
+    fw = "AND r.firma_zkratka=?" if firma else ""
+    fp = [firma] if firma else []
+    with get_db() as conn:
+        # Tržby + karty + hotovost + výdaje + poukazky z reportů
+        rows_r = conn.execute(f"""
+            SELECT
+                TO_CHAR(NULLIF(datum,'')::date, 'MM') as mesic,
+                ROUND(SUM(karty)::numeric,0)      as karty,
+                ROUND(SUM(hotovost)::numeric,0)   as hotovost,
+                ROUND(SUM(trzba_vcpk)::numeric,0) as trzba,
+                ROUND(SUM(vydaje)::numeric,0)     as vydaje_rep,
+                ROUND(SUM(pk_celkem)::numeric,0)  as poukazky
+            FROM reporty r
+            WHERE datum >= ? AND datum <= ? {fw}
+            GROUP BY mesic ORDER BY mesic
+        """, [od, do] + fp).fetchall()
+        # Náklady z faktur
+        rows_f = conn.execute(f"""
+            SELECT
+                TO_CHAR(NULLIF(datum_vystaveni,'')::date, 'MM') as mesic,
+                ROUND(SUM(celkem_s_dph)::numeric,0) as faktury
+            FROM faktury
+            WHERE datum_vystaveni >= ? AND datum_vystaveni <= ?
+            {"AND firma_zkratka=?" if firma else ""}
+            GROUP BY mesic ORDER BY mesic
+        """, [od, do] + fp).fetchall()
+    # Sloučit do dict mesic→data
+    data = {}
+    for m in range(1, 13):
+        data[f"{m:02d}"] = {"karty":0,"hotovost":0,"trzba":0,"vydaje_rep":0,"poukazky":0,"faktury":0}
+    for r in rows_r:
+        m = r["mesic"] if isinstance(r, dict) else r[0]
+        d = dict(r) if isinstance(r, dict) else {"mesic":r[0],"karty":r[1],"hotovost":r[2],"trzba":r[3],"vydaje_rep":r[4],"poukazky":r[5]}
+        if m in data:
+            data[m].update({k: float(v or 0) for k,v in d.items() if k != "mesic"})
+    for r in rows_f:
+        m = r["mesic"] if isinstance(r, dict) else r[0]
+        v = float((r["faktury"] if isinstance(r, dict) else r[1]) or 0)
+        if m in data:
+            data[m]["faktury"] = v
+    result = []
+    for m, d in data.items():
+        d["mesic"] = m
+        d["naklady"] = d["vydaje_rep"] + d["faktury"]
+        result.append(d)
+    return jsonify(result)
+
+
 @app.route("/api/export/reporty")
 @vyzaduj_prihlaseni
 def export_reporty():
