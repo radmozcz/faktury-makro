@@ -2934,31 +2934,49 @@ function renderKartaStatHtml(stats) {
     const mColor = mPct >= 100 ? "#ef4444" : mPct >= 80 ? "#f59e0b" : "#16a34a";
     const rColor = rPct >= 100 ? "#ef4444" : rPct >= 75 ? "#f59e0b" : "#16a34a";
     const od = d.terminal_od ? new Date(d.terminal_od).toLocaleDateString("cs-CZ") : "—";
+    const borderStyle = d.aktivni ? '3px solid #16a34a' : '1px solid var(--border)';
+    const bgStyle = d.aktivni ? 'background:linear-gradient(135deg,var(--card-bg) 85%,#dcfce7)' : 'background:var(--card-bg)';
     return `
-      <div style="background:var(--card-bg);border:${d.aktivni ? '2px solid #16a34a' : '1px solid var(--border)'};border-radius:10px;padding:1rem;flex:1;min-width:200px">
-        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.6rem">
-          <span style="font-weight:700;font-size:1.1rem;font-family:var(--font-head)">${escHtml(firma)}</span>
-          ${d.aktivni ? '<span style="background:#16a34a;color:#fff;font-size:.7rem;padding:.1rem .5rem;border-radius:99px;font-weight:600">● aktivní</span>' : ''}
+      <div style="${bgStyle};border:${borderStyle};border-radius:10px;padding:1rem;flex:1;min-width:220px;position:relative">
+        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem">
+          <span style="font-weight:700;font-size:1.15rem;font-family:var(--font-head)">${escHtml(firma)}</span>
+          ${d.aktivni
+            ? '<span style="background:#16a34a;color:#fff;font-size:.7rem;padding:.15rem .6rem;border-radius:99px;font-weight:700">● KASÍRUJE</span>'
+            : '<span style="background:#9ca3af;color:#fff;font-size:.7rem;padding:.15rem .6rem;border-radius:99px;font-weight:600">○ neaktivní</span>'}
         </div>
-        <div style="font-size:.8rem;color:var(--txt2);margin-bottom:.3rem">💳 Terminál od ${od}</div>
+        <div style="font-size:.78rem;color:var(--txt2);margin-bottom:.6rem">terminál od ${od}</div>
+
         <div style="display:flex;justify-content:space-between;font-size:.88rem;margin-bottom:.2rem">
-          <span>Měsíční karty</span>
+          <span>💳 Karty od přepnutí</span>
           <strong style="color:${mColor}">${czInt(d.mesicni)} / ${czInt(d.terminal_limit)} Kč</strong>
         </div>
         <div style="background:#e5e7eb;border-radius:4px;height:8px;margin-bottom:.7rem">
           <div style="background:${mColor};height:8px;border-radius:4px;width:${mPct}%;transition:.3s"></div>
         </div>
+
+        <div style="display:flex;justify-content:space-between;font-size:.88rem;margin-bottom:.6rem;padding:.35rem .5rem;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
+          <span style="color:var(--txt2)">💰 Tržba celkem</span>
+          <strong>${czInt(d.trzba_od)} Kč</strong>
+        </div>
+
         <div style="display:flex;justify-content:space-between;font-size:.88rem;margin-bottom:.2rem">
-          <span>DPH rok ${new Date().getFullYear()}</span>
+          <span>📊 DPH rok ${new Date().getFullYear()}</span>
           <strong style="color:${rColor}">${czInt(d.rocni)} / ${czInt(d.dph_limit)} Kč</strong>
         </div>
-        <div style="background:#e5e7eb;border-radius:4px;height:8px">
+        <div style="background:#e5e7eb;border-radius:4px;height:8px;margin-bottom:.6rem">
           <div style="background:${rColor};height:8px;border-radius:4px;width:${rPct}%;transition:.3s"></div>
         </div>
-        ${mPct >= 90 ? '<div style="margin-top:.5rem;font-size:.8rem;color:#b45309;font-weight:600">⚠️ Blíží se limit terminálu!</div>' : ''}
-        ${mPct >= 100 ? '<div style="margin-top:.5rem;font-size:.8rem;color:#991b1b;font-weight:700">🚨 Limit terminálu překročen! Přepni firmu.</div>' : ''}
-        ${rPct >= 90 ? '<div style="margin-top:.3rem;font-size:.8rem;color:#b45309;font-weight:600">⚠️ Blíží se DPH limit!</div>' : ''}
-        <button class="btn btn-secondary btn-sm" style="margin-top:.7rem;font-size:.75rem" onclick="prepnoutTerminal('${firma}')">🔄 Přepnout — nulovat měsíční</button>
+
+        ${mPct >= 100 ? '<div style="font-size:.8rem;color:#991b1b;font-weight:700;margin-bottom:.3rem">🚨 Limit terminálu překročen!</div>' : mPct >= 90 ? '<div style="font-size:.8rem;color:#b45309;font-weight:600;margin-bottom:.3rem">⚠️ Blíží se limit terminálu</div>' : ''}
+        ${rPct >= 90 ? '<div style="font-size:.8rem;color:#b45309;font-weight:600;margin-bottom:.3rem">⚠️ Blíží se DPH limit</div>' : ''}
+
+        <button onclick="prepnoutTerminal('${firma}')"
+          style="margin-top:.3rem;width:100%;padding:.45rem;border-radius:7px;border:none;cursor:pointer;font-size:.82rem;font-weight:600;
+                 ${d.aktivni
+                   ? 'background:#fee2e2;color:#991b1b'
+                   : 'background:#16a34a;color:#fff'}">
+          ${d.aktivni ? '🔄 Přepnout na jinou firmu' : '▶ Aktivovat tento terminál'}
+        </button>
       </div>`;
   };
   return `<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">${firmy.map(f => card(f, stats[f])).join("")}</div>`;

@@ -1553,10 +1553,18 @@ def api_karty_stats():
             """, (firma, od)).fetchone()
             mesicni = float((row2 or {}).get("total", 0))
 
+            row3 = conn.execute("""
+                SELECT COALESCE(SUM(hotovost+karty),0) as total
+                FROM reporty
+                WHERE firma_zkratka=? AND datum>=?
+            """, (firma, od)).fetchone()
+            trzba_od = float((row3 or {}).get("total", 0))
+
             aktivni = cfg.get("terminal_aktivni", {}).get(firma, False)
             result[firma] = {
                 "rocni": rocni,
                 "mesicni": mesicni,
+                "trzba_od": trzba_od,
                 "terminal_od": od,
                 "terminal_limit": terminal_limit,
                 "dph_limit": dph_limit,
