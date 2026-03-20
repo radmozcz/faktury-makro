@@ -880,8 +880,7 @@ function renderNahrat() {
       <h1 class="page-title">Nahrát fakturu (MAKRO)</h1>
       <button class="btn btn-secondary btn-sm" onclick="zkontrolovatDriveNyni()">☁️ Zkontrolovat Drive nyní</button>
     </div>
-    <div id="driveCheckStatus" style="margin-bottom:.5rem;font-
-  size:.9rem;color:var(--txt2)"></div>    
+    <div id="driveCheckStatus" style="margin-bottom:.5rem;font-size:.9rem;color:var(--txt2)"></div>
     <div class="card" style="max-width:900px">
       <div class="form-group">
         <label class="form-label">Firma</label>
