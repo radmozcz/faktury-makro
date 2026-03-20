@@ -2944,8 +2944,7 @@ def api_statistiky_roky():
             SELECT
                 strftime('%Y', datum) as rok,
                 strftime('%m', datum) as mesic,
-                ROUND((AVG(trzba_vcpk))::numeric,0) as prumer_den,
-                firma_zkratka
+                ROUND((AVG(trzba_vcpk))::numeric,0) as prumer_den
             FROM reporty
             WHERE datum <= ? AND trzba_vcpk > 0
             GROUP BY rok, mesic
