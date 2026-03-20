@@ -1280,10 +1280,12 @@ Formát odpovědi:
 
 === BURGER, BUŘTGULÁŠ, TALÍŘE — VELMI DŮLEŽITÉ ===
 - BURGER / BURGR → burger (číslo za nebo před slovem)
+- KRITICKÉ: "1" u burgeru bývá čtena jako "0" nebo přeskočena — pokud vidíš jakékoliv číslo u BURGER, zapiš ho!
+- Zápis "1" nebo "1x" nebo ": 1" u burgeru = burger 1, NIKDY 0
 - BURTGULÁŠ / BURTGULAS / BURGULÁŠ / BUŘTGULÁŠ / BURTGULÁS → burtgulas
-- Formát "7x" = 7 kusů — KRITICKÉ: číslovka "7" bývá čtena jako "2" při ručním psaní! Pokud vidíš "2x" u buřtguláše, zkontroluj znovu — může to být "7x"
+- KRITICKÉ: "7" bývá čtena jako "2" — pokud vidíš "2x" u buřtguláše, zkontroluj znovu
 - TALÍŘ / TALIRE / POČET TALÍŘŮ / TAL: → talire
-- NIKDY nezapisuj 0 pokud číslo na lístku je!
+- NIKDY nezapisuj 0 pokud číslo na lístku je — i "1" je číslo!
 
 === JMÉNA (SMĚNA) ===
 Na směně pracují POUZE tyto osoby — žádná jiná jména neexistují:
