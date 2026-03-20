@@ -2911,7 +2911,7 @@ async function odeslitAiDotaz() {
     document.getElementById("aiCekani")?.remove();
 
     if (resp.chyba) {
-      hist.innerHTML += `<div style="align-self:flex-start;color:#ef4444;font-size:.85rem">❌ ${escHtml(resp.chyba)}</div>`;
+      hist.innerHTML += `<div style="align-self:flex-start;color:#ef4444;font-size:.88rem;padding:.4rem .75rem;border:1px solid #fca5a5;border-radius:6px;background:#fef2f2">❌ ${escHtml(resp.chyba)}</div>`;
     } else {
       // Export CSV?
       let exportBtn = "";
@@ -2926,7 +2926,7 @@ async function odeslitAiDotaz() {
     }
   } catch(e) {
     document.getElementById("aiCekani")?.remove();
-    hist.innerHTML += `<div style="color:#ef4444;font-size:.85rem">❌ Chyba spojení</div>`;
+    hist.innerHTML += `<div style="color:#ef4444;font-size:.85rem">❌ Chyba: ${escHtml(e.message||String(e))}</div>`;
   }
   btn.disabled = false;
   input.focus();

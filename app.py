@@ -3530,12 +3530,12 @@ def api_statistiky():
 
         zbozi_top = conn.execute(f"""
             SELECT COALESCE(z.nazev_canonical, p.nazev) zbozi, ROUND((SUM(p.celkem_s_dph))::numeric,2) castka,
-                   ROUND((SUM(p.mnozstvi))::numeric,2) mnozstvi, p.jednotka
+                   ROUND((SUM(p.mnozstvi))::numeric,2) mnozstvi, MAX(p.jednotka) jednotka
             FROM polozky p
             JOIN faktury f ON f.id=p.faktura_id
             LEFT JOIN zbozi z ON z.id=p.zbozi_id
             WHERE f.datum_vystaveni>=? AND f.datum_vystaveni<=? {f_cond}
-            GROUP BY COALESCE(z.id::text, p.nazev) ORDER BY castka DESC LIMIT 20
+            GROUP BY COALESCE(z.nazev_canonical, p.nazev) ORDER BY castka DESC LIMIT 20
         """, (od, do_) + f_params).fetchall()
 
         zbozi_id = request.args.get("zbozi_id")
