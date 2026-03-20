@@ -1699,15 +1699,27 @@ def api_faktura_stav(fid):
     return jsonify({"ok": True})
 
 @app.route("/api/faktury/<int:fid>", methods=["DELETE"])
-@vyzaduj_prihlaseni
 def api_faktura_delete(fid):
+    reset_drive = request.args.get("reset_drive", "0") == "1"
     with get_db() as conn:
-        row = conn.execute("SELECT soubor_cesta FROM faktury WHERE id=?", (fid,)).fetchone()
+        row = conn.execute("SELECT soubor_cesta, zdroj FROM faktury WHERE id=?", (fid,)).fetchone()
         conn.execute("DELETE FROM faktury WHERE id=?", (fid,))
-    if row and row["soubor_cesta"]:
-        path = os.path.join(UPLOAD_DIR, row["soubor_cesta"])
-        if os.path.exists(path):
-            os.remove(path)
+        if reset_drive and row:
+            zdroj = row["zdroj"] if isinstance(row, dict) else row[1]
+            soubor_cesta = row["soubor_cesta"] if isinstance(row, dict) else row[0]
+            if zdroj == "drive_auto" and soubor_cesta:
+                nazev = soubor_cesta.split("/")[-1]
+                try:
+                    conn.execute("DELETE FROM drive_zpracovane WHERE nazev_souboru=?", (nazev,))
+                    app.logger.info(f"Drive reset: smazán záznam {nazev} z drive_zpracovane")
+                except Exception as e:
+                    app.logger.warning(f"Drive reset chyba: {e}")
+    if row:
+        soubor_cesta = row["soubor_cesta"] if isinstance(row, dict) else row[0]
+        if soubor_cesta:
+            path = os.path.join(UPLOAD_DIR, soubor_cesta)
+            if os.path.exists(path):
+                os.remove(path)
     return jsonify({"ok": True})
 
 @app.route("/api/faktury/<int:fid>", methods=["PUT"])

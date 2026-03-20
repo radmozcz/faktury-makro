@@ -717,8 +717,7 @@ async function openFakturaDetail(id) {
     <button class="btn btn-secondary btn-sm" style="margin-top:.5rem" onclick="editPolozkaAdd()">+ Přidat položku</button>
     <div class="btn-group" style="margin-top:1rem">
       <button class="btn btn-primary" onclick="saveFakturaEdit(${f.id})">💾 Uložit změny</button>
-      <button class="btn btn-danger btn-sm" onclick="deleteFaktura(${f.id})">🗑 Smazat</button>
-    </div>`;
+      <button class="btn btn-danger btn-sm" onclick="deleteFaktura(${f.id},'${f.zdroj}')">${f.zdroj === 'drive_auto' ? '🗑 Smazat + Reset Drive' : '🗑 Smazat'}</button>      </div>`;
 
   openModal(`Faktura – ${escHtml(f.dodavatel)} ${czDate(f.datum_vystaveni)}`, body);
 }
@@ -877,7 +876,12 @@ let uploadedFilePath = null;
 
 function renderNahrat() {
   document.getElementById("mainContent").innerHTML = `
-    <div class="page-header"><h1 class="page-title">Nahrát fakturu (MAKRO)</h1></div>
+    <div class="page-header">
+      <h1 class="page-title">Nahrát fakturu (MAKRO)</h1>
+      <button class="btn btn-secondary btn-sm" onclick="zkontrolovatDriveNyni()">☁️ Zkontrolovat Drive nyní</button>
+    </div>
+    <div id="driveCheckStatus" style="margin-bottom:.5rem;font-
+  size:.9rem;color:var(--txt2)"></div>    
     <div class="card" style="max-width:900px">
       <div class="form-group">
         <label class="form-label">Firma</label>
@@ -994,6 +998,18 @@ function renderNahrat() {
   setupDropzone();
   setupDropzoneHromadne();
   rUpdateTotal();
+}
+
+async function zkontrolovatDriveNyni() {
+  const statusEl = document.getElementById("driveCheckStatus");
+  if (statusEl) statusEl.innerHTML = `<span class="spinner"></span> Kontroluji Drive...`;
+  try {
+    const res = await api("/api/drive-zkontrolovat", { method: "POST" });
+    if (res.error) { if (statusEl) statusEl.textContent = "✗ " + res.error; return; }
+    if (statusEl) statusEl.textContent = `✅ Hotovo – staženo ${res.stazeno} souborů`;
+  } catch(e) {
+    if (statusEl) statusEl.textContent = "✗ " + e.message;
+  }
 }
 
 function switchTab(tab) {
