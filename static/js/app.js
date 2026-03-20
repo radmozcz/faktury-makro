@@ -2928,70 +2928,98 @@ const KARTY_LIMIT = 1500000;
 function renderKartaStatHtml(stats) {
   const firmy = Object.keys(stats);
   if (!firmy.length) return "";
+  const rok = new Date().getFullYear();
+
+  // Souhrnný boxík - všechny firmy dohromady
+  const sumKartyM  = firmy.reduce((s,f) => s+(stats[f].karty_mesic||0), 0);
+  const sumHotM    = firmy.reduce((s,f) => s+(stats[f].hot_mesic||0), 0);
+  const sumTrzbaM  = firmy.reduce((s,f) => s+(stats[f].trzba_mesic||0), 0);
+  const sumKartyR  = firmy.reduce((s,f) => s+(stats[f].rocni||0), 0);
+  const sumHotR    = firmy.reduce((s,f) => s+(stats[f].hot_rok||0), 0);
+  const sumTrzbaR  = firmy.reduce((s,f) => s+(stats[f].trzba_rok||0), 0);
+
+  const row = (lbl, val) => `
+    <div style="display:flex;justify-content:space-between;font-size:.85rem;padding:.2rem 0;border-bottom:1px solid var(--border)">
+      <span style="color:var(--txt2)">${lbl}</span><strong>${czInt(val)} Kč</strong>
+    </div>`;
+
+  const souhrn = `
+    <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:1rem;min-width:200px;flex:1">
+      <div style="font-weight:700;font-size:1rem;margin-bottom:.7rem">Celkem všechny firmy</div>
+      <div style="font-size:.75rem;color:var(--txt2);font-weight:600;margin-bottom:.3rem;text-transform:uppercase;letter-spacing:.04em">Tento měsíc</div>
+      ${row('💳 Karty', sumKartyM)}
+      ${row('💵 Hotovost', sumHotM)}
+      ${row('📈 Tržba', sumTrzbaM)}
+      <div style="font-size:.75rem;color:var(--txt2);font-weight:600;margin:.6rem 0 .3rem;text-transform:uppercase;letter-spacing:.04em">Rok ${rok}</div>
+      ${row('💳 Karty', sumKartyR)}
+      ${row('💵 Hotovost', sumHotR)}
+      ${row('📈 Tržba', sumTrzbaR)}
+    </div>`;
+
+  // Boxík pro každou firmu
   const card = (firma, d) => {
     const mPct = Math.min(Math.round(d.mesicni / d.terminal_limit * 100), 100);
     const rPct = Math.min(Math.round(d.rocni / d.dph_limit * 100), 100);
-    const mColor = mPct >= 100 ? "#ef4444" : mPct >= 80 ? "#f59e0b" : "#16a34a";
-    const rColor = rPct >= 100 ? "#ef4444" : rPct >= 75 ? "#f59e0b" : "#16a34a";
+    const mColor = mPct >= 100 ? "#ef4444" : mPct >= 80 ? "#f59e0b" : "#6b7280";
+    const rColor = rPct >= 100 ? "#ef4444" : rPct >= 75 ? "#f59e0b" : "#6b7280";
     const od = d.terminal_od ? new Date(d.terminal_od).toLocaleDateString("cs-CZ") : "—";
-    const borderStyle = d.aktivni ? '3px solid #16a34a' : '1px solid var(--border)';
-    const bgStyle = d.aktivni ? 'background:linear-gradient(135deg,var(--card-bg) 85%,#dcfce7)' : 'background:var(--card-bg)';
+    const border = d.aktivni ? '2px solid #6b7280' : '1px solid var(--border)';
     return `
-      <div style="${bgStyle};border:${borderStyle};border-radius:10px;padding:1rem;flex:1;min-width:220px;position:relative">
-        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.5rem">
-          <span style="font-weight:700;font-size:1.15rem;font-family:var(--font-head)">${escHtml(firma)}</span>
+      <div style="background:var(--card-bg);border:${border};border-radius:10px;padding:1rem;flex:1;min-width:200px">
+        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+          <span style="font-weight:700;font-size:1.1rem">${escHtml(firma)}</span>
           ${d.aktivni
-            ? '<span style="background:#16a34a;color:#fff;font-size:.7rem;padding:.15rem .6rem;border-radius:99px;font-weight:700">● KASÍRUJE</span>'
-            : '<span style="background:#9ca3af;color:#fff;font-size:.7rem;padding:.15rem .6rem;border-radius:99px;font-weight:600">○ neaktivní</span>'}
+            ? '<span style="background:#4b5563;color:#fff;font-size:.68rem;padding:.1rem .5rem;border-radius:99px;font-weight:600">● kasíruje</span>'
+            : '<span style="background:#e5e7eb;color:#6b7280;font-size:.68rem;padding:.1rem .5rem;border-radius:99px">○ neaktivní</span>'}
         </div>
-        <div style="font-size:.78rem;color:var(--txt2);margin-bottom:.6rem">terminál od ${od}</div>
+        <div style="font-size:.75rem;color:var(--txt2);margin-bottom:.6rem">terminál od ${od}</div>
 
-        <div style="display:flex;justify-content:space-between;font-size:.88rem;margin-bottom:.2rem">
-          <span>💳 Karty od přepnutí</span>
+        <div style="font-size:.75rem;color:var(--txt2);font-weight:600;margin-bottom:.3rem;text-transform:uppercase;letter-spacing:.04em">Tento měsíc</div>
+        <div style="display:flex;justify-content:space-between;font-size:.85rem;padding:.15rem 0">
+          <span style="color:var(--txt2)">💳 Karty</span><strong>${czInt(d.karty_mesic)} Kč</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:.85rem;padding:.15rem 0">
+          <span style="color:var(--txt2)">💵 Hotovost</span><strong>${czInt(d.hot_mesic)} Kč</strong>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:.85rem;padding:.15rem 0;margin-bottom:.6rem">
+          <span style="color:var(--txt2)">📈 Tržba</span><strong>${czInt(d.trzba_mesic)} Kč</strong>
+        </div>
+
+        <div style="font-size:.75rem;color:var(--txt2);font-weight:600;margin-bottom:.3rem;text-transform:uppercase;letter-spacing:.04em">Rok ${rok}</div>
+        <div style="display:flex;justify-content:space-between;font-size:.85rem;padding:.15rem 0">
+          <span style="color:var(--txt2)">📈 Tržba</span><strong>${czInt(d.trzba_rok)} Kč</strong>
+        </div>
+
+        <div style="font-size:.75rem;color:var(--txt2);font-weight:600;margin:.6rem 0 .3rem;text-transform:uppercase;letter-spacing:.04em">Terminál (DPH)</div>
+        <div style="display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:.2rem">
+          <span style="color:var(--txt2)">Karty od přepnutí</span>
           <strong style="color:${mColor}">${czInt(d.mesicni)} / ${czInt(d.terminal_limit)} Kč</strong>
         </div>
-        <div style="background:#e5e7eb;border-radius:4px;height:8px;margin-bottom:.7rem">
-          <div style="background:${mColor};height:8px;border-radius:4px;width:${mPct}%;transition:.3s"></div>
+        <div style="background:#e5e7eb;border-radius:4px;height:6px;margin-bottom:.4rem">
+          <div style="background:${mColor};height:6px;border-radius:4px;width:${mPct}%;transition:.3s"></div>
         </div>
-
-        <div style="display:flex;justify-content:space-between;font-size:.88rem;margin-bottom:.6rem;padding:.35rem .5rem;background:var(--bg);border-radius:6px;border:1px solid var(--border)">
-          <span style="color:var(--txt2)">💰 Tržba celkem</span>
-          <strong>${czInt(d.trzba_od)} Kč</strong>
-        </div>
-
-        <div style="display:flex;justify-content:space-between;font-size:.88rem;margin-bottom:.2rem">
-          <span>📊 DPH rok ${new Date().getFullYear()}</span>
+        <div style="display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:.2rem">
+          <span style="color:var(--txt2)">Karty rok ${rok}</span>
           <strong style="color:${rColor}">${czInt(d.rocni)} / ${czInt(d.dph_limit)} Kč</strong>
         </div>
-        <div style="background:#e5e7eb;border-radius:4px;height:8px;margin-bottom:.6rem">
-          <div style="background:${rColor};height:8px;border-radius:4px;width:${rPct}%;transition:.3s"></div>
+        <div style="background:#e5e7eb;border-radius:4px;height:6px;margin-bottom:.5rem">
+          <div style="background:${rColor};height:6px;border-radius:4px;width:${rPct}%;transition:.3s"></div>
         </div>
 
-        ${mPct >= 100 ? '<div style="font-size:.8rem;color:#991b1b;font-weight:700;margin-bottom:.3rem">🚨 Limit terminálu překročen!</div>' : mPct >= 90 ? '<div style="font-size:.8rem;color:#b45309;font-weight:600;margin-bottom:.3rem">⚠️ Blíží se limit terminálu</div>' : ''}
-        ${rPct >= 90 ? '<div style="font-size:.8rem;color:#b45309;font-weight:600;margin-bottom:.3rem">⚠️ Blíží se DPH limit</div>' : ''}
+        ${mPct >= 100 ? '<div style="font-size:.78rem;color:#991b1b;font-weight:700;margin-bottom:.3rem">🚨 Limit překročen!</div>' : mPct >= 90 ? '<div style="font-size:.78rem;color:#b45309;margin-bottom:.3rem">⚠️ Blíží se limit</div>' : ''}
+        ${rPct >= 90 ? '<div style="font-size:.78rem;color:#b45309;margin-bottom:.3rem">⚠️ Blíží se DPH limit</div>' : ''}
 
         <button onclick="prepnoutTerminal('${firma}')"
-          style="margin-top:.3rem;width:100%;padding:.45rem;border-radius:7px;border:none;cursor:pointer;font-size:.82rem;font-weight:600;
-                 ${d.aktivni
-                   ? 'background:#fee2e2;color:#991b1b'
-                   : 'background:#16a34a;color:#fff'}">
-          ${d.aktivni ? '🔄 Přepnout na jinou firmu' : '▶ Aktivovat tento terminál'}
+          style="margin-top:.2rem;width:100%;padding:.35rem;border-radius:6px;border:1px solid var(--border);cursor:pointer;font-size:.8rem;background:var(--bg);color:var(--txt2)">
+          🔄 Přepnout terminál
         </button>
       </div>`;
   };
-  // Souhrnný řádek - celkem přes všechny firmy
-  const totalKarty   = firmy.reduce((s, f) => s + (stats[f].mesicni || 0), 0);
-  const totalHot     = firmy.reduce((s, f) => s + ((stats[f].trzba_od || 0) - (stats[f].mesicni || 0)), 0);
-  const totalTrzba   = firmy.reduce((s, f) => s + (stats[f].trzba_od || 0), 0);
-  const souhrn = totalTrzba > 0 ? `
-    <div style="display:flex;gap:2rem;flex-wrap:wrap;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.6rem 1rem;margin-bottom:.7rem;font-size:.88rem">
-      <span style="font-weight:700;color:var(--txt2)">📊 Celkem všechny firmy:</span>
-      <span>💳 Karty: <strong>${czInt(totalKarty)} Kč</strong></span>
-      <span>💵 Hotovost: <strong>${czInt(totalHot)} Kč</strong></span>
-      <span style="font-size:1rem">💰 Tržba: <strong style="color:#16a34a">${czInt(totalTrzba)} Kč</strong></span>
-    </div>` : "";
 
-  return souhrn + `<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">${firmy.map(f => card(f, stats[f])).join("")}</div>`;
+  return `<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
+    ${souhrn}
+    ${firmy.map(f => card(f, stats[f])).join("")}
+  </div>`;
 }
 
 async function prepnoutTerminal(firma) {

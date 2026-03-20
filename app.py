@@ -1599,11 +1599,38 @@ def api_karty_stats():
             """, (firma, od)).fetchone()
             trzba_od = float((row3 or {}).get("total", 0))
 
+            mesic_str = _dt.date.today().strftime("%Y-%m")
+            row4 = conn.execute("""
+                SELECT COALESCE(SUM(karty),0) as k,
+                       COALESCE(SUM(hotovost),0) as h,
+                       COALESCE(SUM(hotovost+karty),0) as t
+                FROM reporty
+                WHERE firma_zkratka=? AND datum LIKE ?
+            """, (firma, mesic_str + "%")).fetchone()
+            karty_mesic = float((row4 or {}).get("k", 0))
+            hot_mesic   = float((row4 or {}).get("h", 0))
+            trzba_mesic = float((row4 or {}).get("t", 0))
+
+            row5 = conn.execute("""
+                SELECT COALESCE(SUM(karty),0) as k,
+                       COALESCE(SUM(hotovost),0) as h,
+                       COALESCE(SUM(hotovost+karty),0) as t
+                FROM reporty
+                WHERE firma_zkratka=? AND datum>=?
+            """, (firma, f"{rok}-01-01")).fetchone()
+            hot_rok   = float((row5 or {}).get("h", 0))
+            trzba_rok = float((row5 or {}).get("t", 0))
+
             aktivni = cfg.get("terminal_aktivni", {}).get(firma, False)
             result[firma] = {
                 "rocni": rocni,
                 "mesicni": mesicni,
                 "trzba_od": trzba_od,
+                "karty_mesic": karty_mesic,
+                "hot_mesic": hot_mesic,
+                "trzba_mesic": trzba_mesic,
+                "hot_rok": hot_rok,
+                "trzba_rok": trzba_rok,
                 "terminal_od": od,
                 "terminal_limit": terminal_limit,
                 "dph_limit": dph_limit,
