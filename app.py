@@ -3631,7 +3631,7 @@ def _zpracuj_nove_faktury_z_drive():
                         ocr_data.get("datum_vystaveni", ""),
                         ocr_data.get("datum_splatnosti", ""),
                         float(ocr_data.get("celkem_s_dph", 0)),
-                        "ke_zpracovani",
+                        "zaplaceno",
                         fname,
                         gcs_url or "",
                         "drive_auto"
