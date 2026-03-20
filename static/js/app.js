@@ -2930,95 +2930,78 @@ function renderKartaStatHtml(stats) {
   if (!firmy.length) return "";
   const rok = new Date().getFullYear();
 
-  // Souhrnný boxík - všechny firmy dohromady
-  const sumKartyM  = firmy.reduce((s,f) => s+(stats[f].karty_mesic||0), 0);
-  const sumHotM    = firmy.reduce((s,f) => s+(stats[f].hot_mesic||0), 0);
-  const sumTrzbaM  = firmy.reduce((s,f) => s+(stats[f].trzba_mesic||0), 0);
-  const sumKartyR  = firmy.reduce((s,f) => s+(stats[f].rocni||0), 0);
-  const sumHotR    = firmy.reduce((s,f) => s+(stats[f].hot_rok||0), 0);
-  const sumTrzbaR  = firmy.reduce((s,f) => s+(stats[f].trzba_rok||0), 0);
+  // Pokud žádná firma není aktivní, aktivuj první
+  const nekteraAktivni = firmy.some(f => stats[f].aktivni);
 
-  const row = (lbl, val) => `
-    <div style="display:flex;justify-content:space-between;font-size:.85rem;padding:.2rem 0;border-bottom:1px solid var(--border)">
-      <span style="color:var(--txt2)">${lbl}</span><strong>${czInt(val)} Kč</strong>
-    </div>`;
+  const r = (lbl, val) => `<div style="display:flex;justify-content:space-between;font-size:.82rem;padding:.18rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--txt2)">${lbl}</span><strong>${czInt(val)} Kč</strong></div>`;
+  const sec = lbl => `<div style="font-size:.7rem;color:var(--txt2);font-weight:600;margin:.55rem 0 .25rem;text-transform:uppercase;letter-spacing:.04em">${lbl}</div>`;
+  const bar = (pct, col) => `<div style="background:#e5e7eb;border-radius:3px;height:5px;margin-bottom:.35rem"><div style="background:${col};height:5px;border-radius:3px;width:${pct}%;transition:.3s"></div></div>`;
 
-  const souhrn = `
-    <div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:1rem;min-width:200px;flex:1">
-      <div style="font-weight:700;font-size:1rem;margin-bottom:.7rem">Celkem všechny firmy</div>
-      <div style="font-size:.75rem;color:var(--txt2);font-weight:600;margin-bottom:.3rem;text-transform:uppercase;letter-spacing:.04em">Tento měsíc</div>
-      ${row('💳 Karty', sumKartyM)}
-      ${row('💵 Hotovost', sumHotM)}
-      ${row('📈 Tržba', sumTrzbaM)}
-      <div style="font-size:.75rem;color:var(--txt2);font-weight:600;margin:.6rem 0 .3rem;text-transform:uppercase;letter-spacing:.04em">Rok ${rok}</div>
-      ${row('💳 Karty', sumKartyR)}
-      ${row('💵 Hotovost', sumHotR)}
-      ${row('📈 Tržba', sumTrzbaR)}
-    </div>`;
+  // Souhrnný boxík – bez tlačítka
+  const sumKartyM = firmy.reduce((s,f) => s+(stats[f].karty_mesic||0), 0);
+  const sumHotM   = firmy.reduce((s,f) => s+(stats[f].hot_mesic||0), 0);
+  const sumTrzbaM = firmy.reduce((s,f) => s+(stats[f].trzba_mesic||0), 0);
+  const sumKartyR = firmy.reduce((s,f) => s+(stats[f].rocni||0), 0);
+  const sumHotR   = firmy.reduce((s,f) => s+(stats[f].hot_rok||0), 0);
+  const sumTrzbaR = firmy.reduce((s,f) => s+(stats[f].trzba_rok||0), 0);
 
-  // Boxík pro každou firmu
-  const card = (firma, d) => {
+  const souhrn = `<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:.85rem;flex:1;min-width:150px">
+    <div style="font-weight:700;font-size:.95rem;margin-bottom:.5rem">Celkem</div>
+    ${sec('Tento měsíc')}
+    ${r('💳 Karty', sumKartyM)}
+    ${r('💵 Hotovost', sumHotM)}
+    ${r('📈 Tržba', sumTrzbaM)}
+    ${sec('Rok ' + rok)}
+    ${r('💳 Karty', sumKartyR)}
+    ${r('💵 Hotovost', sumHotR)}
+    ${r('📈 Tržba', sumTrzbaR)}
+  </div>`;
+
+  // Firemní boxík
+  const card = (firma, d, jeAktivni) => {
     const mPct = Math.min(Math.round(d.mesicni / d.terminal_limit * 100), 100);
-    const rPct = Math.min(Math.round(d.rocni / d.dph_limit * 100), 100);
-    const mColor = mPct >= 100 ? "#ef4444" : mPct >= 80 ? "#f59e0b" : "#6b7280";
-    const rColor = rPct >= 100 ? "#ef4444" : rPct >= 75 ? "#f59e0b" : "#6b7280";
-    const od = d.terminal_od ? new Date(d.terminal_od).toLocaleDateString("cs-CZ") : "—";
-    const border = d.aktivni ? '2px solid #6b7280' : '1px solid var(--border)';
-    return `
-      <div style="background:var(--card-bg);border:${border};border-radius:10px;padding:1rem;flex:1;min-width:200px">
-        <div style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
-          <span style="font-weight:700;font-size:1.1rem">${escHtml(firma)}</span>
-          ${d.aktivni
-            ? '<span style="background:#4b5563;color:#fff;font-size:.68rem;padding:.1rem .5rem;border-radius:99px;font-weight:600">● kasíruje</span>'
-            : '<span style="background:#e5e7eb;color:#6b7280;font-size:.68rem;padding:.1rem .5rem;border-radius:99px">○ neaktivní</span>'}
-        </div>
-        <div style="font-size:.75rem;color:var(--txt2);margin-bottom:.6rem">terminál od ${od}</div>
-
-        <div style="font-size:.75rem;color:var(--txt2);font-weight:600;margin-bottom:.3rem;text-transform:uppercase;letter-spacing:.04em">Tento měsíc</div>
-        <div style="display:flex;justify-content:space-between;font-size:.85rem;padding:.15rem 0">
-          <span style="color:var(--txt2)">💳 Karty</span><strong>${czInt(d.karty_mesic)} Kč</strong>
-        </div>
-        <div style="display:flex;justify-content:space-between;font-size:.85rem;padding:.15rem 0">
-          <span style="color:var(--txt2)">💵 Hotovost</span><strong>${czInt(d.hot_mesic)} Kč</strong>
-        </div>
-        <div style="display:flex;justify-content:space-between;font-size:.85rem;padding:.15rem 0;margin-bottom:.6rem">
-          <span style="color:var(--txt2)">📈 Tržba</span><strong>${czInt(d.trzba_mesic)} Kč</strong>
-        </div>
-
-        <div style="font-size:.75rem;color:var(--txt2);font-weight:600;margin-bottom:.3rem;text-transform:uppercase;letter-spacing:.04em">Rok ${rok}</div>
-        <div style="display:flex;justify-content:space-between;font-size:.85rem;padding:.15rem 0">
-          <span style="color:var(--txt2)">📈 Tržba</span><strong>${czInt(d.trzba_rok)} Kč</strong>
-        </div>
-
-        <div style="font-size:.75rem;color:var(--txt2);font-weight:600;margin:.6rem 0 .3rem;text-transform:uppercase;letter-spacing:.04em">Terminál (DPH)</div>
-        <div style="display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:.2rem">
-          <span style="color:var(--txt2)">Karty od přepnutí</span>
-          <strong style="color:${mColor}">${czInt(d.mesicni)} / ${czInt(d.terminal_limit)} Kč</strong>
-        </div>
-        <div style="background:#e5e7eb;border-radius:4px;height:6px;margin-bottom:.4rem">
-          <div style="background:${mColor};height:6px;border-radius:4px;width:${mPct}%;transition:.3s"></div>
-        </div>
-        <div style="display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:.2rem">
-          <span style="color:var(--txt2)">Karty rok ${rok}</span>
-          <strong style="color:${rColor}">${czInt(d.rocni)} / ${czInt(d.dph_limit)} Kč</strong>
-        </div>
-        <div style="background:#e5e7eb;border-radius:4px;height:6px;margin-bottom:.5rem">
-          <div style="background:${rColor};height:6px;border-radius:4px;width:${rPct}%;transition:.3s"></div>
-        </div>
-
-        ${mPct >= 100 ? '<div style="font-size:.78rem;color:#991b1b;font-weight:700;margin-bottom:.3rem">🚨 Limit překročen!</div>' : mPct >= 90 ? '<div style="font-size:.78rem;color:#b45309;margin-bottom:.3rem">⚠️ Blíží se limit</div>' : ''}
-        ${rPct >= 90 ? '<div style="font-size:.78rem;color:#b45309;margin-bottom:.3rem">⚠️ Blíží se DPH limit</div>' : ''}
-
-        <button onclick="prepnoutTerminal('${firma}')"
-          style="margin-top:.2rem;width:100%;padding:.35rem;border-radius:6px;border:1px solid var(--border);cursor:pointer;font-size:.8rem;background:var(--bg);color:var(--txt2)">
-          🔄 Přepnout terminál
-        </button>
-      </div>`;
+    const rPct = Math.min(Math.round(d.rocni   / d.dph_limit      * 100), 100);
+    const mCol = mPct >= 100 ? "#ef4444" : mPct >= 80 ? "#f59e0b" : "#9ca3af";
+    const rCol = rPct >= 100 ? "#ef4444" : rPct >= 75 ? "#f59e0b" : "#9ca3af";
+    const od   = d.terminal_od ? new Date(d.terminal_od).toLocaleDateString("cs-CZ") : "—";
+    const bord = jeAktivni ? '2px solid #16a34a' : '1px solid var(--border)';
+    return `<div style="background:var(--card-bg);border:${bord};border-radius:10px;padding:.85rem;flex:1;min-width:150px">
+      <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.3rem">
+        <span style="font-weight:700;font-size:.95rem">${escHtml(firma)}</span>
+        ${jeAktivni
+          ? '<span style="background:#dcfce7;color:#166534;font-size:.65rem;padding:.1rem .4rem;border-radius:99px;font-weight:600">● kasíruje</span>'
+          : '<span style="background:#f3f4f6;color:#9ca3af;font-size:.65rem;padding:.1rem .4rem;border-radius:99px">○ neaktivní</span>'}
+      </div>
+      <div style="font-size:.72rem;color:var(--txt2);margin-bottom:.4rem">od ${od}</div>
+      ${sec('Tento měsíc')}
+      ${r('💳 Karty', d.karty_mesic||0)}
+      ${r('💵 Hotovost', d.hot_mesic||0)}
+      ${r('📈 Tržba', d.trzba_mesic||0)}
+      ${sec('Rok ' + rok)}
+      ${r('📈 Tržba', d.trzba_rok||0)}
+      ${sec('Terminál')}
+      <div style="display:flex;justify-content:space-between;font-size:.8rem;margin-bottom:.15rem">
+        <span style="color:var(--txt2)">Karty od přep.</span>
+        <strong style="color:${mCol}">${czInt(d.mesicni)} / ${czInt(d.terminal_limit)}</strong>
+      </div>
+      ${bar(mPct, mCol)}
+      <div style="display:flex;justify-content:space-between;font-size:.8rem;margin-bottom:.15rem">
+        <span style="color:var(--txt2)">Karty rok</span>
+        <strong style="color:${rCol}">${czInt(d.rocni)} / ${czInt(d.dph_limit)}</strong>
+      </div>
+      ${bar(rPct, rCol)}
+      ${mPct >= 100 ? '<div style="font-size:.75rem;color:#991b1b;font-weight:700;margin-bottom:.2rem">🚨 Limit překročen!</div>' : mPct >= 90 ? '<div style="font-size:.75rem;color:#b45309;margin-bottom:.2rem">⚠️ Blíží se limit</div>' : ''}
+      ${rPct >= 90 ? '<div style="font-size:.75rem;color:#b45309;margin-bottom:.2rem">⚠️ Blíží se DPH limit</div>' : ''}
+      <button onclick="prepnoutTerminal('${firma}')"
+        style="margin-top:.5rem;width:100%;padding:.3rem;border-radius:6px;border:1px solid var(--border);cursor:pointer;font-size:.78rem;font-weight:400;background:var(--bg);color:var(--txt2)">
+        🔄 Přepnout
+      </button>
+    </div>`;
   };
 
-  return `<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">
+  return `<div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem">
     ${souhrn}
-    ${firmy.map(f => card(f, stats[f])).join("")}
+    ${firmy.map((f,i) => card(f, stats[f], nekteraAktivni ? stats[f].aktivni : i===0)).join("")}
   </div>`;
 }
 
