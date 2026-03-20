@@ -3173,9 +3173,10 @@ function reportFormHtml(r = {}) {
       <label class="form-label">Firma</label>
       <select id="rfFirma" class="form-control">
         <option value="">— bez firmy —</option>
-        ${App.config.firmy.map(f=>`<option value="${f}" ${(r.firma_zkratka||App._lastReportFirma||"")==f?"selected":""}>${f}</option>`).join("")}
+        ${App.config.firmy.map(f=>`<option value="${f}" ${(r.firma_zkratka||App._lastReportFirma||App._aktivniFirma||"")==f?"selected":""}>${f}</option>`).join("")}
       </select>
     </div>
+    ${r.soubor_url ? `<div style="margin-bottom:.8rem"><a href="${r.soubor_url}" target="_blank" class="btn btn-secondary btn-sm">📎 Zobrazit originál fotku</a></div>` : ""}
     <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:2px solid var(--border);padding-bottom:0">
       <button id="rtabFoto"  class="tab-btn tab-active" onclick="switchRTab('foto')">📷 Fotka</button>
       <button id="rtabText"  class="tab-btn" onclick="switchRTab('text')">📋 Vložit text</button>
