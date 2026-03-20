@@ -1247,7 +1247,7 @@ Formát odpovědi:
 - Neplést s jinými čísly na lístku (karty, tržba...)
 - Pokud datum není, vrať dnešní: "{today}"
 - POZOR na záměnu číslic v měsíci: "3" a "5" jsou si podobné — měsíc 3 = březen, měsíc 5 = květen
-- Den v týdnu ODVOĎ z data — nepřepisuj ho ze slova na lístku (lístek může mít zkratku čt. = čtvrtek)
+- Pole "den" NEVYPLŇUJ — vrať vždy null, den spočítáme sami z data
 
 === ČÍSLA — ZÁMĚNY ČÍSLIC ===
 - Tečka nebo čárka uvnitř čísla = oddělovač tisíců: 9.582 = 9582, 4.900 = 4900
@@ -1281,7 +1281,7 @@ Formát odpovědi:
 === BURGER, BUŘTGULÁŠ, TALÍŘE — VELMI DŮLEŽITÉ ===
 - BURGER / BURGR → burger (číslo za nebo před slovem)
 - BURTGULÁŠ / BURTGULAS / BURGULÁŠ / BUŘTGULÁŠ / BURTGULÁS → burtgulas
-- Formát "7x" = 7 kusů — pozor na záměnu "7" a "2" při ručním psaní!
+- Formát "7x" = 7 kusů — KRITICKÉ: číslovka "7" bývá čtena jako "2" při ručním psaní! Pokud vidíš "2x" u buřtguláše, zkontroluj znovu — může to být "7x"
 - TALÍŘ / TALIRE / POČET TALÍŘŮ / TAL: → talire
 - NIKDY nezapisuj 0 pokud číslo na lístku je!
 
@@ -1420,9 +1420,19 @@ def build_report_from_parsed(parsed, year=None):
 
     smena = normalize_jmena(parsed.get("smena", ""))
 
+    _DNY = ["pondělí","úterý","středa","čtvrtek","pátek","sobota","neděle"]
+    if datum_iso:
+        try:
+            from datetime import date as _date
+            den_auto = _DNY[_date.fromisoformat(datum_iso).weekday()]
+        except Exception:
+            den_auto = ""
+    else:
+        den_auto = ""
+
     return {
         "datum":       datum_iso,
-        "den":         parsed.get("den", ""),
+        "den":         den_auto,
         "smena":       smena,
         "karty":       karty,
         "kov":         kov,
