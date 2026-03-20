@@ -789,10 +789,15 @@ async function saveStav(id) {
   loadFaktury();
 }
 
-async function deleteFaktura(id) {
-  if (!confirm("Opravdu smazat tuto fakturu?")) return;
-  await api(`/api/faktury/${id}`, { method: "DELETE" });
-  toast("Faktura smazána");
+async function deleteFaktura(id, zdroj) {
+  const jeDrive = zdroj === "drive_auto";
+  const msg = jeDrive
+    ? "Smazat fakturu A resetovat Drive?\n\nPříště se znovu stáhne a zpracuje ze složky Drive."
+    : "Opravdu smazat tuto fakturu?";
+  if (!confirm(msg)) return;
+  const url = jeDrive ? `/api/faktury/${id}?reset_drive=1` : `/api/faktury/${id}`;
+  await api(url, { method: "DELETE" });
+  toast("Faktura smazána" + (jeDrive ? " + Drive reset ✓" : ""));
   closeModal();
   loadFaktury();
 }
