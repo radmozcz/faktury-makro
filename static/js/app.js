@@ -1910,52 +1910,43 @@ async function loadVyplatyKarty() {
 
   const mesicLabel = new Date(mesicOd).toLocaleDateString("cs-CZ",{month:"long",year:"numeric"});
 
+  const sumOdvody = jmeno => {
+    const o = zam[jmeno].odvody || [];
+    return o.reduce((s,x)=>s+(x.castka||0),0);
+  };
+
   const rows = jmena.map(jmeno => {
     const z = zam[jmeno];
-    const jeVendy = jmeno === "Vendy";
-    const odvodyHtml = jeVendy && z.odvody?.length
-      ? z.odvody.map(o => `<span style="font-size:.72rem;color:var(--txt2);margin-right:.4rem">${escHtml(o.nazev)}: ${czInt(o.castka)} Kč</span>`).join("")
-      : "";
+    const odv = sumOdvody(jmeno);
+    const celkemVcOdvody = z.celkem_mesic + odv;
     return `<tr style="cursor:pointer" onclick="renderZamestnanecDetail('${escHtml(jmeno)}')">
-      <td>
-        <strong>${escHtml(jmeno)}</strong>
-        <button class="btn btn-secondary btn-sm" style="font-size:.7rem;padding:.1rem .4rem;margin-left:.5rem"
-          onclick="event.stopPropagation();openPausalni('${escHtml(jmeno)}')">⚙️ odvody</button>
-        <button class="btn btn-secondary btn-sm" style="font-size:.7rem;padding:.1rem .4rem;margin-left:.3rem"
-          onclick="event.stopPropagation();nahratPasku('${escHtml(jmeno)}')">📎 páska</button>
-        ${z.paska_url ? `<a href="${z.paska_url}" target="_blank" style="font-size:.7rem;margin-left:.3rem" onclick="event.stopPropagation()">📄 zobrazit</a>` : ""}
-        ${odvodyHtml ? `<div style="margin-top:.2rem">${odvodyHtml}</div>` : ""}
-      </td>
+      <td><strong>${escHtml(jmeno)}</strong></td>
       <td style="text-align:center;font-size:.85rem">
         ${z.posledni?.datum ? czDate(z.posledni.datum) : "—"}
-        ${z.posledni?.castka ? `<br><span style="color:var(--txt2);font-size:.78rem">${czInt(z.posledni.castka)} Kč</span>` : ""}
+        ${z.posledni?.castka ? `<br><span style="color:var(--txt2);font-size:.78rem">${czInt(z.posledni.castka)}</span>` : ""}
       </td>
-      <td style="text-align:right"><strong>${czInt(z.celkem_mesic)} Kč</strong></td>
-      <td style="text-align:right;color:#dc2626;font-size:.85rem">${czInt(z.naklady_mesic)} Kč</td>
-      <td style="text-align:right">${czInt(z.celkem_rok)} Kč</td>
-      <td style="text-align:right;color:#dc2626;font-size:.85rem">${czInt(z.naklady_rok)} Kč</td>
+      <td style="text-align:right"><strong>${czInt(z.celkem_mesic)}</strong></td>
+      <td style="text-align:right;color:var(--txt2);font-size:.85rem">${odv > 0 ? czInt(odv) : '—'}</td>
+      <td style="text-align:right;font-weight:600">${czInt(celkemVcOdvody)}</td>
+      <td style="text-align:right">${czInt(z.celkem_rok)}</td>
       <td onclick="event.stopPropagation()">
         <button class="btn btn-primary btn-sm" style="font-size:.75rem"
           onclick="openNovVyplata('${escHtml(jmeno)}')">+ Výplata</button>
-        <button class="btn btn-secondary btn-sm" style="font-size:.75rem"
-          onclick="openPausalni('${escHtml(jmeno)}')">⚙️</button>
       </td>
     </tr>`;
   }).join("");
 
   el.innerHTML = `
     <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
-        <span style="font-size:.85rem;color:var(--txt2)">Měsíc: <strong>${mesicLabel}</strong> &nbsp;·&nbsp; Rok ${zvolenyRok}</span>
-      </div>
+      <div style="font-size:.85rem;color:var(--txt2);margin-bottom:.75rem">Měsíc: <strong>${mesicLabel}</strong> &nbsp;·&nbsp; Rok ${zvolenyRok}</div>
       <div class="table-wrap"><table>
         <thead><tr>
           <th>Zaměstnanec</th>
           <th style="text-align:center">Poslední výplata</th>
-          <th style="text-align:right">Měsíc</th>
-          <th style="text-align:right">+ Odvody</th>
+          <th style="text-align:right">Tento měsíc</th>
+          <th style="text-align:right">Odvody</th>
+          <th style="text-align:right">Celkem vč. odvodů</th>
           <th style="text-align:right">Rok ${zvolenyRok}</th>
-          <th style="text-align:right">+ Odvody</th>
           <th></th>
         </tr></thead>
         <tbody>${rows}</tbody>
@@ -2039,7 +2030,11 @@ async function renderZamestnanecDetail(jmeno) {
         <span style="cursor:pointer;color:var(--txt2);font-weight:400" onclick="renderVyplaty()">Výplaty</span>
         <span style="margin:0 .4rem">›</span>${escHtml(jmeno)}
       </h1>
-      <button class="btn btn-primary btn-sm" onclick="openNovVyplata('${escHtml(jmeno)}')">+ Nová výplata</button>
+      <div class="btn-group">
+        <button class="btn btn-primary btn-sm" onclick="openNovVyplata('${escHtml(jmeno)}')">+ Nová výplata</button>
+        <button class="btn btn-secondary btn-sm" onclick="openPausalni('${escHtml(jmeno)}')">⚙️ Odvody</button>
+        <button class="btn btn-secondary btn-sm" onclick="nahratPasku('${escHtml(jmeno)}')">📎 Nahrát pásku</button>
+      </div>
     </div>
     <div id="zamDetail"><div class="loading-center"><span class="spinner"></span></div></div>`;
 
@@ -3202,7 +3197,13 @@ function renderKartaStatHtml(stats) {
   const firmy = Object.keys(stats);
   if (!firmy.length) return "";
   const rok = new Date().getFullYear();
+  // Použít localStorage jako fallback pro aktivní firmu
+  const ulozeneFirma = localStorage.getItem("aktivni_firma");
   const nekteraAktivni = firmy.some(f => stats[f].aktivni);
+  if (!nekteraAktivni && ulozeneFirma && firmy.includes(ulozeneFirma)) {
+    // Označit uloženou firmu jako aktivní vizuálně
+    firmy.forEach(f => { stats[f]._lokalneAktivni = (f === ulozeneFirma); });
+  }
 
   // řádek: label | měsíc / rok
   const r = (lbl, mesic, rocni) => `
@@ -3271,7 +3272,7 @@ function renderKartaStatHtml(stats) {
 
   return `<div style="display:flex;gap:.75rem;flex-wrap:wrap;margin-bottom:1rem">
     ${souhrn}
-    ${firmy.map((f,i) => card(f, stats[f], nekteraAktivni ? stats[f].aktivni : i===0)).join("")}
+    ${firmy.map((f,i) => card(f, stats[f], stats[f].aktivni || (!nekteraAktivni && stats[f]._lokalneAktivni))).join("")}
   </div>`;
 }
 
@@ -3279,6 +3280,7 @@ async function prepnoutTerminal(firma) {
   if (!confirm("Přepnout terminál pro " + firma + "? Měsíční čítač karet se vynuluje od dneška.")) return;
   await api("/api/config", { method: "POST", headers: {"Content-Type":"application/json"},
     body: JSON.stringify({ terminal_prepnout: firma }) });
+  localStorage.setItem("aktivni_firma", firma);
   toast("Terminál přepnut ✓");
   renderReporty();
 }
@@ -3347,13 +3349,16 @@ function sortReporty(col) {
   else { s.col = col; s.asc = false; }
   const rows = [...(App._reportyData || [])];
   rows.sort((a, b) => {
-    const va = a[col] ?? "", vb = b[col] ?? "";
+    let va = a[col] ?? "", vb = b[col] ?? "";
+    // Číselné sloupce
+    if (typeof va === "number" || !isNaN(parseFloat(va))) {
+      va = parseFloat(va) || 0; vb = parseFloat(vb) || 0;
+    }
     if (va < vb) return s.asc ? -1 : 1;
     if (va > vb) return s.asc ? 1 : -1;
     return 0;
   });
   renderReportyTable(rows);
-  loadReporty();
 }
 
 async function smazBudouciReporty() {
