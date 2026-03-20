@@ -2412,10 +2412,13 @@ async function loadStatistiky() {
     od:    document.getElementById("sOd")?.value||"",
     do:    document.getElementById("sDo")?.value||"",
   });
-  let data;
-  try { data = await api(`/api/statistiky?${params}`); } catch { return; }
-
   const el = document.getElementById("statContent");
+  if (el) el.innerHTML = `<div class="loading-center"><span class="spinner"></span></div>`;
+  let data;
+  try { data = await api(`/api/statistiky?${params}`); } catch(e) {
+    if (el) el.innerHTML = `<div style="color:var(--txt2);text-align:center;padding:1rem">Nepodařilo se načíst statistiky</div>`;
+    return;
+  }
   if (!el) return;
 
   el.innerHTML = `
