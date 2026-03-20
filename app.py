@@ -3619,6 +3619,21 @@ def _zpracuj_nove_faktury_z_drive():
                 ocr_data = _ocr_faktura(fpath)
                 print(f"✓ Drive: OCR dokončeno pro {fname}")
                 with get_db() as conn:
+                    # Kontrola duplicity podle čísla faktury
+                    cislo = ocr_data.get("cislo_faktury", "")
+                    if cislo:
+                        dup = conn.execute(
+                            "SELECT id FROM faktury WHERE cislo_faktury=? AND dodavatel LIKE ?",
+                            (cislo, "%MAKRO%")
+                        ).fetchone()
+                        if dup:
+                            print(f"⏭ Drive: duplicita č. {cislo}, přeskakuji")
+                            stats["preskoceno"] += 1
+                            conn.execute(
+                                "INSERT INTO drive_zpracovane (file_id, zpracovano_at) VALUES (?,?)",
+                                (f["id"], __import__("datetime").datetime.now().isoformat())
+                            )
+                            continue
                     conn.execute("""
                         INSERT INTO faktury (firma_zkratka, dodavatel, cislo_faktury,
                             datum_vystaveni, datum_splatnosti, celkem_s_dph,
