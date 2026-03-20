@@ -3122,20 +3122,16 @@ Jinak odpovídej normálně jako text."""
             model="claude-sonnet-4-20250514",
             max_tokens=2000,
             messages=[
-                {"role": "user", "content": kontext + "
-
-Dotaz: " + dotaz}
+                {"role": "user", "content": kontext + "\n\nDotaz: " + dotaz}
             ]
         )
         odpoved = msg.content[0].text.strip()
         # Detekce CSV exportu
         export = None
         if odpoved.startswith("EXPORT_CSV:"):
-            lines = odpoved.split("
-")
+            lines = odpoved.split("\n")
             fname = lines[0].replace("EXPORT_CSV:", "").strip()
-            csv_data = "
-".join(lines[1:])
+            csv_data = "\n".join(lines[1:])
             export = {"nazev": fname, "data": csv_data}
             odpoved = f"Připravil jsem export: **{fname}**"
         return jsonify({"odpoved": odpoved, "export": export})
