@@ -3092,7 +3092,9 @@ def api_ai_dotaz():
                 GROUP BY mesic, jmeno ORDER BY mesic, jmeno
             """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
 
-        def rows(r): return [dict(x) for x in r]
+        from decimal import Decimal
+        def _conv(v): return float(v) if isinstance(v, Decimal) else v
+        def rows(r): return [{k: _conv(v) for k,v in dict(x).items()} for x in r]
         kontext = f"""Jsi analytik restaurace/bistra. Máš přístup k těmto datům za rok {rok}{' pro firmu '+firma if firma else ''}:
 
 MĚSÍČNÍ PŘEHLED REPORTŮ (tržby v Kč):
