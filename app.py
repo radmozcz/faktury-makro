@@ -1710,8 +1710,16 @@ def api_faktura_delete(fid):
             if zdroj == "drive_auto" and soubor_cesta:
                 nazev = soubor_cesta.split("/")[-1]
                 try:
-                    conn.execute("DELETE FROM drive_zpracovane WHERE nazev_souboru=?", (nazev,))
-                    app.logger.info(f"Drive reset: smazán záznam {nazev} z drive_zpracovane")
+                    drive_svc = get_drive_service()
+                    if drive_svc:
+                        results = drive_svc.files().list(
+                            q=f"name='{nazev}' and trashed=false",
+                            fields="files(id,name)"
+                        ).execute()
+                        files = results.get("files", [])
+                        for df in files:
+                            conn.execute("DELETE FROM drive_zpracovane WHERE file_id=?", (df["id"],))
+                            app.logger.info(f"Drive reset: smazán záznam {df['id']} ({nazev})")
                 except Exception as e:
                     app.logger.warning(f"Drive reset chyba: {e}")
     if row:
