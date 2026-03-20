@@ -3135,7 +3135,10 @@ Jinak odpovídej normálně jako text."""
             odpoved = f"Připravil jsem export: **{fname}**"
         return jsonify({"odpoved": odpoved, "export": export})
     except Exception as e:
-        return jsonify({"chyba": str(e)}), 500
+        import traceback
+        tb = traceback.format_exc()
+        app.logger.error(f"api_ai_dotaz error: {tb}")
+        return jsonify({"chyba": tb}), 500
 
 
 @app.route("/api/export/reporty")
