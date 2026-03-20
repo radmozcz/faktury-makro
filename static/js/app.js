@@ -1926,7 +1926,6 @@ async function loadVyplatyKarty() {
         ${z.posledni?.datum ? czDate(z.posledni.datum) : "—"}
         ${z.posledni?.castka ? `<br><span style="color:var(--txt2);font-size:.78rem">${czInt(z.posledni.castka)}</span>` : ""}
       </td>
-      <td style="text-align:right">${czInt(z.celkem_mesic)}</td>
       <td style="text-align:right"><strong>${czInt(z.celkem_mesic)}</strong></td>
       <td style="text-align:right;color:var(--txt2)">${odv > 0 ? czInt(odv) : '—'}</td>
       <td style="text-align:right;font-weight:600">${czInt(celkemVcOdvody)}</td>
@@ -1947,7 +1946,6 @@ async function loadVyplatyKarty() {
           <th>Zaměstnanec</th>
           <th style="text-align:center">Poslední výplata</th>
           <th style="text-align:right">Tento měsíc</th>
-          <th style="text-align:right">Celkem</th>
           <th style="text-align:right">Odvody</th>
           <th style="text-align:right">Celkem vč. odvodů</th>
           <th style="text-align:right">Rok bez odvodů</th>
