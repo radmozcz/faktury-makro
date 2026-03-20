@@ -1710,7 +1710,7 @@ def api_faktura_delete(fid):
             if zdroj == "drive_auto" and soubor_cesta:
                 nazev = soubor_cesta.split("/")[-1]
                 try:
-                    drive_svc = get_drive_service()
+                    drive_svc, _ = get_drive_service()
                     if drive_svc:
                         results = drive_svc.files().list(
                             q=f"name='{nazev}' and trashed=false",
