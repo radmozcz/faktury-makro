@@ -2398,7 +2398,7 @@ async function renderStatistiky() {
     <div id="statContent"><div class="loading-center"><span class="spinner"></span></div></div>
     <div id="statAiChat" style="margin-bottom:1.5rem"></div>
     <div id="statPrehled" style="margin-top:1.5rem"></div>
-    <div id="statReporty" style="margin-top:1.5rem"></div>\`;
+    <div id="statReporty" style="margin-top:1.5rem"></div>`;
 
   initAiChat();
   loadStatistiky();
@@ -2917,8 +2917,7 @@ async function odeslitAiDotaz() {
         const url  = URL.createObjectURL(blob);
         exportBtn  = `<br><a href="${url}" download="${resp.export.nazev}" class="btn btn-secondary btn-sm" style="margin-top:.4rem;font-size:.78rem">⬇ Stáhnout ${escHtml(resp.export.nazev)}</a>`;
       }
-      const text = resp.odpoved.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/
-/g,'<br>');
+      const text = resp.odpoved.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g,'<br>');
       hist.innerHTML += `<div style="align-self:flex-start;background:var(--card-bg);border:1px solid var(--border);border-radius:2px 10px 10px 10px;padding:.4rem .75rem;max-width:90%;font-size:.88rem;line-height:1.5">${text}${exportBtn}</div>`;
       hist.scrollTop = hist.scrollHeight;
     }
