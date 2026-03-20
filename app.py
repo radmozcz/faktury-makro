@@ -3010,6 +3010,139 @@ def api_statistiky_prehled():
     return jsonify(result)
 
 
+@app.route("/api/statistiky/mesic-detail")
+@vyzaduj_prihlaseni
+def api_statistiky_mesic_detail():
+    rok   = request.args.get("rok", "")
+    mesic = request.args.get("mesic", "")  # "01" až "12"
+    firma = request.args.get("firma", "")
+    if not rok or not mesic:
+        return jsonify([])
+    od = f"{rok}-{mesic}-01"
+    # poslední den měsíce
+    import calendar as _cal
+    posledni = _cal.monthrange(int(rok), int(mesic))[1]
+    do = f"{rok}-{mesic}-{posledni:02d}"
+    fw = "AND firma_zkratka=?" if firma else ""
+    fp = [firma] if firma else []
+    with get_db() as conn:
+        rows = conn.execute(f"""
+            SELECT datum, den, smena, firma_zkratka,
+                karty, hotovost, trzba_vcpk as trzba,
+                vydaje, pk_celkem, pk50_ks, pk100_ks,
+                burger, burtgulas, pizza_cela, pizza_ctvrt, talire
+            FROM reporty
+            WHERE datum >= ? AND datum <= ? {fw}
+            ORDER BY datum
+        """, [od, do] + fp).fetchall()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/ai-dotaz", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_ai_dotaz():
+    import datetime as _dt
+    data   = request.json or {}
+    dotaz  = data.get("dotaz", "").strip()
+    rok    = data.get("rok", str(_dt.date.today().year))
+    firma  = data.get("firma", "")
+    if not dotaz:
+        return jsonify({"chyba": "Prázdný dotaz"}), 400
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return jsonify({"chyba": "ANTHROPIC_API_KEY není nastaven"}), 500
+    try:
+        with get_db() as conn:
+            fw = "AND firma_zkratka=?" if firma else ""
+            fp = [firma] if firma else []
+            # Měsíční přehled reportů
+            rep = conn.execute(f"""
+                SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY-MM') as mesic,
+                    ROUND(SUM(karty)::numeric,0) as karty,
+                    ROUND(SUM(hotovost)::numeric,0) as hotovost,
+                    ROUND(SUM(trzba_vcpk)::numeric,0) as trzba,
+                    ROUND(SUM(vydaje)::numeric,0) as vydaje,
+                    ROUND(SUM(pk_celkem)::numeric,0) as poukazky,
+                    SUM(burger) as burger, SUM(burtgulas) as burtgulas,
+                    SUM(pizza_cela) as pizza_cela, SUM(pizza_ctvrt) as pizza_ctvrt,
+                    SUM(talire) as talire, COUNT(*) as dni
+                FROM reporty WHERE datum >= ? AND datum <= ? {fw}
+                GROUP BY mesic ORDER BY mesic
+            """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
+            # Denní data za posledních 90 dní
+            dny = conn.execute(f"""
+                SELECT datum, firma_zkratka, karty, hotovost, trzba_vcpk as trzba,
+                    vydaje, pk_celkem, burger, burtgulas, pizza_cela, pizza_ctvrt, talire, smena
+                FROM reporty
+                WHERE datum >= ? {fw}
+                ORDER BY datum DESC LIMIT 90
+            """, [(_dt.date.today() - _dt.timedelta(days=90)).isoformat()] + fp).fetchall()
+            # Faktury měsíčně
+            fakt = conn.execute(f"""
+                SELECT TO_CHAR(NULLIF(datum_vystaveni,'')::date,'YYYY-MM') as mesic,
+                    dodavatel, ROUND(SUM(celkem_s_dph)::numeric,0) as castka, COUNT(*) as pocet
+                FROM faktury WHERE datum_vystaveni >= ? AND datum_vystaveni <= ?
+                {"AND firma_zkratka=?" if firma else ""}
+                GROUP BY mesic, dodavatel ORDER BY mesic, castka DESC
+            """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
+            # Výplaty
+            vypl = conn.execute(f"""
+                SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY-MM') as mesic,
+                    jmeno, ROUND(SUM(castka)::numeric,0) as castka
+                FROM vyplaty WHERE datum >= ? AND datum <= ?
+                {"AND firma_zkratka=?" if firma else ""}
+                GROUP BY mesic, jmeno ORDER BY mesic, jmeno
+            """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
+
+        def rows(r): return [dict(x) for x in r]
+        kontext = f"""Jsi analytik restaurace/bistra. Máš přístup k těmto datům za rok {rok}{' pro firmu '+firma if firma else ''}:
+
+MĚSÍČNÍ PŘEHLED REPORTŮ (tržby v Kč):
+{json.dumps(rows(rep), ensure_ascii=False, indent=2)}
+
+DENNÍ DATA (posledních 90 dní):
+{json.dumps(rows(dny), ensure_ascii=False, indent=2)}
+
+FAKTURY (náklady podle dodavatele):
+{json.dumps(rows(fakt), ensure_ascii=False, indent=2)}
+
+VÝPLATY:
+{json.dumps(rows(vypl), ensure_ascii=False, indent=2)}
+
+Odpovídej stručně a konkrétně v češtině.
+Pokud uživatel žádá export dat (CSV, tabulka, seznam), vrať odpověď ve formátu:
+EXPORT_CSV:nazev_souboru.csv
+datum,hodnota1,hodnota2
+řádek1...
+
+Jinak odpovídej normálně jako text."""
+
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=2000,
+            messages=[
+                {"role": "user", "content": kontext + "
+
+Dotaz: " + dotaz}
+            ]
+        )
+        odpoved = msg.content[0].text.strip()
+        # Detekce CSV exportu
+        export = None
+        if odpoved.startswith("EXPORT_CSV:"):
+            lines = odpoved.split("
+")
+            fname = lines[0].replace("EXPORT_CSV:", "").strip()
+            csv_data = "
+".join(lines[1:])
+            export = {"nazev": fname, "data": csv_data}
+            odpoved = f"Připravil jsem export: **{fname}**"
+        return jsonify({"odpoved": odpoved, "export": export})
+    except Exception as e:
+        return jsonify({"chyba": str(e)}), 500
+
+
 @app.route("/api/export/reporty")
 @vyzaduj_prihlaseni
 def export_reporty():

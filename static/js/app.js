@@ -2396,9 +2396,11 @@ async function renderStatistiky() {
       <button class="btn btn-primary btn-sm" onclick="loadStatistiky()">Zobrazit</button>
     </div>
     <div id="statContent"><div class="loading-center"><span class="spinner"></span></div></div>
+    <div id="statAiChat" style="margin-bottom:1.5rem"></div>
     <div id="statPrehled" style="margin-top:1.5rem"></div>
-    <div id="statReporty" style="margin-top:1.5rem"></div>`;
+    <div id="statReporty" style="margin-top:1.5rem"></div>\`;
 
+  initAiChat();
   loadStatistiky();
   loadPrehledStatistik();
   loadMesicniStatistiky();
@@ -2862,6 +2864,72 @@ async function saveConfig() {
 // ═══════════════════════════════════════════════════════════════
 //  Util
 // ═══════════════════════════════════════════════════════════════
+function initAiChat() {
+  const el = document.getElementById("statAiChat");
+  if (!el) return;
+  el._historie = [];
+  el.innerHTML = `
+    <div class="card">
+      <div class="card-title" style="display:flex;align-items:center;gap:.5rem">
+        🤖 AI asistent
+        <span style="font-size:.75rem;color:var(--txt2);font-weight:400">— zeptej se na data, požádej o export CSV...</span>
+      </div>
+      <div id="aiHistorie" style="max-height:320px;overflow-y:auto;margin-bottom:.75rem;display:flex;flex-direction:column;gap:.5rem"></div>
+      <div style="display:flex;gap:.5rem">
+        <input id="aiDotazInput" class="form-control" placeholder="Kolik burgerů bylo v únoru? Nebo: udělej CSV výpis karet za březen..."
+          style="flex:1" onkeydown="if(event.key==='Enter')odeslitAiDotaz()">
+        <button class="btn btn-primary btn-sm" onclick="odeslitAiDotaz()" id="aiOdeslatBtn">→ Odeslat</button>
+      </div>
+    </div>`;
+}
+
+async function odeslitAiDotaz() {
+  const input = document.getElementById("aiDotazInput");
+  const btn   = document.getElementById("aiOdeslatBtn");
+  const hist  = document.getElementById("aiHistorie");
+  const dotaz = input?.value?.trim();
+  if (!dotaz) return;
+  const rok   = document.getElementById("sRok")?.value || new Date().getFullYear();
+  const firma = document.getElementById("sFirma")?.value || "";
+
+  // Přidat dotaz do historie
+  hist.innerHTML += `<div style="align-self:flex-end;background:var(--primary-bg,#e8f4fd);border-radius:10px 10px 2px 10px;padding:.4rem .75rem;max-width:80%;font-size:.88rem">${escHtml(dotaz)}</div>`;
+  hist.innerHTML += `<div id="aiCekani" style="align-self:flex-start;color:var(--txt2);font-size:.85rem">⏳ Přemýšlím...</div>`;
+  hist.scrollTop = hist.scrollHeight;
+  input.value = "";
+  btn.disabled = true;
+
+  try {
+    const resp = await api("/api/ai-dotaz", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({dotaz, rok, firma})
+    });
+    document.getElementById("aiCekani")?.remove();
+
+    if (resp.chyba) {
+      hist.innerHTML += `<div style="align-self:flex-start;color:#ef4444;font-size:.85rem">❌ ${escHtml(resp.chyba)}</div>`;
+    } else {
+      // Export CSV?
+      let exportBtn = "";
+      if (resp.export) {
+        const blob = new Blob([resp.export.data], {type:"text/csv;charset=utf-8;"});
+        const url  = URL.createObjectURL(blob);
+        exportBtn  = `<br><a href="${url}" download="${resp.export.nazev}" class="btn btn-secondary btn-sm" style="margin-top:.4rem;font-size:.78rem">⬇ Stáhnout ${escHtml(resp.export.nazev)}</a>`;
+      }
+      const text = resp.odpoved.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/
+/g,'<br>');
+      hist.innerHTML += `<div style="align-self:flex-start;background:var(--card-bg);border:1px solid var(--border);border-radius:2px 10px 10px 10px;padding:.4rem .75rem;max-width:90%;font-size:.88rem;line-height:1.5">${text}${exportBtn}</div>`;
+      hist.scrollTop = hist.scrollHeight;
+    }
+  } catch(e) {
+    document.getElementById("aiCekani")?.remove();
+    hist.innerHTML += `<div style="color:#ef4444;font-size:.85rem">❌ Chyba spojení</div>`;
+  }
+  btn.disabled = false;
+  input.focus();
+}
+
 async function loadPrehledStatistik() {
   const rok   = document.getElementById("sRok")?.value || new Date().getFullYear();
   const firma = document.getElementById("sFirma")?.value || "";
@@ -2877,19 +2945,25 @@ async function loadPrehledStatistik() {
   const rows = data.map(d => {
     const mInt = parseInt(d.mesic);
     const mame = d.trzba > 0 || d.karty > 0 || d.hotovost > 0;
-    sum.karty     += d.karty     || 0;
-    sum.hotovost  += d.hotovost  || 0;
-    sum.trzba     += d.trzba     || 0;
-    sum.naklady   += d.naklady   || 0;
-    sum.poukazky  += d.poukazky  || 0;
-    return `<tr style="${mame ? '' : 'color:var(--txt2)'}">
-      <td><strong>${MCZ[mInt]}</strong></td>
-      <td style="text-align:right">${mame ? czInt(d.karty||0) : '—'}</td>
-      <td style="text-align:right">${mame ? czInt(d.hotovost||0) : '—'}</td>
-      <td style="text-align:right">${mame ? '<strong>'+czInt(d.trzba||0)+'</strong>' : '—'}</td>
-      <td style="text-align:right">${mame ? czInt(d.naklady||0) : '—'}</td>
-      <td style="text-align:right">${mame ? czInt(d.poukazky||0) : '—'}</td>
-    </tr>`;
+    sum.karty    += d.karty    || 0;
+    sum.hotovost += d.hotovost || 0;
+    sum.trzba    += d.trzba    || 0;
+    sum.naklady  += d.naklady  || 0;
+    sum.poukazky += d.poukazky || 0;
+    return `
+      <tr style="${mame ? 'cursor:pointer' : 'color:var(--txt2)'}" onclick="${mame ? `toggleMesicDetail('${rok}','${d.mesic}',this)` : ''}">
+        <td><strong>${MCZ[mInt]}</strong> ${mame ? '<span style="font-size:.7rem;color:var(--txt2)">▶</span>' : ''}</td>
+        <td style="text-align:right">${mame ? czInt(d.karty||0) : '—'}</td>
+        <td style="text-align:right">${mame ? czInt(d.hotovost||0) : '—'}</td>
+        <td style="text-align:right">${mame ? '<strong>'+czInt(d.trzba||0)+'</strong>' : '—'}</td>
+        <td style="text-align:right">${mame ? czInt(d.naklady||0) : '—'}</td>
+        <td style="text-align:right">${mame ? czInt(d.poukazky||0) : '—'}</td>
+      </tr>
+      <tr id="detail-${rok}-${d.mesic}" style="display:none">
+        <td colspan="6" style="padding:0;background:var(--bg)">
+          <div id="detail-inner-${rok}-${d.mesic}" style="padding:.5rem 1rem"></div>
+        </td>
+      </tr>`;
   }).join("");
 
   el.innerHTML = `
@@ -2915,6 +2989,58 @@ async function loadPrehledStatistik() {
         </tr></tfoot>
       </table></div>
     </div>`;
+}
+
+async function toggleMesicDetail(rok, mesic, tr) {
+  const firma = document.getElementById("sFirma")?.value || "";
+  const detailTr    = document.getElementById(`detail-${rok}-${mesic}`);
+  const detailInner = document.getElementById(`detail-inner-${rok}-${mesic}`);
+  const arrow = tr.querySelector("span");
+  if (!detailTr) return;
+
+  // Zavřít
+  if (detailTr.style.display !== "none") {
+    detailTr.style.display = "none";
+    if (arrow) arrow.textContent = "▶";
+    return;
+  }
+
+  // Otevřít + načíst
+  detailTr.style.display = "";
+  if (arrow) arrow.textContent = "▼";
+  detailInner.innerHTML = `<div class="loading-center"><span class="spinner"></span></div>`;
+
+  let dny;
+  try {
+    dny = await api(`/api/statistiky/mesic-detail?rok=${rok}&mesic=${mesic}&firma=${encodeURIComponent(firma)}`);
+  } catch { detailInner.innerHTML = "Chyba načítání"; return; }
+
+  if (!dny.length) { detailInner.innerHTML = `<em style="color:var(--txt2);font-size:.85rem">Žádné záznamy</em>`; return; }
+
+  const DNY = {"Monday":"Po","Tuesday":"Út","Wednesday":"St","Thursday":"Čt","Friday":"Pá","Saturday":"So","Sunday":"Ne"};
+  const dRows = dny.map(d => `
+    <tr onclick="editReport(${d.id || 0})" style="cursor:pointer">
+      <td style="font-size:.82rem">${d.datum} <span style="color:var(--txt2)">${d.den||''}</span></td>
+      <td style="font-size:.82rem;color:var(--txt2)">${escHtml(d.smena||'')}</td>
+      <td style="text-align:right;font-size:.82rem">${czInt(d.karty||0)}</td>
+      <td style="text-align:right;font-size:.82rem">${czInt(d.hotovost||0)}</td>
+      <td style="text-align:right;font-size:.82rem"><strong>${czInt(d.trzba||0)}</strong></td>
+      <td style="text-align:right;font-size:.82rem">${czInt(d.pk_celkem||0)}</td>
+      <td style="text-align:center;font-size:.82rem">${d.burger||0}/${d.burtgulas||0}/${d.pizza_cela||0}+${d.pizza_ctvrt||0}</td>
+    </tr>`).join("");
+
+  detailInner.innerHTML = `
+    <table style="width:100%;font-size:.82rem">
+      <thead><tr style="font-size:.75rem;color:var(--txt2)">
+        <th>Datum</th><th>Směna</th>
+        <th style="text-align:right">Karty</th>
+        <th style="text-align:right">Hotovost</th>
+        <th style="text-align:right">Tržba</th>
+        <th style="text-align:right">PK</th>
+        <th style="text-align:center">🍔/🍲/🍕</th>
+      </tr></thead>
+      <tbody>${dRows}</tbody>
+    </table>`;
 }
 
 async function loadMesicniStatistiky() {
