@@ -615,7 +615,7 @@ async function loadFaktury() {
       </tr></thead>
       <tbody>
        ${data.faktury.map(f => `
-            <tr class="faktura-row" data-id="${f.id}" style="${f.duplicita_id ? 'opacity:0.55' : f.stav==='ke_zpracovani' ? 'background:#fffbeb' : ''}">
+            <tr class="faktura-row" data-id="${f.id}" style="${f.duplicita_id ? 'background:#fff7ed;border-left:3px solid #f59e0b' : f.stav==='ke_zpracovani' ? 'background:#fffbeb' : ''}">
               <td><span class="badge badge-zaplaceno" style="background:var(--green-pale)">${f.firma_zkratka}</span></td>
               <td>${escHtml(f.dodavatel)}</td>
               <td>${escHtml(f.cislo_faktury||"–")}${f.duplicita_id ? " <small style='color:orange'>⚠️ dup #" + f.duplicita_id + "</small>" : ""}</td>
@@ -718,6 +718,7 @@ async function openFakturaDetail(id) {
     <div class="btn-group" style="margin-top:1rem">
       <button class="btn btn-primary" onclick="saveFakturaEdit(${f.id})">💾 Uložit změny</button>
       <button class="btn btn-secondary btn-sm" onclick="presunDoSoukromych(${f.id})">📦 → Soukromé výdaje</button>
+      ${f.duplicita_id ? `<button class="btn btn-secondary btn-sm" onclick="neniDuplicita(${f.id})" style="background:#f59e0b;color:#fff;border:none">✅ Není duplicita</button>` : ''}
       <button class="btn btn-danger btn-sm" onclick="deleteFaktura(${f.id},'${f.zdroj}')">${f.zdroj === 'drive_auto' ? '🗑 Smazat + Reset Drive' : '🗑 Smazat'}</button>
     </div>`;
 
@@ -786,6 +787,17 @@ async function saveStav(id) {
     body: JSON.stringify({ stav })
   });
   toast("Stav uložen");
+  closeModal();
+  loadFaktury();
+}
+
+async function neniDuplicita(id) {
+  await api(`/api/faktury/${id}`, {
+    method: "PUT",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ duplicita_id: null })
+  });
+  toast("Označení duplicity odstraněno ✓");
   closeModal();
   loadFaktury();
 }

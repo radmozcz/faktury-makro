@@ -1735,7 +1735,7 @@ def api_faktura_delete(fid):
 def api_faktura_update(fid):
     data = request.json
     fields = ["firma_zkratka","dodavatel","cislo_faktury","datum_vystaveni",
-              "datum_splatnosti","zpusob_uhrady","stav","celkem_s_dph"]
+              "datum_splatnosti","zpusob_uhrady","stav","celkem_s_dph","duplicita_id"]
     set_parts = [f"{f}=?" for f in fields if f in data]
     vals = [data[f] for f in fields if f in data]
     if set_parts:
