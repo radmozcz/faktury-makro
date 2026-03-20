@@ -1875,6 +1875,7 @@ async function loadVyplatyKarty() {
     if (!zam[v.jmeno]) zam[v.jmeno] = { posledni: null, celkem_mesic: 0, celkem_rok: 0, naklady_mesic: 0, naklady_rok: 0 };
     if (!zam[v.jmeno].posledni || v.datum > zam[v.jmeno].posledni.datum)
       zam[v.jmeno].posledni = v;
+    if (v.paska_url) zam[v.jmeno].paska_url = v.paska_url;
   });
   dataMesic.vyplaty.forEach(v => {
     if (!zam[v.jmeno]) zam[v.jmeno] = { posledni: null, celkem_mesic: 0, celkem_rok: 0, naklady_mesic: 0, naklady_rok: 0 };
@@ -1889,7 +1890,9 @@ async function loadVyplatyKarty() {
   for (const jmeno of Object.keys(zam)) {
     try {
       const od = await api(`/api/pausalni-odvody/${encodeURIComponent(jmeno)}`);
-      const sumOdvody = (od.odvody||[]).reduce((s,o)=>s+o.castka,0);
+      const odvody = od.odvody || od || [];
+      const sumOdvody = odvody.reduce((s,o)=>s+(o.castka||0),0);
+      zam[jmeno].odvody = odvody;
       zam[jmeno].naklady_mesic = zam[jmeno].celkem_mesic + sumOdvody;
       zam[jmeno].naklady_rok   = zam[jmeno].celkem_rok   + sumOdvody * 12;
     } catch {}
@@ -1906,46 +1909,127 @@ async function loadVyplatyKarty() {
   });
 
   const mesicLabel = new Date(mesicOd).toLocaleDateString("cs-CZ",{month:"long",year:"numeric"});
+
+  const rows = jmena.map(jmeno => {
+    const z = zam[jmeno];
+    const jeVendy = jmeno === "Vendy";
+    const odvodyHtml = jeVendy && z.odvody?.length
+      ? z.odvody.map(o => `<span style="font-size:.72rem;color:var(--txt2);margin-right:.4rem">${escHtml(o.nazev)}: ${czInt(o.castka)} Kč</span>`).join("")
+      : "";
+    return `<tr style="cursor:pointer" onclick="renderZamestnanecDetail('${escHtml(jmeno)}')">
+      <td>
+        <strong>${escHtml(jmeno)}</strong>
+        <button class="btn btn-secondary btn-sm" style="font-size:.7rem;padding:.1rem .4rem;margin-left:.5rem"
+          onclick="event.stopPropagation();openPausalni('${escHtml(jmeno)}')">⚙️ odvody</button>
+        <button class="btn btn-secondary btn-sm" style="font-size:.7rem;padding:.1rem .4rem;margin-left:.3rem"
+          onclick="event.stopPropagation();nahratPasku('${escHtml(jmeno)}')">📎 páska</button>
+        ${z.paska_url ? `<a href="${z.paska_url}" target="_blank" style="font-size:.7rem;margin-left:.3rem" onclick="event.stopPropagation()">📄 zobrazit</a>` : ""}
+        ${odvodyHtml ? `<div style="margin-top:.2rem">${odvodyHtml}</div>` : ""}
+      </td>
+      <td style="text-align:center;font-size:.85rem">
+        ${z.posledni?.datum ? czDate(z.posledni.datum) : "—"}
+        ${z.posledni?.castka ? `<br><span style="color:var(--txt2);font-size:.78rem">${czInt(z.posledni.castka)} Kč</span>` : ""}
+      </td>
+      <td style="text-align:right"><strong>${czInt(z.celkem_mesic)} Kč</strong></td>
+      <td style="text-align:right;color:#dc2626;font-size:.85rem">${czInt(z.naklady_mesic)} Kč</td>
+      <td style="text-align:right">${czInt(z.celkem_rok)} Kč</td>
+      <td style="text-align:right;color:#dc2626;font-size:.85rem">${czInt(z.naklady_rok)} Kč</td>
+      <td onclick="event.stopPropagation()">
+        <button class="btn btn-primary btn-sm" style="font-size:.75rem"
+          onclick="openNovVyplata('${escHtml(jmeno)}')">+ Výplata</button>
+        <button class="btn btn-secondary btn-sm" style="font-size:.75rem"
+          onclick="openPausalni('${escHtml(jmeno)}')">⚙️</button>
+      </td>
+    </tr>`;
+  }).join("");
+
   el.innerHTML = `
-    <div style="font-size:.85rem;color:var(--txt2);margin-bottom:1rem">Aktuální měsíc: <strong>${mesicLabel}</strong> &nbsp;·&nbsp; Rok ${zvolenyRok}</div>
-    <div style="display:flex;flex-wrap:wrap;gap:1rem">
-      ${jmena.map(jmeno => {
-        const z = zam[jmeno];
-        return `
-        <div class="card" style="flex:1;min-width:220px;max-width:300px;cursor:pointer;transition:box-shadow .2s;padding:1.2rem"
-             onclick="renderZamestnanecDetail('${escHtml(jmeno)}')"
-             onmouseover="this.style.boxShadow='0 4px 24px rgba(0,0,0,.13)'"
-             onmouseout="this.style.boxShadow=''">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.8rem">
-            <strong style="font-size:1.1rem">${escHtml(jmeno)}</strong>
-            <button class="btn btn-secondary btn-sm" style="font-size:.75rem;padding:.2rem .5rem"
-                    onclick="event.stopPropagation();openPausalni('${escHtml(jmeno)}')">⚙️ Odvody</button>
-          </div>
-          <div style="font-size:.8rem;color:var(--txt2);margin-bottom:.6rem">
-            Poslední: <strong>${czMoney(z.posledni?.castka)}</strong>
-            ${z.posledni?.datum ? `<span style="margin-left:.4rem">${czDate(z.posledni.datum)}</span>` : ""}
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem;font-size:.85rem">
-            <div style="background:var(--bg);border-radius:6px;padding:.4rem .6rem">
-              <div style="color:var(--txt2);font-size:.75rem">Měsíc</div>
-              <div style="font-weight:700">${czMoney(z.celkem_mesic)}</div>
-            </div>
-            <div style="background:var(--bg);border-radius:6px;padding:.4rem .6rem">
-              <div style="color:var(--txt2);font-size:.75rem">Náklady měsíc</div>
-              <div style="font-weight:700;color:#dc2626">${czMoney(z.naklady_mesic)}</div>
-            </div>
-            <div style="background:var(--bg);border-radius:6px;padding:.4rem .6rem">
-              <div style="color:var(--txt2);font-size:.75rem">Rok ${zvolenyRok}</div>
-              <div style="font-weight:700">${czMoney(z.celkem_rok)}</div>
-            </div>
-            <div style="background:var(--bg);border-radius:6px;padding:.4rem .6rem">
-              <div style="color:var(--txt2);font-size:.75rem">Náklady rok</div>
-              <div style="font-weight:700;color:#dc2626">${czMoney(z.naklady_rok)}</div>
-            </div>
-          </div>
-        </div>`;
-      }).join("")}
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+        <span style="font-size:.85rem;color:var(--txt2)">Měsíc: <strong>${mesicLabel}</strong> &nbsp;·&nbsp; Rok ${zvolenyRok}</span>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Zaměstnanec</th>
+          <th style="text-align:center">Poslední výplata</th>
+          <th style="text-align:right">Měsíc</th>
+          <th style="text-align:right">+ Odvody</th>
+          <th style="text-align:right">Rok ${zvolenyRok}</th>
+          <th style="text-align:right">+ Odvody</th>
+          <th></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
     </div>`;
+}
+
+function nahratPaskuMesic(jmeno, mesic) {
+  openModal("📎 Nahrát pásku – " + jmeno + " – " + mesic, `
+    <div style="margin-bottom:1rem;font-size:.9rem;color:var(--txt2)">PDF výplatní pásky za <strong>${mesic}</strong>.</div>
+    <input type="file" id="paskaFile" accept=".pdf" class="form-control" style="margin-bottom:1rem">
+    <div id="paskaStatus" style="font-size:.85rem;color:var(--txt2)"></div>
+    <div style="margin-top:1rem;display:flex;gap:.5rem;justify-content:flex-end">
+      <button class="btn btn-secondary btn-sm" onclick="closeModal()">Zrušit</button>
+      <button class="btn btn-primary btn-sm" onclick="uploadPaskuMesic('${escHtml(jmeno)}','${mesic}')">⬆ Nahrát</button>
+    </div>`);
+}
+
+async function uploadPaskuMesic(jmeno, mesic) {
+  const file = document.getElementById("paskaFile")?.files[0];
+  const status = document.getElementById("paskaStatus");
+  if (!file) { if(status) status.textContent = "Vyberte soubor."; return; }
+  if (status) status.textContent = "Nahrávám...";
+  const fd = new FormData();
+  fd.append("soubor", file);
+  fd.append("jmeno", jmeno);
+  fd.append("mesic", mesic);
+  try {
+    const resp = await fetch("/api/vyplaty/nahrat-pasku", { method: "POST", body: fd });
+    const data = await resp.json();
+    if (data.url) {
+      closeModal();
+      toast("Páska nahrána ✓");
+      renderZamestnanecDetail(jmeno);
+    } else {
+      if (status) status.textContent = "Chyba: " + (data.chyba || "neznámá");
+    }
+  } catch(e) {
+    if (status) status.textContent = "Chyba nahrávání.";
+  }
+}
+
+function nahratPasku(jmeno) {
+  openModal("📎 Nahrát výplatní pásku – " + jmeno, `
+    <div style="margin-bottom:1rem;font-size:.9rem;color:var(--txt2)">Vyberte PDF soubor výplatní pásky za aktuální měsíc.</div>
+    <input type="file" id="paskaFile" accept=".pdf" class="form-control" style="margin-bottom:1rem">
+    <div id="paskaStatus" style="font-size:.85rem;color:var(--txt2)"></div>
+    <div style="margin-top:1rem;display:flex;gap:.5rem;justify-content:flex-end">
+      <button class="btn btn-secondary btn-sm" onclick="closeModal()">Zrušit</button>
+      <button class="btn btn-primary btn-sm" onclick="uploadPasku('${escHtml(jmeno)}')">⬆ Nahrát</button>
+    </div>`);
+}
+
+async function uploadPasku(jmeno) {
+  const file = document.getElementById("paskaFile")?.files[0];
+  const status = document.getElementById("paskaStatus");
+  if (!file) { if(status) status.textContent = "Vyberte soubor."; return; }
+  if (status) status.textContent = "Nahrávám...";
+  const fd = new FormData();
+  fd.append("soubor", file);
+  fd.append("jmeno", jmeno);
+  try {
+    const resp = await fetch("/api/vyplaty/nahrat-pasku", { method: "POST", body: fd });
+    const data = await resp.json();
+    if (data.url) {
+      closeModal();
+      toast("Páska nahrána ✓");
+      loadVyplatyKarty();
+    } else {
+      if (status) status.textContent = "Chyba: " + (data.chyba || "neznámá");
+    }
+  } catch(e) {
+    if (status) status.textContent = "Chyba nahrávání.";
+  }
 }
 
 async function renderZamestnanecDetail(jmeno) {
@@ -1990,6 +2074,10 @@ async function renderZamestnanecDetail(jmeno) {
         <span style="font-size:1rem;font-weight:700;flex:1">${nazevMesice}</span>
         <span style="font-weight:600;color:#16a34a">${czMoney(celkem)}</span>
         <span style="color:var(--txt2);font-size:.85rem">${vyplaty.length} zázn.</span>
+        ${(() => { const pu = vyplaty.find(v=>v.paska_url)?.paska_url; return pu
+          ? `<a href="${pu}" target="_blank" onclick="event.stopPropagation()" style="font-size:.75rem;text-decoration:none">📄 páska</a>`
+          : `<button class="btn btn-secondary btn-sm" style="font-size:.72rem;padding:.1rem .45rem"
+              onclick="event.stopPropagation();nahratPaskuMesic('${escHtml(jmeno)}','${klic}')">📎 páska</button>`; })()}
         <span class="accordion-arrow" style="transition:transform .2s">▼</span>
       </div>
       <div id="zm_${klic}" style="display:none;border-top:1px solid var(--border)">

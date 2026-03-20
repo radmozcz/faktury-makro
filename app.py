@@ -567,6 +567,16 @@ def migrate_db():
             id SERIAL PRIMARY KEY, file_id TEXT UNIQUE, zpracovano_at TEXT)""")
         conn.execute("""CREATE TABLE IF NOT EXISTS drive_channels (
             id SERIAL PRIMARY KEY, channel_id TEXT, resource_id TEXT, expiration TEXT)""")
+    # paska_url ve vyplaty
+    with get_db() as conn:
+        if _USE_PG:
+            cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='vyplaty'")
+            vypl_cols = [r["column_name"] for r in cur.fetchall()]
+        else:
+            vypl_cols = [row[1] for row in conn.execute("PRAGMA table_info(vyplaty)").fetchall()]
+        if "paska_url" not in vypl_cols:
+            try: conn.execute("ALTER TABLE vyplaty ADD COLUMN paska_url TEXT")
+            except Exception: pass
     print("migrate_db OK")
 
 
@@ -1978,6 +1988,153 @@ def api_pausalni_save(jmeno):
                     (jmeno, nazev, castka, i)
                 )
     return jsonify({"ok": True})
+
+
+@app.route("/api/vyplaty/nahrat-pasku", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_nahrat_pasku():
+    jmeno = request.form.get("jmeno", "").strip()
+    soubor = request.files.get("soubor")
+    if not jmeno or not soubor:
+        return jsonify({"chyba": "Chybí jméno nebo soubor"}), 400
+    try:
+        import tempfile, os as _os
+        from datetime import date as _date
+        mesic = _date.today().strftime("%Y-%m")
+        fname = f"paska_{jmeno}_{mesic}.pdf"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            soubor.save(tmp.name)
+            gcs_url = upload_to_gcs(tmp.name, f"vyplaty/{fname}")
+            _os.unlink(tmp.name)
+        if not gcs_url:
+            return jsonify({"chyba": "Nahrávání do GCS selhalo"}), 500
+        # Uložit URL ke všem výplatám daného zaměstnance v daném měsíci
+        mesic = request.form.get("mesic", _date.today().strftime("%Y-%m"))
+        od_m  = f"{mesic}-01"
+        import calendar as _cal
+        rok_m, mes_m = mesic.split("-")
+        posl = _cal.monthrange(int(rok_m), int(mes_m))[1]
+        do_m  = f"{mesic}-{posl:02d}"
+        with get_db() as conn:
+            conn.execute("""
+                UPDATE vyplaty SET paska_url=?
+                WHERE jmeno=? AND datum>=? AND datum<=?
+            """, (gcs_url, jmeno, od_m, do_m))
+            # Pokud není žádná výplata v tom měsíci, ulož k poslední
+            if conn.execute("SELECT COUNT(*) as c FROM vyplaty WHERE jmeno=? AND datum>=? AND datum<=?",
+                           (jmeno, od_m, do_m)).fetchone()["c"] == 0:
+                conn.execute("""
+                    UPDATE vyplaty SET paska_url=?
+                    WHERE id = (SELECT id FROM vyplaty WHERE jmeno=? ORDER BY datum DESC, id DESC LIMIT 1)
+                """, (gcs_url, jmeno))
+        return jsonify({"url": gcs_url})
+    except Exception as e:
+        return jsonify({"chyba": str(e)}), 500
+
+
+@app.route("/api/vyplaty/paska-pdf")
+@vyzaduj_prihlaseni
+def api_vyplatni_paska_pdf():
+    from reportlab.lib.pagesizes import A5
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import mm
+    import io
+
+    jmeno = request.args.get("jmeno", "")
+    od    = request.args.get("od", "")
+    do_   = request.args.get("do", "")
+    if not jmeno:
+        return jsonify({"chyba": "Chybí jméno"}), 400
+
+    with get_db() as conn:
+        vyplaty = conn.execute(
+            "SELECT datum, castka, poznamka, firma_zkratka FROM vyplaty WHERE jmeno=? AND datum>=? AND datum<=? ORDER BY datum",
+            (jmeno, od, do_)
+        ).fetchall()
+        odvody = conn.execute(
+            "SELECT nazev, castka FROM pausalni_odvody WHERE jmeno=? ORDER BY poradi, nazev",
+            (jmeno,)
+        ).fetchall()
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A5,
+        leftMargin=15*mm, rightMargin=15*mm, topMargin=15*mm, bottomMargin=15*mm)
+
+    styles = getSampleStyleSheet()
+    nadpis = ParagraphStyle("nadpis", parent=styles["Normal"], fontSize=13, fontName="Helvetica-Bold", spaceAfter=4*mm)
+    normal = ParagraphStyle("normal", parent=styles["Normal"], fontSize=9, fontName="Helvetica")
+    maly   = ParagraphStyle("maly",   parent=styles["Normal"], fontSize=8, fontName="Helvetica", textColor=colors.grey)
+
+    mesic_label = od[:7] if od else ""
+    celkem_vyplata = sum(float(v["castka"] if isinstance(v, dict) else v[1]) for v in vyplaty)
+    celkem_odvody  = sum(float(o["castka"] if isinstance(o, dict) else o[1]) for o in odvody)
+
+    story = []
+    story.append(Paragraph(f"Výplatní páska – {jmeno}", nadpis))
+    story.append(Paragraph(f"Období: {mesic_label}", maly))
+    story.append(Spacer(1, 4*mm))
+
+    # Výplaty
+    story.append(Paragraph("Výplaty / zálohy:", ParagraphStyle("h", parent=normal, fontName="Helvetica-Bold", spaceAfter=2*mm)))
+    vdata = [["Datum", "Firma", "Částka", "Poznámka"]]
+    for v in vyplaty:
+        if isinstance(v, dict):
+            vdata.append([v.get("datum",""), v.get("firma_zkratka",""), f"{czInt_py(v.get('castka',0))} Kč", v.get("poznamka","") or ""])
+        else:
+            vdata.append([v[0], v[3] or "", f"{czInt_py(v[1])} Kč", v[2] or ""])
+    vdata.append(["", "CELKEM", f"{czInt_py(celkem_vyplata)} Kč", ""])
+    t = Table(vdata, colWidths=[22*mm, 18*mm, 28*mm, 50*mm])
+    t.setStyle(TableStyle([
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTSIZE", (0,0), (-1,-1), 8),
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#f3f4f6")),
+        ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#fef9c3")),
+        ("FONTNAME", (0,-1), (-1,-1), "Helvetica-Bold"),
+        ("GRID", (0,0), (-1,-1), 0.3, colors.grey),
+        ("ALIGN", (2,0), (2,-1), "RIGHT"),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 5*mm))
+
+    # Odvody
+    if odvody:
+        story.append(Paragraph("Paušální odvody:", ParagraphStyle("h", parent=normal, fontName="Helvetica-Bold", spaceAfter=2*mm)))
+        odata = [["Položka", "Měsíčně"]]
+        for o in odvody:
+            if isinstance(o, dict):
+                odata.append([o.get("nazev",""), f"{czInt_py(o.get('castka',0))} Kč"])
+            else:
+                odata.append([o[0], f"{czInt_py(o[1])} Kč"])
+        odata.append(["CELKEM odvody", f"{czInt_py(celkem_odvody)} Kč"])
+        ot = Table(odata, colWidths=[80*mm, 28*mm])
+        ot.setStyle(TableStyle([
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("FONTSIZE", (0,0), (-1,-1), 8),
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#f3f4f6")),
+            ("BACKGROUND", (0,-1), (-1,-1), colors.HexColor("#fee2e2")),
+            ("FONTNAME", (0,-1), (-1,-1), "Helvetica-Bold"),
+            ("GRID", (0,0), (-1,-1), 0.3, colors.grey),
+            ("ALIGN", (1,0), (1,-1), "RIGHT"),
+        ]))
+        story.append(ot)
+        story.append(Spacer(1, 4*mm))
+        story.append(Paragraph(f"Celkem náklady: {czInt_py(celkem_vyplata + celkem_odvody)} Kč",
+            ParagraphStyle("total", parent=normal, fontName="Helvetica-Bold", fontSize=10)))
+
+    doc.build(story)
+    buf.seek(0)
+    fname = f"vyplatni_paska_{jmeno}_{mesic_label}.pdf"
+    return send_file(buf, mimetype="application/pdf",
+        as_attachment=False, download_name=fname)
+
+
+def czInt_py(v):
+    try:
+        return f"{int(float(v or 0)):,}".replace(",", " ")
+    except Exception:
+        return "0"
 
 
 # ── API: VÝDAJE ───────────────────────────────────────────────────────────────
