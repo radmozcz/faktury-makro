@@ -717,7 +717,9 @@ async function openFakturaDetail(id) {
     <button class="btn btn-secondary btn-sm" style="margin-top:.5rem" onclick="editPolozkaAdd()">+ Přidat položku</button>
     <div class="btn-group" style="margin-top:1rem">
       <button class="btn btn-primary" onclick="saveFakturaEdit(${f.id})">💾 Uložit změny</button>
-      <button class="btn btn-danger btn-sm" onclick="deleteFaktura(${f.id},'${f.zdroj}')">${f.zdroj === 'drive_auto' ? '🗑 Smazat + Reset Drive' : '🗑 Smazat'}</button>      </div>`;
+      <button class="btn btn-secondary btn-sm" onclick="presunDoSoukromych(${f.id})">📦 → Soukromé výdaje</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteFaktura(${f.id},'${f.zdroj}')">${f.zdroj === 'drive_auto' ? '🗑 Smazat + Reset Drive' : '🗑 Smazat'}</button>
+    </div>`;
 
   openModal(`Faktura – ${escHtml(f.dodavatel)} ${czDate(f.datum_vystaveni)}`, body);
 }
@@ -786,6 +788,39 @@ async function saveStav(id) {
   toast("Stav uložen");
   closeModal();
   loadFaktury();
+}
+
+async function presunDoSoukromych(id) {
+  if (!confirm("Přesunout tuto fakturu do Soukromých výdajů?\nFaktura bude smazána ze seznamu faktur.")) return;
+  let data;
+  try { data = await api(`/api/faktury/${id}`); } catch { return; }
+  const f = data.faktura;
+  const polozky = (data.polozky || []).map(p => ({
+    nazev: p.zbozi_nazev || p.nazev,
+    castka: p.celkem_s_dph
+  }));
+  const payload = {
+    firma_zkratka: f.firma_zkratka || "FP",
+    dodavatel: f.dodavatel,
+    datum: f.datum_vystaveni,
+    datum_splatnosti: f.datum_splatnosti,
+    castka: f.celkem_s_dph,
+    zpusob_uhrady: f.zpusob_uhrady || "hotovost",
+    stav: "zaplaceno",
+    popis: `Přesunuto z faktur: ${f.cislo_faktury || f.dodavatel}`,
+    zdroj: "faktura",
+    typ: "soukrome",
+    polozky
+  };
+  try {
+    await api("/api/vydaje", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload) });
+    await api(`/api/faktury/${id}`, { method: "DELETE" });
+    toast("✅ Přesunuto do Soukromých výdajů");
+    closeModal();
+    loadFaktury();
+  } catch(e) {
+    toast("Chyba: " + e.message, true);
+  }
 }
 
 async function deleteFaktura(id, zdroj) {
@@ -891,7 +926,7 @@ function renderNahrat() {
 
       <div style="display:flex;gap:.5rem;margin-bottom:1rem;border-bottom:2px solid var(--border);padding-bottom:0">
         <button id="tabPdf" class="tab-btn tab-active" onclick="switchTab('pdf')">📄 PDF soubor</button>
-        <button id="tabText" class="tab-btn" onclick="switchTab('text')">📋 Vložit text</button>
+        <button id="tabText" class="tab-btn" onclick="switchTab('text');zkontrolovatDriveMobil()">📱 Z mobilu</button>
         <button id="tabHromadne" class="tab-btn" onclick="switchTab('hromadne')">📦 Hromadné nahrání</button>
         <button id="tabRucni" class="tab-btn" onclick="switchTab('rucni')">✏️ Ruční zadání</button>
       </div>
@@ -909,13 +944,9 @@ function renderNahrat() {
       </div>
 
       <div id="tabPanelText" style="display:none">
-        <p style="color:var(--txt2);font-size:.9rem;margin-bottom:.7rem">
-          Zkopírujte text faktury z PDF prohlížeče nebo e-mailu a vložte ho sem (Ctrl+V):
-        </p>
-        <textarea id="textInput" class="form-control" rows="10" style="font-family:monospace;font-size:.8rem"
-          placeholder="Sem vložte zkopírovaný text faktury MAKRO (Ctrl+V)..."></textarea>
-        <button class="btn btn-primary" style="margin-top:.7rem" onclick="zpracovatText()">🔍 Zpracovat text</button>
-        <div id="textStatus" style="margin-top:.5rem;color:var(--txt2);font-size:.9rem"></div>
+        <div id="mobilDriveStatus" style="padding:1rem;font-size:.95rem;color:var(--txt2)">
+          <span class="spinner"></span> Kontroluji Drive složku...
+        </div>
       </div>
 
       <div id="tabPanelHromadne" style="display:none">
@@ -997,6 +1028,30 @@ function renderNahrat() {
   setupDropzone();
   setupDropzoneHromadne();
   rUpdateTotal();
+}
+
+async function zkontrolovatDriveMobil() {
+  const statusEl = document.getElementById("mobilDriveStatus");
+  if (statusEl) statusEl.innerHTML = `<span class="spinner"></span> Kontroluji Drive složku...`;
+  try {
+    const res = await api("/api/drive-zkontrolovat", { method: "POST" });
+    if (res.error) {
+      if (statusEl) statusEl.innerHTML = `❌ Chyba: ${res.error}`;
+      return;
+    }
+    const stazeno = res.stazeno || 0;
+    const preskoceno = res.preskoceno || 0;
+    const chyby = res.chyby || 0;
+    let msg = stazeno > 0
+      ? `✅ Staženo <strong>${stazeno}</strong> nových faktur`
+      : `ℹ️ Žádné nové faktury`;
+    if (preskoceno > 0) msg += ` &nbsp;|&nbsp; ⏭ ${preskoceno} přeskočeno (již zpracováno)`;
+    if (chyby > 0) msg += ` &nbsp;|&nbsp; ⚠️ ${chyby} chyb`;
+    if (statusEl) statusEl.innerHTML = msg;
+    if (stazeno > 0) loadFaktury();
+  } catch(e) {
+    if (statusEl) statusEl.innerHTML = `❌ ${e.message}`;
+  }
 }
 
 async function zkontrolovatDriveNyni() {
@@ -2659,6 +2714,30 @@ async function registrovatDriveWebhook() {
     if (statusEl) statusEl.textContent = "❌ " + e.message;
   }
 }
+async function zkontrolovatDriveMobil() {
+  const statusEl = document.getElementById("mobilDriveStatus");
+  if (statusEl) statusEl.innerHTML = `<span class="spinner"></span> Kontroluji Drive složku...`;
+  try {
+    const res = await api("/api/drive-zkontrolovat", { method: "POST" });
+    if (res.error) {
+      if (statusEl) statusEl.innerHTML = `❌ Chyba: ${res.error}`;
+      return;
+    }
+    const stazeno = res.stazeno || 0;
+    const preskoceno = res.preskoceno || 0;
+    const chyby = res.chyby || 0;
+    let msg = stazeno > 0
+      ? `✅ Staženo <strong>${stazeno}</strong> nových faktur`
+      : `ℹ️ Žádné nové faktury`;
+    if (preskoceno > 0) msg += ` &nbsp;|&nbsp; ⏭ ${preskoceno} přeskočeno (již zpracováno)`;
+    if (chyby > 0) msg += ` &nbsp;|&nbsp; ⚠️ ${chyby} chyb`;
+    if (statusEl) statusEl.innerHTML = msg;
+    if (stazeno > 0) loadFaktury();
+  } catch(e) {
+    if (statusEl) statusEl.innerHTML = `❌ ${e.message}`;
+  }
+}
+
 async function zkontrolovatDriveNyni() {
   const statusEl = document.getElementById("driveCheckStatus");
   if (statusEl) statusEl.textContent = "⏳ Kontroluji...";

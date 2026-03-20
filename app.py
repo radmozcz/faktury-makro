@@ -3542,8 +3542,8 @@ def api_drive_registruj():
 def api_drive_zkontrolovat():
     """Ručně spustí stažení nových souborů z Google Drive."""
     print("DRIVE_ZKONTROLOVAT_SPUSTENO")
-    _zpracuj_nove_faktury_z_drive()
-    return jsonify({"ok": True, "stazeno": "hotovo"})
+    stats = _zpracuj_nove_faktury_z_drive()
+    return jsonify({"ok": True, "stazeno": stats.get("stazeno", 0), "preskoceno": stats.get("preskoceno", 0), "chyby": stats.get("chyby", 0)})
 
 @app.route("/api/drive-webhook", methods=["POST"])
 def api_drive_webhook():
@@ -3560,13 +3560,14 @@ def api_drive_webhook():
 def _zpracuj_nove_faktury_z_drive():
     """Stáhne nové PDF ze složky faktury-nahrat a zpracuje OCR."""
     import google.auth.transport.requests
+    stats = {"stazeno": 0, "preskoceno": 0, "chyby": 0}
     print("DRIVE_START")
     print(f"DRIVE_FOLDER_ID={DRIVE_FOLDER_ID}")
     try:
         service, creds = get_drive_service()
         if not service:
             print("⚠ Drive: service není dostupný")
-            return
+            return stats
         print("✓ Drive: service OK, načítám soubory")
         result = service.files().list(
             q=f"'{DRIVE_FOLDER_ID}' in parents and mimeType='application/pdf' and trashed=false",
@@ -3589,6 +3590,7 @@ def _zpracuj_nove_faktury_z_drive():
         for f in files:
             if f["id"] in zpracovane:
                 print(f"⏭ Drive: přeskakuji {f['name']} (již zpracováno)")
+                stats["preskoceno"] += 1
                 continue
             print(f"📥 Drive: stahuji {f['name']} ({f['id']})")
             try:
@@ -3657,14 +3659,17 @@ def _zpracuj_nove_faktury_z_drive():
                         (f["id"], __import__("datetime").datetime.now().isoformat())
                     )
                 print(f"✅ Drive auto: zpracována FA {fname}")
+                stats["stazeno"] += 1
             except Exception as e:
                 import traceback
                 print(f"⚠ Drive auto error pro {f['name']}: {e}")
                 print(traceback.format_exc())
+                stats["chyby"] += 1
     except Exception as e:
         import traceback
         print(f"⚠ Drive webhook error: {e}")
         print(traceback.format_exc())
+    return stats
 
 def _ocr_faktura(fpath):
     """OCR faktury — vrátí dict s daty."""
