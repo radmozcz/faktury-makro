@@ -1532,7 +1532,6 @@ def api_prava_set():
 
 @app.route("/")
 def index():
-    update_stav_po_splatnosti()
     return render_template("index.html", config=load_config())
 
 
