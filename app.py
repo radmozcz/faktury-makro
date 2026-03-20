@@ -1286,13 +1286,20 @@ Formát odpovědi:
 - NIKDY nezapisuj 0 pokud číslo na lístku je!
 
 === JMÉNA (SMĚNA) ===
-- Ráďa, Rádá, Rada → "Ráďa"
-- Věrka, Věra, Verka → "Věrka" (začíná VĚ nebo VER, NE VEN!)
-- Vendy, Wendy, Vendi, Nady, Nada → "Vendy" (začíná VEN nebo WEN — nebo připomíná Vendy)
-- Vali, Valy → "Vali"
-- Renča, Renata, Renca → "Renča"
-- KRITICKÉ: na směně NIKDY nepracuje osoba jménem "Nada" nebo "Náda" — pokud vidíš takové jméno, je to špatně přečtené "Vendy"
-- Zaměstnanci jsou pouze: Ráďa, Vendy, Vali, Věrka, Renča — žádné jiné jméno neexistuje!
+Na směně pracují POUZE tyto osoby — žádná jiná jména neexistují:
+
+  "Ráďa"  → variace: Ráďa, Rádá, Rada, Radi, Nada, Náda, Nade, Nadi
+             (Ř bývá čteno jako N, Á jako A, Ď jako D)
+  "Vendy" → variace: Vendy, Wendy, Vendi, Vends, Vend
+             (začíná VEN nebo WEN)
+  "Vali"  → variace: Vali, Valy, Voli
+  "Věrka" → variace: Věrka, Věra, Verka, Vera
+             (začíná VĚ nebo VER — NIKDY VEN!)
+  "Renča" → variace: Renča, Renata, Renca, Renata
+
+POSTUP: Přečti každé jméno na lístku → najdi nejpodobnější ze seznamu výše → zapiš správný tvar.
+Pokud jméno vůbec neznáš → přiřaď nejbližší ze 5 možností, nikdy nevymýšlej nové.
+NIKDY nepiš: Nada, Náda (→ je to Ráďa), ani žádné jiné jméno mimo seznam.
 """
 
         message = client.messages.create(

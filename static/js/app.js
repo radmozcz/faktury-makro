@@ -2979,7 +2979,19 @@ function renderKartaStatHtml(stats) {
         </button>
       </div>`;
   };
-  return `<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">${firmy.map(f => card(f, stats[f])).join("")}</div>`;
+  // Souhrnný řádek - celkem přes všechny firmy
+  const totalKarty   = firmy.reduce((s, f) => s + (stats[f].mesicni || 0), 0);
+  const totalHot     = firmy.reduce((s, f) => s + ((stats[f].trzba_od || 0) - (stats[f].mesicni || 0)), 0);
+  const totalTrzba   = firmy.reduce((s, f) => s + (stats[f].trzba_od || 0), 0);
+  const souhrn = totalTrzba > 0 ? `
+    <div style="display:flex;gap:2rem;flex-wrap:wrap;align-items:center;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:.6rem 1rem;margin-bottom:.7rem;font-size:.88rem">
+      <span style="font-weight:700;color:var(--txt2)">📊 Celkem všechny firmy:</span>
+      <span>💳 Karty: <strong>${czInt(totalKarty)} Kč</strong></span>
+      <span>💵 Hotovost: <strong>${czInt(totalHot)} Kč</strong></span>
+      <span style="font-size:1rem">💰 Tržba: <strong style="color:#16a34a">${czInt(totalTrzba)} Kč</strong></span>
+    </div>` : "";
+
+  return souhrn + `<div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem">${firmy.map(f => card(f, stats[f])).join("")}</div>`;
 }
 
 async function prepnoutTerminal(firma) {
