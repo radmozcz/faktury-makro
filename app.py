@@ -1246,15 +1246,20 @@ Formát odpovědi:
 - Příklad: "19.3" → "19.3", "5/2" → "5.2"
 - Neplést s jinými čísly na lístku (karty, tržba...)
 - Pokud datum není, vrať dnešní: "{today}"
+- POZOR na záměnu číslic v měsíci: "3" a "5" jsou si podobné — měsíc 3 = březen, měsíc 5 = květen
+- Den v týdnu ODVOĎ z data — nepřepisuj ho ze slova na lístku (lístek může mít zkratku čt. = čtvrtek)
 
-=== ČÍSLA — OBECNĚ ===
+=== ČÍSLA — ZÁMĚNY ČÍSLIC ===
 - Tečka nebo čárka uvnitř čísla = oddělovač tisíců: 9.582 = 9582, 4.900 = 4900
 - Pomlčka nebo lomítko za číslem (9.582,-) = ignoruj
 - Výsledek rovnice: "14.521 + 5 = 14.636" → ber číslo ZA "=" = 14636
+- KRITICKÉ — při ručním psaní jsou si podobné: 3↔5, 1↔7, 0↔6, 4↔9
+- KOV je vždy malé číslo (desítky): pokud vidíš "59" zkontroluj zda není "39" nebo "39"
+- Číslo čti vždy v kontextu — KOV 39 je realističtější než KOV 59
 
 === KARTY, KOV, PAPÍR, VÝDAJE ===
 - KARTY = platby kartou (větší číslo, typicky tisíce)
-- KOV = drobné mince (malé číslo, desítky až stovky)
+- KOV = drobné mince (malé číslo, typicky desítky — pod 100 Kč)
 - PAPÍR = papírové bankovky (stovky až tisíce)
 - VÝDAJE = hotovost vydaná na nákupy — typicky prázdné nebo malé číslo
 - TRŽBA = karty + kov + papír — NEpatří do vydaje!
@@ -1275,18 +1280,19 @@ Formát odpovědi:
 
 === BURGER, BUŘTGULÁŠ, TALÍŘE — VELMI DŮLEŽITÉ ===
 - BURGER / BURGR → burger (číslo za nebo před slovem)
-- BURTGULÁŠ / BURTGULAS / BURGULÁŠ / BUŘTGULÁŠ → burtgulas
+- BURTGULÁŠ / BURTGULAS / BURGULÁŠ / BUŘTGULÁŠ / BURTGULÁS → burtgulas
+- Formát "7x" = 7 kusů — pozor na záměnu "7" a "2" při ručním psaní!
 - TALÍŘ / TALIRE / POČET TALÍŘŮ / TAL: → talire
-- Formát "7x" nebo "7 X" nebo jen "7" za názvem = 7 kusů
 - NIKDY nezapisuj 0 pokud číslo na lístku je!
 
 === JMÉNA (SMĚNA) ===
 - Ráďa, Rádá, Rada → "Ráďa"
 - Věrka, Věra, Verka → "Věrka" (začíná VĚ nebo VER, NE VEN!)
-- Vendy, Wendy, Vendi → "Vendy" (začíná VEN nebo WEN)
+- Vendy, Wendy, Vendi, Nady, Nada → "Vendy" (začíná VEN nebo WEN — nebo připomíná Vendy)
 - Vali, Valy → "Vali"
 - Renča, Renata, Renca → "Renča"
-- KRITICKÉ: VEN = Vendy, VĚR/VER = Věrka — jsou to RŮZNÉ osoby!
+- KRITICKÉ: na směně NIKDY nepracuje osoba jménem "Nada" nebo "Náda" — pokud vidíš takové jméno, je to špatně přečtené "Vendy"
+- Zaměstnanci jsou pouze: Ráďa, Vendy, Vali, Věrka, Renča — žádné jiné jméno neexistuje!
 """
 
         message = client.messages.create(
