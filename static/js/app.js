@@ -2433,6 +2433,155 @@ async function smazatKalkulaci(id) {
   loadKalkulace();
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+//  STATISTIKY
+// ═══════════════════════════════════════════════════════════════
+
+async function renderStatistiky() {
+  const rokAkt = new Date().getFullYear();
+  const od = new Date(); od.setFullYear(od.getFullYear()-1);
+  const odStr = od.toISOString().split("T")[0];
+  const doStr = new Date().toISOString().split("T")[0];
+
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header"><h1 class="page-title">Statistiky</h1></div>
+
+    <div class="card" style="margin-bottom:1.5rem">
+      <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap">
+        <label style="font-size:.85rem;color:var(--txt2)">Rok:</label>
+        <select id="tmRok" onchange="loadTrzbyMesice()" style="font-size:.85rem">
+          <option value="">Vše</option>
+          ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}">${r}</option>`).join("")}
+        </select>
+        <label style="font-size:.85rem;color:var(--txt2)">Firma:</label>
+        <select id="tmFirma" class="firma-select" onchange="loadTrzbyMesice();loadPL()" style="font-size:.85rem">
+          <option value="">Všechny</option>
+          ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+        </select>
+      </div>
+      <div id="tmTabulka"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem;margin-bottom:1rem">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+          <span class="card-title" style="margin:0">Marže — tržba vč.PK / nákupy za suroviny</span>
+          <select id="plRokMarze" onchange="loadPL()" style="font-size:.82rem">
+            <option value="">Vše</option>
+            ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}" ${r==rokAkt?"selected":""}>${r}</option>`).join("")}
+          </select>
+        </div>
+        <div id="plMarze"><div class="loading-center"><span class="spinner"></span></div></div>
+      </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+          <span class="card-title" style="margin:0">Náklady po měsících</span>
+          <select id="plRok" onchange="loadPL()" style="font-size:.82rem">
+            <option value="">Vše</option>
+            ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}" ${r==rokAkt?"selected":""}>${r}</option>`).join("")}
+          </select>
+        </div>
+        <div id="plNaklady"><div class="loading-center"><span class="spinner"></span></div></div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem;margin-bottom:1.5rem">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+          <span class="card-title" style="margin:0">P&amp;L — příjmy vč. PK vs. všechny výdaje</span>
+          <select id="plRokPL" onchange="loadPL()" style="font-size:.82rem">
+            <option value="">Vše</option>
+            ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}" ${r==rokAkt?"selected":""}>${r}</option>`).join("")}
+          </select>
+        </div>
+        <div id="plTotal"><div class="loading-center"><span class="spinner"></span></div></div>
+      </div>
+      <div class="card">
+        <div class="card-title" style="margin-bottom:.75rem">Průměrná denní tržba vč. PK — po letech</div>
+        <div id="plPrumery"><div class="loading-center"><span class="spinner"></span></div></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:1.5rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+        <span class="card-title" style="margin:0">Grafy</span>
+        <select id="grafTyp" style="font-size:.82rem"><option value="">— vybrat graf —</option></select>
+      </div>
+      <div id="grafContainer" style="min-height:80px;display:flex;align-items:center;justify-content:center;color:var(--txt2);font-size:.85rem">Vyberte graf</div>
+    </div>`;
+
+  loadTrzbyMesice();
+  loadPL();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  NASTAVENÍ
+// ═══════════════════════════════════════════════════════════════
+
+async function renderNastaveni() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header"><h1 class="page-title">⚙️ Nastavení</h1></div>
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-title">Paušální odvody</div>
+      <div id="odvodySeznam"><div class="loading-center"><span class="spinner"></span></div></div>
+      <button class="btn btn-secondary btn-sm" style="margin-top:.75rem" onclick="pridatOdvod()">+ Přidat odvod</button>
+    </div>
+    <div class="card">
+      <div class="card-title">Přístupová práva</div>
+      <div id="pravaSeznam"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>`;
+  loadOdvody();
+  loadPrava();
+}
+
+async function loadOdvody() {
+  const el = document.getElementById("odvodySeznam");
+  if (!el) return;
+  try {
+    const data = await api("/api/pausalni-odvody/admin");
+    if (!data.odvody?.length) { el.innerHTML = `<div style="color:var(--txt2);font-size:.85rem">Žádné odvody</div>`; return; }
+    el.innerHTML = `<table style="width:100%;font-size:.85rem;border-collapse:collapse">
+      <thead><tr style="color:var(--txt2);font-size:.78rem"><th style="text-align:left;padding:4px 8px">Název</th><th style="text-align:right;padding:4px 8px">Částka</th><th></th></tr></thead>
+      <tbody>${data.odvody.map(o=>`<tr style="border-top:0.5px solid var(--border)">
+        <td style="padding:5px 8px">${escHtml(o.nazev)}</td>
+        <td style="text-align:right;padding:5px 8px">${czMoney(o.castka)}</td>
+        <td style="padding:5px 8px"><button class="btn btn-danger btn-sm" onclick="smazatOdvod(${o.id})">🗑</button></td>
+      </tr>`).join("")}</tbody>
+      <tfoot><tr style="font-weight:600;border-top:1px solid var(--border)"><td style="padding:5px 8px">Celkem/měsíc</td><td style="text-align:right;padding:5px 8px">${czMoney(data.odvody_suma)}</td><td></td></tr></tfoot>
+    </table>`;
+  } catch { el.innerHTML = `<div style="color:var(--txt2)">Nepodařilo se načíst</div>`; }
+}
+
+function pridatOdvod() {
+  openModal("Přidat paušální odvod", `
+    <div class="form-group"><label class="form-label">Název</label>
+      <input id="odNazev" class="form-control" placeholder="např. Zdravotní pojištění"></div>
+    <div class="form-group"><label class="form-label">Částka (Kč/měsíc)</label>
+      <input type="number" id="odCastka" class="form-control" placeholder="2000"></div>
+    <button class="btn btn-primary" style="margin-top:.5rem" onclick="App._odvodSave&&App._odvodSave()">💾 Uložit</button>`);
+  App._odvodSave = async () => {
+    const nazev = document.getElementById("odNazev").value.trim();
+    const castka = parseFloat(document.getElementById("odCastka").value);
+    if (!nazev || isNaN(castka)) { toast("Vyplň název a částku"); return; }
+    await api("/api/pausalni-odvody/admin", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({nazev,castka})});
+    toast("Odvod přidán ✓"); closeModal(); loadOdvody();
+  };
+}
+
+async function smazatOdvod(id) {
+  if (!confirm("Smazat tento odvod?")) return;
+  await api(`/api/pausalni-odvody/${id}`, {method:"DELETE"});
+  toast("Smazáno ✓"); loadOdvody();
+}
+
+async function loadPrava() {
+  const el = document.getElementById("pravaSeznam");
+  if (!el) return;
+  el.innerHTML = `<div style="color:var(--txt2);font-size:.85rem;padding:.5rem">Správa práv probíhá v Nastavení → uživatelé.</div>`;
+}
+
+
 function renderAiAsistent() {
   const rok = new Date().getFullYear();
   document.getElementById("mainContent").innerHTML = `
