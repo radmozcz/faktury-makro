@@ -2976,17 +2976,15 @@ async function renderNastaveni() {
       </div>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-top:.5rem">
         <button class="btn btn-primary" onclick="saveConfig()">💾 Uložit nastavení</button>
-        <button class="btn" style="background:var(--accent);color:#fff" onclick="opravDuplicity()">🔍 Zkontrolovat duplicity</button>
+        <button class="btn" style="background:var(--accent);color:#fff" onclick="opravDuplicity()" title="Zkontroluje a označí duplicitní faktury">🔍 Duplicity</button>
         <button class="btn" style="background:#6c757d;color:#fff" onclick="normalizujNazvy()">🧹 Odstranit ARO/MC/FL prefixy</button>
-        <button class="btn" style="background:#2563eb;color:#fff" onclick="stahnoutZalohu()">📦 Vytvořit zálohu DB</button>
+        <button class="btn" style="background:#2563eb;color:#fff" onclick="stahnoutZalohu()">📦 Záloha do GCS</button>
+        <button class="btn btn-secondary btn-sm" onclick="stahnoutSqlDump()">⬇ SQL dump</button>
       </div>
 
       <div style="margin-top:1rem">
         <div style="font-size:.85rem;font-weight:600;margin-bottom:.5rem">📋 Uložené zálohy v Google Cloud</div>
         <div id="zalohySeznam"><div class="loading-center"><span class="spinner"></span></div></div>
-      </div>
-        <button class="btn" style="background:#2563eb;color:#fff" onclick="stahnoutZalohu()">📦 Vytvořit zálohu DB (GCS)</button>
-        <button class="btn btn-secondary btn-sm" style="margin-left:.5rem" onclick="stahnoutSqlDump()">⬇ SQL dump</button>
       </div>
 
       <hr style="margin:1.5rem 0">
