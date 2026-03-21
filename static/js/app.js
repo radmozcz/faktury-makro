@@ -3143,7 +3143,7 @@ async function odeslitAiDotaz() {
   const firma = document.getElementById("sFirma")?.value || "";
 
   // Přidat dotaz do historie
-  hist.innerHTML += `<div style="align-self:flex-end;background:var(--primary-bg,#e8f4fd);border-radius:10px 10px 2px 10px;padding:.4rem .75rem;max-width:80%;font-size:.88rem">${escHtml(dotaz)}</div>`;
+  hist.innerHTML += `<div style="align-self:flex-start;background:var(--primary-bg,#e8f4fd);border-radius:2px 10px 10px 10px;padding:.4rem .75rem;max-width:80%;font-size:.88rem;font-weight:500">${escHtml(dotaz)}</div>`;
   hist.innerHTML += `<div id="aiCekani" style="align-self:flex-start;color:var(--txt2);font-size:.85rem">⏳ Přemýšlím...</div>`;
   hist.scrollTop = hist.scrollHeight;
   input.value = "";
