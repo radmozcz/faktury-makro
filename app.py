@@ -3145,6 +3145,135 @@ def api_karty_alert():
     })
 
 
+@app.route("/api/statistiky/prehled-pl")
+@vyzaduj_prihlaseni
+def api_statistiky_prehled_pl():
+    """Vrátí data pro 4 tabulky: náklady, průměry po letech, marže, P&L."""
+    import datetime as _dt, calendar as _cal
+    firma = request.args.get("firma", "")
+    rok   = request.args.get("rok", "")
+    fw  = "AND firma_zkratka=?" if firma else ""
+    fp  = [firma] if firma else []
+    ffw = ("AND firma_zkratka=?" if firma else "")
+
+    # Rozsah
+    if rok:
+        od, do = f"{rok}-01-01", f"{rok}-12-31"
+    else:
+        od, do = "2020-01-01", _dt.date.today().isoformat()
+
+    from decimal import Decimal
+    def _f(v): return float(v) if isinstance(v, Decimal) else (float(v) if v is not None else 0.0)
+
+    with get_db() as conn:
+        # 1. Tržby po měsících (pro průměry a P&L)
+        trzby = conn.execute(f"""
+            SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY') as rok,
+                   TO_CHAR(NULLIF(datum,'')::date,'MM') as mesic,
+                   COUNT(*) as dni,
+                   ROUND(SUM(trzba_vcpk)::numeric,0) as trzba_vcpk,
+                   ROUND(SUM(karty+hotovost+vydaje)::numeric,0) as trzba
+            FROM reporty
+            WHERE datum >= ? AND datum <= ? {fw} AND trzba_vcpk > 0
+            GROUP BY rok, mesic ORDER BY rok, mesic
+        """, [od, do] + fp).fetchall()
+
+        # 2. Faktury po měsících
+        faktury = conn.execute(f"""
+            SELECT TO_CHAR(NULLIF(datum_vystaveni,'')::date,'YYYY') as rok,
+                   TO_CHAR(NULLIF(datum_vystaveni,'')::date,'MM') as mesic,
+                   ROUND(SUM(celkem_s_dph)::numeric,0) as castka
+            FROM faktury
+            WHERE datum_vystaveni >= ? AND datum_vystaveni <= ? {ffw}
+            GROUP BY rok, mesic ORDER BY rok, mesic
+        """, [od, do] + fp).fetchall()
+
+        # 3. Ruční výdaje po měsících (provozní)
+        vydaje = conn.execute(f"""
+            SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY') as rok,
+                   TO_CHAR(NULLIF(datum,'')::date,'MM') as mesic,
+                   ROUND(SUM(castka)::numeric,0) as castka
+            FROM vydaje
+            WHERE datum >= ? AND datum <= ?
+            AND COALESCE(typ,'provozni')='provozni' {ffw}
+            GROUP BY rok, mesic ORDER BY rok, mesic
+        """, [od, do] + fp).fetchall()
+
+        # 4. Výplaty po měsících
+        vyplaty = conn.execute(f"""
+            SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY') as rok,
+                   TO_CHAR(NULLIF(datum,'')::date,'MM') as mesic,
+                   ROUND(SUM(castka)::numeric,0) as castka
+            FROM vyplaty
+            WHERE datum >= ? AND datum <= ? {ffw}
+            GROUP BY rok, mesic ORDER BY rok, mesic
+        """, [od, do] + fp).fetchall()
+
+        # 5. Paušální odvody – suma všech zaměstnanců (měsíční fix)
+        odvody_row = conn.execute("SELECT COALESCE(SUM(castka),0) as suma FROM pausalni_odvody").fetchone()
+        odvody_mesic = _f(odvody_row["suma"] if isinstance(odvody_row, dict) else odvody_row[0])
+
+    # Sestavit dict rok-mesic
+    def _to_dict(rows, key="castka"):
+        d = {}
+        for r in rows:
+            rm = r["rok"] if isinstance(r, dict) else r[0]
+            mm = r["mesic"] if isinstance(r, dict) else r[1]
+            d[(rm, mm)] = _f(r[key] if isinstance(r, dict) else r[2])
+        return d
+
+    def _to_dict2(rows):
+        d = {}
+        for r in rows:
+            rm = r["rok"] if isinstance(r, dict) else r[0]
+            mm = r["mesic"] if isinstance(r, dict) else r[1]
+            d[(rm, mm)] = {
+                "dni": int(_f(r["dni"] if isinstance(r, dict) else r[2])),
+                "trzba_vcpk": _f(r["trzba_vcpk"] if isinstance(r, dict) else r[3]),
+                "trzba": _f(r["trzba"] if isinstance(r, dict) else r[4]),
+            }
+        return d
+
+    t_dict  = _to_dict2(trzby)
+    f_dict  = _to_dict(faktury)
+    v_dict  = _to_dict(vydaje)
+    p_dict  = _to_dict(vyplaty)
+
+    # Unikátní roky
+    roky = sorted(set(k[0] for k in list(t_dict.keys())+list(f_dict.keys())+list(p_dict.keys())))
+
+    # Sestavit výsledek po měsících
+    result = []
+    for mi in range(1, 13):
+        m = f"{mi:02d}"
+        row = {"mesic": m}
+        for r in roky:
+            td = t_dict.get((r, m), {})
+            fakt = f_dict.get((r, m), 0)
+            vyda = v_dict.get((r, m), 0)
+            vypl = p_dict.get((r, m), 0)
+            odv  = odvody_mesic if td.get("dni", 0) > 0 else 0
+            naklady = fakt + vyda + vypl + odv
+            trzba_vcpk = td.get("trzba_vcpk", 0)
+            trzba = td.get("trzba", 0)
+            row[r] = {
+                "dni": td.get("dni", 0),
+                "trzba_vcpk": trzba_vcpk,
+                "trzba": trzba,
+                "faktury": fakt,
+                "vydaje": vyda,
+                "vyplaty": vypl,
+                "odvody": odv,
+                "naklady": naklady,
+                "marze_czk": trzba - fakt,
+                "marze_pct": round((trzba - fakt) / fakt * 100, 1) if fakt > 0 else None,
+                "pl": trzba_vcpk - naklady,
+            }
+        result.append(row)
+
+    return jsonify({"mesice": result, "roky": roky, "odvody_mesic": odvody_mesic})
+
+
 @app.route("/api/statistiky/trzby-mesice")
 @vyzaduj_prihlaseni
 def api_statistiky_trzby_mesice():

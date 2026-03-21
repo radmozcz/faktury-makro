@@ -2872,12 +2872,38 @@ async function renderStatistiky() {
           ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}">${r}</option>`).join("")}
         </select>
         <label style="font-size:.85rem;color:var(--txt2)">Firma:</label>
-        <select id="tmFirma" class="firma-select" onchange="loadTrzbyMesice()" style="font-size:.85rem">
+        <select id="tmFirma" class="firma-select" onchange="loadTrzbyMesice();loadPL()" style="font-size:.85rem">
           <option value="">Všechny</option>
           ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
         </select>
       </div>
       <div id="tmTabulka"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-title" style="margin-bottom:.75rem">📊 Průměrná denní tržba vč. poukazek — přehled po měsících a letech</div>
+      <div id="plPrumery"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-title" style="margin-bottom:.75rem">🧾 Náklady po měsících (faktury + výdaje + výplaty + odvody)</div>
+      <div style="display:flex;gap:.5rem;margin-bottom:.75rem;flex-wrap:wrap">
+        <select id="plRok" onchange="loadPL()" style="font-size:.85rem">
+          <option value="">Vše</option>
+          ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}">${r}</option>`).join("")}
+        </select>
+      </div>
+      <div id="plNaklady"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-title" style="margin-bottom:.75rem">📈 Marže — tržba vs. nákupy surovin (faktury)</div>
+      <div id="plMarze"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-title" style="margin-bottom:.75rem">💰 P&L — příjmy vs. všechny výdaje</div>
+      <div id="plTotal"><div class="loading-center"><span class="spinner"></span></div></div>
     </div>
 
     <div class="card" style="margin-bottom:1.5rem">
@@ -2920,6 +2946,7 @@ async function renderStatistiky() {
     <div id="statReporty" style="margin-top:1.5rem"></div>`;
 
   loadTrzbyMesice();
+  loadPL();
   loadStatRozsirene();
   loadStatistiky();
   loadPrehledStatistik();
@@ -2927,6 +2954,186 @@ async function renderStatistiky() {
 }
 
 const MCZ_NAZVY = ["","Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
+
+async function loadPL() {
+  const firma = document.getElementById("tmFirma")?.value || "";
+  const rok   = document.getElementById("plRok")?.value || "";
+  let data;
+  try { data = await api(`/api/statistiky/prehled-pl?firma=${encodeURIComponent(firma)}&rok=${rok}`); }
+  catch { return; }
+
+  const mesice = data.mesice || [];
+  const roky   = data.roky   || [];
+  const _n = v => v ? Math.round(v).toLocaleString("cs-CZ") : "—";
+  const _pct = v => v !== null && v !== undefined ? v.toFixed(1)+"%" : "—";
+  const _zisk = v => {
+    if (!v && v !== 0) return "—";
+    const c = v >= 0 ? "#16a34a" : "#dc2626";
+    return `<span style="color:${c};font-weight:600">${Math.round(v).toLocaleString("cs-CZ")}</span>`;
+  };
+
+  // ── Tabulka 1: Průměrná denní tržba vč.PK po letech ──
+  const elPrum = document.getElementById("plPrumery");
+  if (elPrum) {
+    const aktRoky = roky.filter(r => mesice.some(m => m[r]?.dni > 0));
+    let thead = `<tr style="font-size:.78rem;color:var(--txt2)"><th style="text-align:left;padding:5px 8px">Měsíc</th>`;
+    aktRoky.forEach(r => thead += `<th style="text-align:right;padding:5px 8px">${r}</th>`);
+    thead += `</tr>`;
+    let tbody = "";
+    let soucty = {};
+    let aktivni = {};
+    aktRoky.forEach(r => { soucty[r]=0; aktivni[r]=0; });
+    mesice.forEach(m => {
+      const mi = parseInt(m.mesic);
+      let radek = `<tr><td style="padding:5px 8px">${MCZ_NAZVY[mi]}</td>`;
+      aktRoky.forEach(r => {
+        const d = m[r];
+        if (d?.dni > 0) {
+          const prumer = Math.round(d.trzba_vcpk / d.dni);
+          radek += `<td style="text-align:right;padding:5px 8px">${prumer.toLocaleString("cs-CZ")}</td>`;
+          soucty[r] += d.trzba_vcpk;
+          aktivni[r]++;
+        } else {
+          radek += `<td style="text-align:right;padding:5px 8px;color:var(--txt2)">—</td>`;
+        }
+      });
+      radek += `</tr>`;
+      tbody += radek;
+    });
+    let tfoot = `<tr style="font-weight:600;border-top:1.5px solid var(--border)"><td style="padding:5px 8px">Součet</td>`;
+    aktRoky.forEach(r => tfoot += `<td style="text-align:right;padding:5px 8px">${_n(soucty[r])}</td>`);
+    tfoot += `</tr><tr style="font-size:.78rem;color:var(--txt2)"><td style="padding:4px 8px">Aktivních měs.</td>`;
+    aktRoky.forEach(r => tfoot += `<td style="text-align:right;padding:4px 8px">${aktivni[r]}</td>`);
+    tfoot += `</tr><tr style="font-size:.78rem;color:var(--txt2)"><td style="padding:4px 8px">Průměr/měs.</td>`;
+    aktRoky.forEach(r => tfoot += `<td style="text-align:right;padding:4px 8px">${aktivni[r]>0?_n(Math.round(soucty[r]/aktivni[r])):"—"}</td>`);
+    tfoot += `</tr>`;
+    elPrum.innerHTML = `<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.85rem">${thead}<tbody>${tbody}</tbody><tfoot>${tfoot}</tfoot></table></div>`;
+  }
+
+  // ── Tabulka 2: Náklady po měsících ──
+  const elNakl = document.getElementById("plNaklady");
+  if (elNakl) {
+    const aktRoky = roky.filter(r => mesice.some(m => m[r]?.naklady > 0));
+    if (!aktRoky.length) { elNakl.innerHTML = `<div style="color:var(--txt2);padding:.5rem">Žádná data</div>`; }
+    else {
+      let thead = `<tr style="font-size:.78rem;color:var(--txt2)"><th style="text-align:left;padding:5px 8px">Měsíc</th>`;
+      aktRoky.forEach(r => thead += `<th style="text-align:right;padding:5px 8px" colspan="4">${r}</th>`);
+      thead += `</tr><tr style="font-size:.75rem;color:var(--txt2)"><th style="text-align:left;padding:4px 8px"></th>`;
+      aktRoky.forEach(() => thead += `<th style="text-align:right;padding:4px 6px">Faktury</th><th style="text-align:right;padding:4px 6px">Výdaje</th><th style="text-align:right;padding:4px 6px">Výplaty+Odv.</th><th style="text-align:right;padding:4px 6px;font-weight:600">Celkem</th>`);
+      thead += `</tr>`;
+      let tbody = "";
+      let tots = {};
+      aktRoky.forEach(r => tots[r]={f:0,v:0,p:0,n:0});
+      mesice.forEach(m => {
+        const mi = parseInt(m.mesic);
+        const mame = aktRoky.some(r => m[r]?.naklady > 0);
+        if (!mame) return;
+        let radek = `<tr><td style="padding:5px 8px">${MCZ_NAZVY[mi]}</td>`;
+        aktRoky.forEach(r => {
+          const d = m[r] || {};
+          tots[r].f += d.faktury||0; tots[r].v += d.vydaje||0;
+          tots[r].p += (d.vyplaty||0)+(d.odvody||0); tots[r].n += d.naklady||0;
+          radek += `<td style="text-align:right;padding:5px 6px;font-size:.82rem">${_n(d.faktury)}</td>`;
+          radek += `<td style="text-align:right;padding:5px 6px;font-size:.82rem">${_n(d.vydaje)}</td>`;
+          radek += `<td style="text-align:right;padding:5px 6px;font-size:.82rem">${_n((d.vyplaty||0)+(d.odvody||0))}</td>`;
+          radek += `<td style="text-align:right;padding:5px 6px;font-weight:600;color:#dc2626">${_n(d.naklady)}</td>`;
+        });
+        tbody += radek + `</tr>`;
+      });
+      let tfoot = `<tr style="font-weight:600;border-top:1.5px solid var(--border)"><td style="padding:5px 8px">Celkem</td>`;
+      aktRoky.forEach(r => {
+        tfoot += `<td style="text-align:right;padding:5px 6px">${_n(tots[r].f)}</td>`;
+        tfoot += `<td style="text-align:right;padding:5px 6px">${_n(tots[r].v)}</td>`;
+        tfoot += `<td style="text-align:right;padding:5px 6px">${_n(tots[r].p)}</td>`;
+        tfoot += `<td style="text-align:right;padding:5px 6px;color:#dc2626">${_n(tots[r].n)}</td>`;
+      });
+      tfoot += `</tr>`;
+      elNakl.innerHTML = `<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.85rem;width:100%">${thead}<tbody>${tbody}</tbody><tfoot>${tfoot}</tfoot></table></div>`;
+    }
+  }
+
+  // ── Tabulka 3: Marže ──
+  const elMarze = document.getElementById("plMarze");
+  if (elMarze) {
+    const aktRoky = roky.filter(r => mesice.some(m => m[r]?.trzba > 0));
+    if (!aktRoky.length) { elMarze.innerHTML = `<div style="color:var(--txt2);padding:.5rem">Žádná data</div>`; }
+    else {
+      let thead = `<tr style="font-size:.78rem;color:var(--txt2)"><th style="text-align:left;padding:5px 8px">Měsíc</th>`;
+      aktRoky.forEach(r => thead += `<th style="text-align:right;padding:5px 8px" colspan="3">${r}</th>`);
+      thead += `</tr><tr style="font-size:.75rem;color:var(--txt2)"><th></th>`;
+      aktRoky.forEach(() => thead += `<th style="text-align:right;padding:4px 6px">Tržba</th><th style="text-align:right;padding:4px 6px">Faktury</th><th style="text-align:right;padding:4px 6px">Marže %</th>`);
+      thead += `</tr>`;
+      let tbody = "";
+      let tots = {};
+      aktRoky.forEach(r => tots[r]={t:0,f:0});
+      mesice.forEach(m => {
+        const mi = parseInt(m.mesic);
+        const mame = aktRoky.some(r => m[r]?.trzba > 0);
+        if (!mame) return;
+        let radek = `<tr><td style="padding:5px 8px">${MCZ_NAZVY[mi]}</td>`;
+        aktRoky.forEach(r => {
+          const d = m[r] || {};
+          tots[r].t += d.trzba||0; tots[r].f += d.faktury||0;
+          const pct = d.faktury > 0 ? ((d.trzba - d.faktury)/d.faktury*100) : null;
+          const pctColor = pct !== null ? (pct >= 100 ? "#16a34a" : pct >= 50 ? "#d97706" : "#dc2626") : "";
+          radek += `<td style="text-align:right;padding:5px 6px;font-size:.82rem">${_n(d.trzba)}</td>`;
+          radek += `<td style="text-align:right;padding:5px 6px;font-size:.82rem;color:#dc2626">${_n(d.faktury)}</td>`;
+          radek += `<td style="text-align:right;padding:5px 6px;font-weight:600;color:${pctColor}">${_pct(pct)}</td>`;
+        });
+        tbody += radek + `</tr>`;
+      });
+      let tfoot = `<tr style="font-weight:600;border-top:1.5px solid var(--border)"><td style="padding:5px 8px">Celkem</td>`;
+      aktRoky.forEach(r => {
+        const pct = tots[r].f > 0 ? ((tots[r].t - tots[r].f)/tots[r].f*100) : null;
+        const pctColor = pct !== null ? (pct >= 100 ? "#16a34a" : pct >= 50 ? "#d97706" : "#dc2626") : "";
+        tfoot += `<td style="text-align:right;padding:5px 6px">${_n(tots[r].t)}</td>`;
+        tfoot += `<td style="text-align:right;padding:5px 6px;color:#dc2626">${_n(tots[r].f)}</td>`;
+        tfoot += `<td style="text-align:right;padding:5px 6px;color:${pctColor}">${_pct(pct)}</td>`;
+      });
+      tfoot += `</tr>`;
+      elMarze.innerHTML = `<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.85rem;width:100%">${thead}<tbody>${tbody}</tbody><tfoot>${tfoot}</tfoot></table></div>`;
+    }
+  }
+
+  // ── Tabulka 4: P&L ──
+  const elPL = document.getElementById("plTotal");
+  if (elPL) {
+    const aktRoky = roky.filter(r => mesice.some(m => m[r]?.trzba_vcpk > 0 || m[r]?.naklady > 0));
+    if (!aktRoky.length) { elPL.innerHTML = `<div style="color:var(--txt2);padding:.5rem">Žádná data</div>`; }
+    else {
+      let thead = `<tr style="font-size:.78rem;color:var(--txt2)"><th style="text-align:left;padding:5px 8px">Měsíc</th>`;
+      aktRoky.forEach(r => thead += `<th style="text-align:right;padding:5px 8px" colspan="3">${r}</th>`);
+      thead += `</tr><tr style="font-size:.75rem;color:var(--txt2)"><th></th>`;
+      aktRoky.forEach(() => thead += `<th style="text-align:right;padding:4px 6px">Příjmy</th><th style="text-align:right;padding:4px 6px">Výdaje</th><th style="text-align:right;padding:4px 6px">Zůstatek</th>`);
+      thead += `</tr>`;
+      let tbody = "";
+      let tots = {};
+      aktRoky.forEach(r => tots[r]={t:0,n:0,p:0});
+      mesice.forEach(m => {
+        const mi = parseInt(m.mesic);
+        const mame = aktRoky.some(r => m[r]?.trzba_vcpk > 0);
+        if (!mame) return;
+        let radek = `<tr><td style="padding:5px 8px">${MCZ_NAZVY[mi]}</td>`;
+        aktRoky.forEach(r => {
+          const d = m[r] || {};
+          tots[r].t += d.trzba_vcpk||0; tots[r].n += d.naklady||0; tots[r].p += d.pl||0;
+          radek += `<td style="text-align:right;padding:5px 6px;font-size:.82rem">${_n(d.trzba_vcpk)}</td>`;
+          radek += `<td style="text-align:right;padding:5px 6px;font-size:.82rem;color:#dc2626">${_n(d.naklady)}</td>`;
+          radek += `<td style="text-align:right;padding:5px 6px">${_zisk(d.pl)}</td>`;
+        });
+        tbody += radek + `</tr>`;
+      });
+      let tfoot = `<tr style="font-weight:600;border-top:1.5px solid var(--border)"><td style="padding:5px 8px">Celkem</td>`;
+      aktRoky.forEach(r => {
+        tfoot += `<td style="text-align:right;padding:5px 6px">${_n(tots[r].t)}</td>`;
+        tfoot += `<td style="text-align:right;padding:5px 6px;color:#dc2626">${_n(tots[r].n)}</td>`;
+        tfoot += `<td style="text-align:right;padding:5px 6px">${_zisk(tots[r].p)}</td>`;
+      });
+      tfoot += `</tr>`;
+      elPL.innerHTML = `<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.85rem;width:100%">${thead}<tbody>${tbody}</tbody><tfoot>${tfoot}</tfoot></table></div>`;
+    }
+  }
+}
 
 async function loadTrzbyMesice() {
   const el = document.getElementById("tmTabulka");
