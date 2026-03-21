@@ -3576,8 +3576,8 @@ function renderReportyTable(rows) {
         ${rows.map(r => {
           const celkem_trzba = (r.karty||0) + (r.hotovost||0) + (r.vydaje||0);
           return `
-          <tr style="cursor:pointer" onclick="editReport(${r.id})">
-            <td style="white-space:nowrap"><strong>${czDateShort(r.datum)}</strong></td>
+          <tr style="cursor:pointer;${r.duplicita_id ? 'background:#fff7ed;border-left:3px solid #f59e0b' : ''}" onclick="editReport(${r.id})">
+            <td style="white-space:nowrap"><strong>${czDateShort(r.datum)}</strong>${r.duplicita_id ? ` <small style="color:#f59e0b">⚠️ dup</small>` : ''}</td>
             <td style="color:var(--txt2);font-size:.82rem">${escHtml(r.den||"")}</td>
             <td style="text-align:right;background:var(--primary-bg,#e8f4fd)"><strong>${czInt(celkem_trzba)}</strong></td>
             <td style="text-align:right"><strong>${czInt(r.trzba_vcpk)}</strong></td>
@@ -3595,6 +3595,7 @@ function renderReportyTable(rows) {
             <td style="white-space:nowrap">
               ${r.soubor_url ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();window.open('${r.soubor_url}','_blank')" title="Originál">📎</button>` : ''}
               <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();editReport(${r.id})" title="Upravit">✏️</button>
+              ${r.duplicita_id ? `<button class="btn btn-sm" style="background:#f59e0b;color:#fff;border:none" onclick="event.stopPropagation();reportNeniDuplicita(${r.id})" title="Není duplicita">✅</button>` : ''}
               <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteReport(${r.id})" title="Smazat">🗑</button>
             </td>
           </tr>`;}).join("")}
@@ -3821,6 +3822,16 @@ async function deleteReport(id) {
   loadReporty();
 }
 
+async function reportNeniDuplicita(id) {
+  await api(`/api/reporty/${id}`, {
+    method: "PUT",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ _jen_duplicita_id: true, duplicita_id: null })
+  });
+  toast("Označení duplicity odstraněno ✓");
+  loadReporty();
+}
+
 function setupReportDropzone() {
   const dz  = document.getElementById("reportDropzone");
   const inp = document.getElementById("reportFileInput");
@@ -3917,17 +3928,38 @@ async function ulozitReport() {
     firma_zkratka: document.getElementById("rfFirma")?.value || "",
   };
   App._lastReportFirma = document.getElementById("rfFirma")?.value || "";
-  // Přidat soubor_url pokud bylo nahráno foto
+
+  // Foto: nově nahrané má přednost, jinak zachovat existující
   if (App._reportSouborUrl) {
     payload.soubor_url = App._reportSouborUrl;
     App._reportSouborUrl = null;
+  } else if (App._reportSouborUrlExisting) {
+    payload.soubor_url = App._reportSouborUrlExisting;
   }
-  await api("/api/reporty", {
-    method: "POST",
-    headers: {"Content-Type":"application/json"},
-    body: JSON.stringify(payload)
-  });
-  toast("Report uložen ✓");
+
+  const editId = App._reportEditId || null;
+  App._reportEditId = null;
+  App._reportSouborUrlExisting = null;
+
+  if (editId) {
+    await api(`/api/reporty/${editId}`, {
+      method: "PUT",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+    toast("Report uložen ✓");
+  } else {
+    const resp = await api("/api/reporty", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
+    if (resp && resp.duplicita) {
+      toast("⚠️ Report uložen – duplicitní datum!");
+    } else {
+      toast("Report uložen ✓");
+    }
+  }
   closeModal();
   renderReporty();
 }

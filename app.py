@@ -508,13 +508,29 @@ def migrate_db():
             ("burtgulas","INTEGER DEFAULT 0"),("hotdog","INTEGER DEFAULT 0"),
             ("snidane","INTEGER DEFAULT 0"),("nakupy","INTEGER DEFAULT 0"),
             ("foto_cesta","TEXT"),("firma_zkratka","TEXT DEFAULT ''"),
-            ("soubor_url","TEXT"),
+            ("soubor_url","TEXT"),("duplicita_id","INTEGER"),
         ]:
             if col not in existing:
                 try: conn.execute(f"ALTER TABLE reporty ADD COLUMN {col} {typ}")
                 except Exception: pass
+        if "duplicita_id" not in existing:
+            try: conn.execute("ALTER TABLE reporty ADD COLUMN duplicita_id INTEGER")
+            except Exception: pass
+        # Odebrat UNIQUE constraint na datum v reporty (povolit duplicity)
         if _USE_PG:
-            cur2 = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='faktury'")
+            try:
+                conn.execute("""
+                    DO $$ BEGIN
+                        IF EXISTS (
+                            SELECT 1 FROM information_schema.table_constraints
+                            WHERE table_name='reporty' AND constraint_type='UNIQUE'
+                            AND constraint_name LIKE '%datum%'
+                        ) THEN
+                            ALTER TABLE reporty DROP CONSTRAINT reporty_datum_key;
+                        END IF;
+                    END $$;
+                """)
+            except Exception: pass
             fakt_cols = [r["column_name"] for r in cur2.fetchall()]
         else:
             fakt_cols = [row[1] for row in conn.execute("PRAGMA table_info(faktury)").fetchall()]
@@ -2836,44 +2852,36 @@ def api_report_ulozit():
 
     firma = data.get("firma_zkratka", "")
     with get_db() as conn:
+        # Zjistit jestli existuje záznam se stejným datem
         existing = conn.execute("SELECT id FROM reporty WHERE datum=?", (data["datum"],)).fetchone()
-        soubor_url = data.get("soubor_url") or None
+        duplicita_id = None
         if existing:
-            conn.execute("""
-                UPDATE reporty SET den=?,smena=?,karty=?,kov=?,papir=?,hotovost=?,
-                vydaje=?,trzba=?,trzba_vcpk=?,pk50_ks=?,pk100_ks=?,pk_celkem=?,
-                pizza_cela=?,pizza_ctvrt=?,burger=?,talire=?,burtgulas=?,poznamka=?,firma_zkratka=?,
-                soubor_url=COALESCE(?,soubor_url)
-                WHERE datum=?
-            """, (
-                data.get("den",""), data.get("smena",""),
-                karty, kov, papir, hotovost, vydaje, trzba, trzba_vcpk,
-                pk50_ks, pk100_ks, pk_celkem,
-                int(data.get("pizza_cela",0) or 0), int(data.get("pizza_ctvrt",0) or 0),
-                int(data.get("burger",0) or 0), int(data.get("talire",0) or 0),
-                int(data.get("burtgulas",0) or 0),
-                data.get("poznamka",""), firma,
-                soubor_url, data["datum"]
-            ))
-            rid = existing["id"]
-        else:
-            cur = conn.execute("""
-                INSERT INTO reporty (datum,den,smena,karty,kov,papir,hotovost,vydaje,
-                trzba,trzba_vcpk,pk50_ks,pk100_ks,pk_celkem,
-                pizza_cela,pizza_ctvrt,burger,talire,burtgulas,poznamka,firma_zkratka,soubor_url)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            """, (
-                data["datum"], data.get("den",""), data.get("smena",""),
-                karty, kov, papir, hotovost, vydaje, trzba, trzba_vcpk,
-                pk50_ks, pk100_ks, pk_celkem,
-                int(data.get("pizza_cela",0) or 0), int(data.get("pizza_ctvrt",0) or 0),
-                int(data.get("burger",0) or 0), int(data.get("talire",0) or 0),
-                int(data.get("burtgulas",0) or 0),
-                data.get("poznamka",""), firma, soubor_url
-            ))
-            rid = cur.lastrowid
+            duplicita_id = existing["id"] if isinstance(existing, dict) else existing[0]
 
-    return jsonify({"ok": True, "id": rid})
+        soubor_url = data.get("soubor_url") or None
+        cur = conn.execute("""
+            INSERT INTO reporty (datum,den,smena,karty,kov,papir,hotovost,vydaje,
+            trzba,trzba_vcpk,pk50_ks,pk100_ks,pk_celkem,
+            pizza_cela,pizza_ctvrt,burger,talire,burtgulas,poznamka,firma_zkratka,soubor_url,duplicita_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            data["datum"], data.get("den",""), data.get("smena",""),
+            karty, kov, papir, hotovost, vydaje, trzba, trzba_vcpk,
+            pk50_ks, pk100_ks, pk_celkem,
+            int(data.get("pizza_cela",0) or 0), int(data.get("pizza_ctvrt",0) or 0),
+            int(data.get("burger",0) or 0), int(data.get("talire",0) or 0),
+            int(data.get("burtgulas",0) or 0),
+            data.get("poznamka",""), firma, soubor_url, duplicita_id
+        ))
+        rid = cur.lastrowid
+        # Označit i původní záznam jako duplicitu pokud ještě není
+        if duplicita_id:
+            conn.execute(
+                "UPDATE reporty SET duplicita_id=? WHERE id=? AND duplicita_id IS NULL",
+                (rid, duplicita_id)
+            )
+
+    return jsonify({"ok": True, "id": rid, "duplicita": duplicita_id is not None})
 
 
 @app.route("/api/reporty/<int:rid>", methods=["GET"])
@@ -2884,6 +2892,57 @@ def api_report_get(rid):
     if not r:
         return jsonify({"error": "Nenalezen"}), 404
     return jsonify(dict(r))
+
+@app.route("/api/reporty/<int:rid>", methods=["PUT"])
+@vyzaduj_prihlaseni
+def api_report_update(rid):
+    data = request.json
+
+    with get_db() as conn:
+        existing = conn.execute("SELECT * FROM reporty WHERE id=?", (rid,)).fetchone()
+        if not existing:
+            return jsonify({"error": "Report nenalezen"}), 404
+
+        # Speciální případ: jen smazat duplicita_id
+        if data.get("_jen_duplicita_id"):
+            conn.execute("UPDATE reporty SET duplicita_id=NULL WHERE id=?", (rid,))
+            return jsonify({"ok": True})
+
+        if not data.get("datum"):
+            return jsonify({"error": "Chybí datum"}), 400
+
+        karty    = float(data.get("karty", 0) or 0)
+        kov      = float(data.get("kov", 0) or 0)
+        papir    = float(data.get("papir", 0) or 0)
+        vydaje   = float(data.get("vydaje", 0) or 0)
+        hotovost = kov + papir
+        trzba    = karty + hotovost + vydaje
+        pk50_ks  = int(data.get("pk50_ks", 0) or 0)
+        pk100_ks = int(data.get("pk100_ks", 0) or 0)
+        pk_celkem  = pk50_ks * 50 + pk100_ks * 100
+        trzba_vcpk = trzba + pk_celkem
+
+        # Zachovat stávající soubor_url pokud nebylo nahráno nové
+        ex = dict(existing) if hasattr(existing, "keys") else dict(zip([d[0] for d in conn.execute("SELECT * FROM reporty WHERE id=?", (rid,)).description or []], existing))
+        soubor_url = data.get("soubor_url") or (existing["soubor_url"] if isinstance(existing, dict) else None)
+
+        conn.execute("""
+            UPDATE reporty SET datum=?,den=?,smena=?,karty=?,kov=?,papir=?,hotovost=?,
+            vydaje=?,trzba=?,trzba_vcpk=?,pk50_ks=?,pk100_ks=?,pk_celkem=?,
+            pizza_cela=?,pizza_ctvrt=?,burger=?,talire=?,burtgulas=?,poznamka=?,
+            firma_zkratka=?,soubor_url=?
+            WHERE id=?
+        """, (
+            data["datum"], data.get("den",""), data.get("smena",""),
+            karty, kov, papir, hotovost, vydaje, trzba, trzba_vcpk,
+            pk50_ks, pk100_ks, pk_celkem,
+            int(data.get("pizza_cela",0) or 0), int(data.get("pizza_ctvrt",0) or 0),
+            int(data.get("burger",0) or 0), int(data.get("talire",0) or 0),
+            int(data.get("burtgulas",0) or 0),
+            data.get("poznamka",""), data.get("firma_zkratka",""),
+            soubor_url, rid
+        ))
+    return jsonify({"ok": True, "id": rid})
 
 @app.route("/api/reporty/<int:rid>", methods=["DELETE"])
 @vyzaduj_prihlaseni
