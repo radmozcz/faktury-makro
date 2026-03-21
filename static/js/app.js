@@ -3451,9 +3451,9 @@ function renderReportyTable(rows) {
     <table style="min-width:900px">
       <thead><tr>
         ${th("datum","Datum")}${th("den","Den")}
+        <th style="background:var(--primary-bg,#e8f4fd)">Celkem tržba</th>
         ${th("trzba_vcpk","Tržba vč.PK")}${th("karty","Karty")}${th("hotovost","Hotovost")}${th("vydaje","Výdaje")}
         ${th("pk_celkem","Poukázky")}
-        <th style="background:var(--primary-bg,#e8f4fd)">Celkem tržba</th>
         ${th("pizza_cela","Pizza")}${th("pizza_ctvrt","1/4\nPizza")}${th("burger","Burger")}${th("burtgulas","B-guláš")}${th("talire","Talíře")}
         <th>Firma</th><th>Směna</th><th></th>
       </tr></thead>
@@ -3464,12 +3464,12 @@ function renderReportyTable(rows) {
           <tr style="cursor:pointer" onclick="editReport(${r.id})">
             <td style="white-space:nowrap"><strong>${czDateShort(r.datum)}</strong></td>
             <td style="color:var(--txt2);font-size:.82rem">${escHtml(r.den||"")}</td>
+            <td style="text-align:right;background:var(--primary-bg,#e8f4fd)"><strong>${czInt(celkem_trzba)}</strong></td>
             <td style="text-align:right"><strong>${czInt(r.trzba_vcpk)}</strong></td>
             <td style="text-align:right">${czInt(r.karty)}</td>
             <td style="text-align:right">${czInt(r.hotovost)}</td>
             <td style="text-align:right">${r.vydaje ? czInt(r.vydaje) : "—"}</td>
             <td style="text-align:right">${r.pk_celkem ? czInt(r.pk_celkem) : "—"}</td>
-            <td style="text-align:right;background:var(--primary-bg,#e8f4fd)"><strong>${czInt(celkem_trzba)}</strong></td>
             <td style="text-align:center">${r.pizza_cela || "—"}</td>
             <td style="text-align:center">${r.pizza_ctvrt || "—"}</td>
             <td style="text-align:center">${r.burger || "—"}</td>
@@ -3487,12 +3487,12 @@ function renderReportyTable(rows) {
       <tfoot>
         <tr class="table-footer">
           <td colspan="2">Celkem (${rows.length} dní)</td>
+          <td style="text-align:right;background:var(--primary-bg,#e8f4fd)"><strong>${czInt(sumy.karty+sumy.hotovost+sumy.vydaje)}</strong></td>
           <td style="text-align:right"><strong>${czInt(sumy.trzba_vcpk)}</strong></td>
           <td style="text-align:right"><strong>${czInt(sumy.karty)}</strong></td>
           <td style="text-align:right"><strong>${czInt(sumy.hotovost)}</strong></td>
           <td style="text-align:right"><strong>${czInt(sumy.vydaje)}</strong></td>
           <td style="text-align:right"><strong>${czInt(sumy.pk_celkem)}</strong></td>
-          <td style="text-align:right;background:var(--primary-bg,#e8f4fd)"><strong>${czInt(sumy.karty+sumy.hotovost+sumy.vydaje)}</strong></td>
           <td style="text-align:center"><strong>${sumy.pizza_cela}</strong></td>
           <td style="text-align:center"><strong>${sumy.pizza_ctvrt}</strong></td>
           <td style="text-align:center"><strong>${sumy.burger}</strong></td>
