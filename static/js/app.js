@@ -1969,6 +1969,146 @@ function exportPolozky(fmt) {
 
 
 // ═══════════════════════════════════════════════════════════════
+//  VÝPLATY
+// ═══════════════════════════════════════════════════════════════
+
+async function renderVyplaty() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Výplaty</h1>
+      <div class="btn-group">
+        <button class="btn btn-primary btn-sm" onclick="openNovVyplata()">+ Nová výplata</button>
+      </div>
+    </div>
+    <div class="filters">
+      <label>Firma:</label>
+      <select id="vFirma" class="firma-select">
+        <option value="">Všechny</option>
+        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+      </select>
+      <label>Zaměstnanec:</label>
+      <select id="vJmeno"><option value="">Všichni</option></select>
+      <label>Od:</label><input type="date" id="vOd">
+      <label>Do:</label><input type="date" id="vDo">
+    </div>
+    <div class="card">
+      <div class="table-wrap" id="vyplatyList"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>`;
+  await nacistZamestnance();
+  loadVyplaty();
+  ["vFirma","vJmeno","vOd","vDo"].forEach(id => {
+    document.getElementById(id)?.addEventListener("change", loadVyplaty);
+  });
+}
+
+async function nacistZamestnance() {
+  try {
+    const data = await api("/api/vyplaty/zamestnanci");
+    const sel = document.getElementById("vJmeno");
+    if (!sel) return;
+    data.forEach(j => {
+      const o = document.createElement("option");
+      o.value = j; o.textContent = j;
+      sel.appendChild(o);
+    });
+  } catch {}
+}
+
+async function loadVyplaty() {
+  const params = new URLSearchParams({
+    firma: document.getElementById("vFirma")?.value||"",
+    jmeno: document.getElementById("vJmeno")?.value||"",
+    od:    document.getElementById("vOd")?.value||"",
+    do:    document.getElementById("vDo")?.value||"",
+  });
+  let data;
+  try { data = await api(`/api/vyplaty?${params}`); } catch { return; }
+  const el = document.getElementById("vyplatyList");
+  if (!el) return;
+  el.innerHTML = `
+    <table>
+      <thead><tr><th>Firma</th><th>Jméno</th><th>Datum</th><th>Částka</th><th>Poznámka</th><th></th></tr></thead>
+      <tbody>
+        ${data.vyplaty.map(v => `
+          <tr>
+            <td><span class="badge" style="background:var(--green-pale)">${escHtml(v.firma_zkratka||"—")}</span></td>
+            <td><strong>${escHtml(v.jmeno)}</strong></td>
+            <td>${czDate(v.datum)}</td>
+            <td><strong>${czMoney(v.castka)}</strong></td>
+            <td style="color:var(--txt2);font-size:.88rem">${escHtml(v.poznamka||"")}</td>
+            <td>
+              <button class="btn btn-secondary btn-sm" onclick="editVyplata(${v.id},'${escHtml(v.jmeno)}','${v.datum}',${v.castka},'${escHtml(v.poznamka||"")}','${escHtml(v.firma_zkratka||"")}')">✏️</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteVyplata(${v.id})">🗑</button>
+            </td>
+          </tr>`).join("") || "<tr><td colspan='6' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné výplaty</td></tr>"}
+      </tbody>
+      ${data.vyplaty.length ? `<tfoot><tr class="table-footer"><td colspan="3">Celkem (${data.vyplaty.length})</td><td colspan="3"><strong>${czMoney(data.celkem)}</strong></td></tr></tfoot>` : ""}
+    </table>`;
+}
+
+function vyplataFormHtml(v = {}) {
+  return `
+    <div class="grid-2" style="gap:1rem">
+      <div class="form-group"><label class="form-label">Firma</label>
+        <select id="vFirmaF" class="form-control">
+          <option value="">—</option>
+          ${App.config.firmy.map(f=>`<option value="${f}" ${v.firma_zkratka===f?"selected":""}>${f}</option>`).join("")}
+        </select>
+      </div>
+      <div class="form-group"><label class="form-label">Jméno *</label>
+        <input id="vJmenoF" class="form-control" value="${escHtml(v.jmeno||"")}" placeholder="Jméno zaměstnance">
+      </div>
+      <div class="form-group"><label class="form-label">Datum *</label>
+        <input type="date" id="vDatumF" class="form-control" value="${v.datum||new Date().toISOString().split("T")[0]}">
+      </div>
+      <div class="form-group"><label class="form-label">Částka (Kč) *</label>
+        <input type="number" step="0.01" id="vCastkaF" class="form-control" value="${v.castka||""}">
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">Poznámka</label>
+      <input id="vPoznamkaF" class="form-control" value="${escHtml(v.poznamka||"")}">
+    </div>`;
+}
+
+function openNovVyplata() {
+  openModal("Nová výplata", vyplataFormHtml() + `
+    <div class="btn-group" style="margin-top:1rem">
+      <button class="btn btn-primary" onclick="App._vyplataOnSave&&App._vyplataOnSave()">💾 Uložit</button>
+    </div>`);
+  App._vyplataOnSave = async () => {
+    const jmeno  = document.getElementById("vJmenoF").value.trim();
+    const datum  = document.getElementById("vDatumF").value;
+    const castka = parseFloat(document.getElementById("vCastkaF").value);
+    if (!jmeno || !datum || isNaN(castka)) { toast("Vyplňte jméno, datum a částku"); return; }
+    await api("/api/vyplaty", {method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({jmeno,datum,castka,poznamka:document.getElementById("vPoznamkaF").value,firma_zkratka:document.getElementById("vFirmaF").value})});
+    toast("Výplata uložena ✓"); closeModal(); loadVyplaty();
+  };
+}
+
+function editVyplata(id, jmeno, datum, castka, poznamka, firma_zkratka) {
+  openModal("Upravit výplatu", vyplataFormHtml({jmeno,datum,castka,poznamka,firma_zkratka}) + `
+    <div class="btn-group" style="margin-top:1rem">
+      <button class="btn btn-primary" onclick="App._vyplataOnSave&&App._vyplataOnSave()">💾 Uložit změny</button>
+    </div>`);
+  App._vyplataOnSave = async () => {
+    const jmeno2  = document.getElementById("vJmenoF").value.trim();
+    const datum2  = document.getElementById("vDatumF").value;
+    const castka2 = parseFloat(document.getElementById("vCastkaF").value);
+    if (!jmeno2 || !datum2 || isNaN(castka2)) { toast("Vyplňte jméno, datum a částku"); return; }
+    await api(`/api/vyplaty/${id}`, {method:"PUT",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({jmeno:jmeno2,datum:datum2,castka:castka2,poznamka:document.getElementById("vPoznamkaF").value,firma_zkratka:document.getElementById("vFirmaF").value})});
+    toast("Výplata upravena ✓"); closeModal(); loadVyplaty();
+  };
+}
+
+async function deleteVyplata(id) {
+  if (!confirm("Opravdu smazat tuto výplatu?")) return;
+  await api(`/api/vyplaty/${id}`, {method:"DELETE"});
+  toast("Výplata smazána ✓"); loadVyplaty();
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  KALKULACE
 // ═══════════════════════════════════════════════════════════════
 
