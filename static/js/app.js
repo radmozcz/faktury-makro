@@ -2901,9 +2901,20 @@ async function renderStatistiky() {
       <div id="plMarze"><div class="loading-center"><span class="spinner"></span></div></div>
     </div>
 
-    <div class="card" style="margin-bottom:1.5rem">
-      <div class="card-title" style="margin-bottom:.75rem">💰 P&L — příjmy vs. všechny výdaje</div>
-      <div id="plTotal"><div class="loading-center"><span class="spinner"></span></div></div>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem;margin-bottom:1.5rem">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+          <span class="card-title" style="margin:0">P&amp;L — příjmy vč. PK vs. všechny výdaje</span>
+          <select id="plRokPL" onchange="loadPL()" style="font-size:.82rem">
+            <option value="">Vše</option>
+            ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}" ${r==rokAkt?"selected":""}>${r}</option>`).join("")}
+          </select>
+        </div>
+        <div id="plTotal"><div class="loading-center"><span class="spinner"></span></div></div>
+      </div>
+      <div class="card" style="display:flex;align-items:center;justify-content:center;min-height:150px;color:var(--txt2);font-size:.85rem;border-style:dashed">
+        — připraveno pro další tabulku —
+      </div>
     </div>
 
     <div class="card" style="margin-bottom:1.5rem">
