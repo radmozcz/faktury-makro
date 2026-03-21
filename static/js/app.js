@@ -2925,51 +2925,10 @@ async function renderStatistiky() {
       </div>
     </div>
 
-    <div class="card" style="margin-bottom:1.5rem">
-      <div class="card-title">📅 Měsíční přehled – tržby a náklady</div>
-      <div class="filters" style="margin-bottom:1rem;flex-wrap:wrap;gap:.5rem">
-        <label>Firma:</label>
-        <select id="srFirma" class="firma-select" onchange="loadStatRozsirene()">
-          <option value="">Všechny</option>
-          ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
-        </select>
-        <label>Rok:</label>
-        <select id="srRok" onchange="loadStatRozsirene()">
-          ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}">${r}</option>`).join("")}
-        </select>
-        <label>Porovnat s:</label>
-        <select id="srRok2" onchange="loadStatRozsirene()">
-          <option value="">—</option>
-          ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}">${r}</option>`).join("")}
-        </select>
-      </div>
-      <div id="statRozsirene"><div class="loading-center"><span class="spinner"></span></div></div>
-    </div>
-
-    <div class="filters" style="margin-bottom:1rem">
-      <label>Firma:</label>
-      <select id="sFirma" class="firma-select" onchange="loadPrehledStatistik();loadMesicniStatistiky()">
-        <option value="">Všechny</option>
-        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
-      </select>
-      <label>Rok:</label>
-      <select id="sRok" onchange="aplikujRokFiltr('sRok','sOd','sDo',loadStatistiky);loadPrehledStatistik()">
-        ${rokOptions("")}
-      </select>
-      <label>Od:</label><input type="date" id="sOd" value="${odStr}">
-      <label>Do:</label><input type="date" id="sDo" value="${doStr}">
-      <button class="btn btn-primary btn-sm" onclick="loadStatistiky()">Zobrazit</button>
-    </div>
-    <div id="statContent"><div class="loading-center"><span class="spinner"></span></div></div>
-    <div id="statPrehled" style="margin-top:1.5rem"></div>
-    <div id="statReporty" style="margin-top:1.5rem"></div>`;
+`;
 
   loadTrzbyMesice();
   loadPL();
-  loadStatRozsirene();
-  loadStatistiky();
-  loadPrehledStatistik();
-  loadMesicniStatistiky();
 }
 
 const MCZ_NAZVY = ["","Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
@@ -3079,10 +3038,8 @@ async function loadPL() {
       let tbody = "";
       let tots = {};
       aktRoky.forEach(r => tots[r]={f:0,v:0,p:0,n:0});
-      mesiceNakl.forEach(m => {
-        const mi = parseInt(m.mesic);
-        const mame = aktRoky.some(r => m[r]?.naklady > 0);
-        if (!mame) return;
+      for (let mi = 1; mi <= 12; mi++) {
+        const m = mesiceNakl.find(x => parseInt(x.mesic) === mi) || {mesic: String(mi).padStart(2,"0")};
         let radek = `<tr><td style="padding:5px 8px">${MCZ_NAZVY[mi]}</td>`;
         aktRoky.forEach(r => {
           const d = m[r] || {};
@@ -3094,7 +3051,7 @@ async function loadPL() {
           radek += `<td style="text-align:right;padding:5px 6px;font-weight:600;color:#dc2626">${_n(d.naklady)}</td>`;
         });
         tbody += radek + `</tr>`;
-      });
+      }
       let tfoot = `<tr style="font-weight:600;border-top:1.5px solid var(--border)"><td style="padding:5px 8px">Celkem</td>`;
       aktRoky.forEach(r => {
         tfoot += `<td style="text-align:right;padding:5px 6px">${_n(tots[r].f)}</td>`;
@@ -3121,10 +3078,8 @@ async function loadPL() {
       let tbody = "";
       let tots = {};
       aktRoky.forEach(r => tots[r]={t:0,f:0});
-      mesiceMarze.forEach(m => {
-        const mi = parseInt(m.mesic);
-        const mame = aktRoky.some(r => m[r]?.trzba > 0);
-        if (!mame) return;
+      for (let mi = 1; mi <= 12; mi++) {
+        const m = mesiceMarze.find(x => parseInt(x.mesic) === mi) || {mesic: String(mi).padStart(2,"0")};
         let radek = `<tr><td style="padding:5px 8px">${MCZ_NAZVY[mi]}</td>`;
         aktRoky.forEach(r => {
           const d = m[r] || {};
@@ -3136,7 +3091,7 @@ async function loadPL() {
           radek += `<td style="text-align:right;padding:5px 6px;font-weight:600;color:${pctColor}">${_pct(pct)}</td>`;
         });
         tbody += radek + `</tr>`;
-      });
+      }
       let tfoot = `<tr style="font-weight:600;border-top:1.5px solid var(--border)"><td style="padding:5px 8px">Celkem</td>`;
       aktRoky.forEach(r => {
         const pct = tots[r].f > 0 ? ((tots[r].t - tots[r].f)/tots[r].f*100) : null;
@@ -3232,8 +3187,8 @@ async function loadTrzbyMesice() {
       <td style="text-align:right">${_n(d.burger)}</td>
       <td style="text-align:right">${_n(d.bgulas)}</td>
     </tr>
-    <tr style="background:var(--bg);font-size:.8rem;color:var(--txt2)">
-      <td style="padding-left:1.5rem">ø/den (${d.dni} dní)</td>
+    <tr style="background:var(--bg);color:var(--txt2)">
+      <td style="padding-left:1.5rem;font-size:.8rem">ø/den (${d.dni} dní)</td>
       <td style="text-align:right">${_n(Math.round(d.trzba/dn))}</td>
       <td style="text-align:right">${_n(Math.round(d.trzba_vcpk/dn))}</td>
       <td style="text-align:right">${_n(Math.round(d.karty/dn))}</td>
