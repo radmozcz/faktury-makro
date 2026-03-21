@@ -2976,10 +2976,10 @@ async function renderNastaveni() {
       </div>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-top:.5rem">
         <button class="btn btn-primary" onclick="saveConfig()">💾 Uložit nastavení</button>
-        <button class="btn" style="background:var(--accent);color:#fff" onclick="opravDuplicity()" title="Zkontroluje a označí duplicitní faktury">🔍 Duplicity</button>
+        <button class="btn" style="background:var(--accent);color:#fff" onclick="opravDuplicity()">🔍 Najít duplicity</button>
         <button class="btn" style="background:#6c757d;color:#fff" onclick="normalizujNazvy()">🧹 Odstranit ARO/MC/FL prefixy</button>
         <button class="btn" style="background:#2563eb;color:#fff" onclick="stahnoutZalohu()">📦 Záloha do GCS</button>
-        <button class="btn btn-secondary btn-sm" onclick="stahnoutSqlDump()">⬇ SQL dump</button>
+        <button class="btn btn-secondary btn-sm" onclick="stahnoutSqlDump()">💾 SQL záloha → GCS</button>
       </div>
 
       <div style="margin-top:1rem">
@@ -3207,6 +3207,7 @@ async function stahnoutSqlDump() {
     URL.revokeObjectURL(url);
     const gcsInfo = gcsUrl ? " + uloženo do GCS" : "";
     if (statusEl) { statusEl.textContent = `✅ Staženo${gcsInfo}`; setTimeout(() => statusEl.textContent = "", 4000); }
+    if (gcsUrl) loadZalohy();
   } catch(e) {
     if (statusEl) statusEl.textContent = "❌ " + e.message;
     toast("Záloha selhala: " + e.message, true);
