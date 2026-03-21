@@ -764,7 +764,7 @@ def parse_makro_pdf(filepath):
         result["zpusob_uhrady"] = "Hotovost"
         result["stav"] = "zaplaceno"
         result["ico_odberatele"] = ico_odberatele
-        result["firma_zkratka"] = _ico_na_firmu(ico_odberatele)
+        result["firma_zkratka"] = _ico_na_firmu(ico_odberatele) or "UNI"
 
         for p in result["polozky"]:
             p["nazev"] = _format_nazev(p["nazev"])
@@ -1056,6 +1056,9 @@ def parse_makro_image(filepath):
         suma_polozek = round(sum(p["celkem_s_dph"] for p in result["polozky"]), 2)
         if result["celkem_s_dph"] == 0:
             result["celkem_s_dph"] = suma_polozek
+
+        if not result["firma_zkratka"]:
+            result["firma_zkratka"] = "UNI"
 
         ocr_bez = result.get("ocr_strana_celkem_bez_dph", 0)
         podezrele = [i for i, p in enumerate(result["polozky"])

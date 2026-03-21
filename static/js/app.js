@@ -183,6 +183,7 @@ function navigateTo(page) {
     vyplaty:    renderVyplaty,
     reporty:    renderReporty,
     statistiky: renderStatistiky,
+    "ai-asistent": renderAiAsistent,
     nastaveni:  renderNastaveni,
     banky:      renderBanky,
     vydaje:          renderVydaje,
@@ -2510,11 +2511,9 @@ async function renderStatistiky() {
       <button class="btn btn-primary btn-sm" onclick="loadStatistiky()">Zobrazit</button>
     </div>
     <div id="statContent"><div class="loading-center"><span class="spinner"></span></div></div>
-    <div id="statAiChat" style="margin-bottom:1.5rem"></div>
     <div id="statPrehled" style="margin-top:1.5rem"></div>
     <div id="statReporty" style="margin-top:1.5rem"></div>`;
 
-  initAiChat();
   loadStatistiky();
   loadPrehledStatistik();
   loadMesicniStatistiky();
@@ -2981,6 +2980,25 @@ async function saveConfig() {
 // ═══════════════════════════════════════════════════════════════
 //  Util
 // ═══════════════════════════════════════════════════════════════
+function renderAiAsistent() {
+  const rok = new Date().getFullYear();
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header"><h1 class="page-title">🤖 AI asistent</h1></div>
+    <div class="filters" style="margin-bottom:1rem">
+      <label>Firma:</label>
+      <select id="sFirma" class="firma-select">
+        <option value="">Všechny</option>
+        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+      </select>
+      <label>Rok:</label>
+      <select id="sRok">
+        ${rokOptions(rok)}
+      </select>
+    </div>
+    <div id="statAiChat"></div>`;
+  initAiChat();
+}
+
 function initAiChat() {
   const el = document.getElementById("statAiChat");
   if (!el) return;
@@ -3435,11 +3453,14 @@ function renderReportyTable(rows) {
         ${th("datum","Datum")}${th("den","Den")}
         ${th("trzba_vcpk","Tržba vč.PK")}${th("karty","Karty")}${th("hotovost","Hotovost")}${th("vydaje","Výdaje")}
         ${th("pk_celkem","Poukázky")}
+        <th style="background:var(--primary-bg,#e8f4fd)">Celkem tržba</th>
         ${th("pizza_cela","Pizza")}${th("pizza_ctvrt","1/4\nPizza")}${th("burger","Burger")}${th("burtgulas","B-guláš")}${th("talire","Talíře")}
         <th>Firma</th><th>Směna</th><th></th>
       </tr></thead>
       <tbody>
-        ${rows.map(r => `
+        ${rows.map(r => {
+          const celkem_trzba = (r.karty||0) + (r.hotovost||0) + (r.vydaje||0);
+          return `
           <tr style="cursor:pointer" onclick="editReport(${r.id})">
             <td style="white-space:nowrap"><strong>${czDateShort(r.datum)}</strong></td>
             <td style="color:var(--txt2);font-size:.82rem">${escHtml(r.den||"")}</td>
@@ -3448,6 +3469,7 @@ function renderReportyTable(rows) {
             <td style="text-align:right">${czInt(r.hotovost)}</td>
             <td style="text-align:right">${r.vydaje ? czInt(r.vydaje) : "—"}</td>
             <td style="text-align:right">${r.pk_celkem ? czInt(r.pk_celkem) : "—"}</td>
+            <td style="text-align:right;background:var(--primary-bg,#e8f4fd)"><strong>${czInt(celkem_trzba)}</strong></td>
             <td style="text-align:center">${r.pizza_cela || "—"}</td>
             <td style="text-align:center">${r.pizza_ctvrt || "—"}</td>
             <td style="text-align:center">${r.burger || "—"}</td>
@@ -3460,7 +3482,7 @@ function renderReportyTable(rows) {
               <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();editReport(${r.id})" title="Upravit">✏️</button>
               <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteReport(${r.id})" title="Smazat">🗑</button>
             </td>
-          </tr>`).join("")}
+          </tr>`;}).join("")}
       </tbody>
       <tfoot>
         <tr class="table-footer">
@@ -3470,6 +3492,7 @@ function renderReportyTable(rows) {
           <td style="text-align:right"><strong>${czInt(sumy.hotovost)}</strong></td>
           <td style="text-align:right"><strong>${czInt(sumy.vydaje)}</strong></td>
           <td style="text-align:right"><strong>${czInt(sumy.pk_celkem)}</strong></td>
+          <td style="text-align:right;background:var(--primary-bg,#e8f4fd)"><strong>${czInt(sumy.karty+sumy.hotovost+sumy.vydaje)}</strong></td>
           <td style="text-align:center"><strong>${sumy.pizza_cela}</strong></td>
           <td style="text-align:center"><strong>${sumy.pizza_ctvrt}</strong></td>
           <td style="text-align:center"><strong>${sumy.burger}</strong></td>
