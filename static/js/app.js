@@ -4716,10 +4716,10 @@ function openVydajRucni() {
 }
 
 async function openVydajEdit(id) {
-  const data = await api("/api/vydaje");
+  const typ = window._vydajTyp || "provozni";
+  const data = await api(`/api/vydaje?typ=${typ}`);
   const v = data.vydaje.find(x=>x.id===id);
   if (!v) return;
-  const typ = window._vydajTyp || "provozni";
   _vydajModal("Upravit výdaj", v, async function() {
     const payload = _vydajGetPayload();
     await api(`/api/vydaje/${id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
@@ -4827,22 +4827,28 @@ function _renderVydajForm(formEl, data) {
 }
 
 async function ulozitVydajZDokladu(soubor_cesta, soubor_url) {
+  const typ = window._vydajTyp || "provozni";
+  const jeSoukrome = typ === "soukrome";
+  const firma_zkratka = jeSoukrome
+    ? (document.getElementById("soukrNahratLokace")?.value || "Praha")
+    : (document.getElementById("vNahratFirma")?.value || "");
   const payload = {
-    firma_zkratka: document.getElementById("vNahratFirma")?.value || "",
+    firma_zkratka,
     dodavatel:     document.getElementById("vnDodavatel").value,
     datum:         document.getElementById("vnDatum").value,
     castka:        parseFloat(document.getElementById("vnCastka").value||0),
     zpusob_uhrady: document.getElementById("vnUhrada").value,
     popis:         document.getElementById("vnPopis").value,
-    stav:          "nezaplaceno",
+    stav:          "zaplaceno",
     soubor_cesta, soubor_url,
     zdroj: "ocr",
-    typ:   window._vydajTyp || "provozni",
+    typ,
     polozky: [],
   };
-  if (!payload.firma_zkratka || !payload.castka) { toast("Vyplň firmu a částku"); return; }
+  if (!payload.firma_zkratka || !payload.castka) { toast("Vyplň lokaci a částku"); return; }
   await api("/api/vydaje", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
-  toast("Výdaj uložen ✓"); closeModal(); loadVydaje(); loadVydajeNezaplacene();
+  toast("Výdaj uložen ✓");
+  if (jeSoukrome) { renderVydaje("soukrome"); } else { closeModal(); loadVydaje(); loadVydajeNezaplacene(); }
 }
 
 async function smazatVydaj(id) {
