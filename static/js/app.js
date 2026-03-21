@@ -3810,6 +3810,9 @@ async function editReport(id) {
   let r;
   try { r = await api("/api/reporty/" + id); } catch { return; }
   if (!r || r.error) { toast("Report nenalezen", true); return; }
+  App._reportEditId = id;
+  App._reportSouborUrl = null;
+  App._reportSouborUrlExisting = r.soubor_url || null;
   openModal("Upravit report – " + czDate(r.datum), reportFormHtml(r));
   setupReportDropzone();
   rfRecalc();
