@@ -1779,15 +1779,28 @@ def api_faktury():
         rows = conn.execute(f"""
             SELECT id, firma_zkratka, dodavatel, cislo_faktury,
                    datum_vystaveni, datum_splatnosti, celkem_s_dph, stav, zdroj, duplicita_id,
-                   soubor_url
+                   soubor_url, soubor_cesta
             FROM faktury {where}
             ORDER BY datum_vystaveni DESC, created_at DESC
         """, params).fetchall()
         total_row = conn.execute(f"SELECT COALESCE(SUM(celkem_s_dph),0) as total FROM faktury {where}", params).fetchone()
         total = _first_val(total_row)
 
+    # Fallback: pokud soubor_url chybí ale je soubor_cesta, zkus GCS
+    # Omezit na max 20 volání GCS aby soupis nebyl pomalý
+    gcs_calls = 0
+    result = []
+    for r in rows:
+        d = dict(r)
+        if not d.get("soubor_url") and d.get("soubor_cesta") and gcs_calls < 20:
+            gcs_url = get_gcs_url(d["soubor_cesta"])
+            if gcs_url:
+                d["soubor_url"] = gcs_url
+            gcs_calls += 1
+        result.append(d)
+
     return jsonify({
-        "faktury": [dict(r) for r in rows],
+        "faktury": result,
         "celkem": round(total, 2)
     })
 
