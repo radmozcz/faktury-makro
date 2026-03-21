@@ -603,6 +603,16 @@ def migrate_db():
             baleni_ks       REAL DEFAULT 1,
             zdroj_ceny      TEXT DEFAULT 'rucni'
         )""")
+    # Ruční statistická data (průměry za roky bez dat v DB)
+    with get_db() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS stat_rucni_data (
+            id      SERIAL PRIMARY KEY,
+            rok     TEXT NOT NULL,
+            mesic   TEXT NOT NULL,
+            hodnota REAL NOT NULL DEFAULT 0,
+            typ     TEXT NOT NULL DEFAULT 'trzba_vcpk_prumer',
+            UNIQUE(rok, mesic, typ)
+        )""")
     # paska_url ve vyplaty
     with get_db() as conn:
         if _USE_PG:
@@ -3143,6 +3153,43 @@ def api_karty_alert():
         "varovani": total >= 1200000,
         "per_firma": firmy_alert,
     })
+
+
+@app.route("/api/statistiky/rucni-data")
+@vyzaduj_prihlaseni
+def api_stat_rucni_get():
+    with get_db() as conn:
+        rows = conn.execute("SELECT rok, mesic, hodnota, typ FROM stat_rucni_data ORDER BY rok, mesic").fetchall()
+    return jsonify([dict(r) for r in rows])
+
+@app.route("/api/statistiky/rucni-data", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_stat_rucni_set():
+    data = request.json
+    rok     = str(data.get("rok","")).strip()
+    mesic   = str(data.get("mesic","")).strip().zfill(2)
+    hodnota = float(data.get("hodnota", 0) or 0)
+    typ     = data.get("typ", "trzba_vcpk_prumer")
+    if not rok or not mesic:
+        return jsonify({"error": "Chybí rok nebo měsíc"}), 400
+    with get_db() as conn:
+        conn.execute("""
+            INSERT INTO stat_rucni_data (rok, mesic, hodnota, typ)
+            VALUES (?,?,?,?)
+            ON CONFLICT (rok, mesic, typ) DO UPDATE SET hodnota=EXCLUDED.hodnota
+        """, (rok, mesic, hodnota, typ))
+    return jsonify({"ok": True})
+
+@app.route("/api/statistiky/rucni-data", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_stat_rucni_delete():
+    data = request.json
+    rok   = str(data.get("rok","")).strip()
+    mesic = str(data.get("mesic","")).strip().zfill(2)
+    typ   = data.get("typ", "trzba_vcpk_prumer")
+    with get_db() as conn:
+        conn.execute("DELETE FROM stat_rucni_data WHERE rok=? AND mesic=? AND typ=?", (rok, mesic, typ))
+    return jsonify({"ok": True})
 
 
 @app.route("/api/statistiky/prehled-pl")

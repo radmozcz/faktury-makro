@@ -2973,44 +2973,66 @@ async function loadPL() {
   };
 
   // ── Tabulka 1: Průměrná denní tržba vč.PK po letech ──
+  // Načíst ruční data
+  let rucniData = {};
+  try {
+    const rd = await api("/api/statistiky/rucni-data");
+    rd.forEach(r => { rucniData[`${r.rok}_${r.mesic}`] = r.hodnota; });
+  } catch {}
+
   const elPrum = document.getElementById("plPrumery");
   if (elPrum) {
-    const aktRoky = roky.filter(r => mesice.some(m => m[r]?.dni > 0));
+    const rucniRoky = [...new Set(Object.keys(rucniData).map(k=>k.split("_")[0]))];
+    const vsechnyRoky = [...new Set([...roky, ...rucniRoky])].sort();
+    const editRoky = ["2023","2024"].filter(r => !roky.includes(r));
+    const vsRoky = [...new Set([...vsechnyRoky, ...editRoky])].filter(r =>
+      mesice.some(m => m[r]?.dni > 0) || Object.keys(rucniData).some(k=>k.startsWith(r+"_")) || editRoky.includes(r)
+    ).sort();
+
     let thead = `<tr style="font-size:.78rem;color:var(--txt2)"><th style="text-align:left;padding:5px 8px">Měsíc</th>`;
-    aktRoky.forEach(r => thead += `<th style="text-align:right;padding:5px 8px">${r}</th>`);
+    vsRoky.forEach(r => {
+      const jeRucni = !roky.includes(r);
+      thead += `<th style="text-align:right;padding:5px 8px">${r}${jeRucni?' <span style="font-size:10px" title="Ruční data">✎</span>':""}</th>`;
+    });
     thead += `</tr>`;
+
     let tbody = "";
-    let soucty = {};
-    let aktivni = {};
-    aktRoky.forEach(r => { soucty[r]=0; aktivni[r]=0; });
-    mesice.forEach(m => {
-      const mi = parseInt(m.mesic);
+    let soucty = {}; let aktivni = {};
+    vsRoky.forEach(r => { soucty[r]=0; aktivni[r]=0; });
+
+    for (let mi = 1; mi <= 12; mi++) {
+      const m = mesice.find(x => parseInt(x.mesic) === mi) || {mesic: String(mi).padStart(2,"0")};
       let radek = `<tr><td style="padding:5px 8px">${MCZ_NAZVY[mi]}</td>`;
-      aktRoky.forEach(r => {
+      vsRoky.forEach(r => {
         const d = m[r];
+        const klic = `${r}_${String(mi).padStart(2,"0")}`;
+        const rucni = rucniData[klic];
         if (d?.dni > 0) {
           const prumer = Math.round(d.trzba_vcpk / d.dni);
+          soucty[r] += d.trzba_vcpk; aktivni[r]++;
           radek += `<td style="text-align:right;padding:5px 8px">${prumer.toLocaleString("cs-CZ")}</td>`;
-          soucty[r] += d.trzba_vcpk;
-          aktivni[r]++;
+        } else if (rucni) {
+          soucty[r] += rucni; aktivni[r]++;
+          radek += `<td style="text-align:right;padding:5px 8px;cursor:pointer" title="Klikni pro úpravu" onclick="editStatPrumer('${r}','${String(mi).padStart(2,"0")}',${rucni})"><span style="color:var(--txt2)">${Math.round(rucni).toLocaleString("cs-CZ")}</span></td>`;
         } else {
-          radek += `<td style="text-align:right;padding:5px 8px;color:var(--txt2)">—</td>`;
+          radek += `<td style="text-align:right;padding:5px 8px;cursor:pointer;color:var(--color-border-secondary)" title="Klikni pro ruční zadání" onclick="editStatPrumer('${r}','${String(mi).padStart(2,"0")}',0)">+</td>`;
         }
       });
       radek += `</tr>`;
       tbody += radek;
-    });
+    }
+
     let tfoot = `<tr style="font-weight:600;border-top:1.5px solid var(--border)"><td style="padding:5px 8px">Součet</td>`;
-    aktRoky.forEach(r => tfoot += `<td style="text-align:right;padding:5px 8px">${_n(soucty[r])}</td>`);
+    vsRoky.forEach(r => tfoot += `<td style="text-align:right;padding:5px 8px">${_n(soucty[r])}</td>`);
     tfoot += `</tr><tr style="font-size:.78rem;color:var(--txt2)"><td style="padding:4px 8px">Aktivních měs.</td>`;
-    aktRoky.forEach(r => tfoot += `<td style="text-align:right;padding:4px 8px">${aktivni[r]}</td>`);
+    vsRoky.forEach(r => tfoot += `<td style="text-align:right;padding:4px 8px">${aktivni[r]}</td>`);
     tfoot += `</tr><tr style="font-size:.78rem;color:var(--txt2)"><td style="padding:4px 8px">Průměr/měs.</td>`;
-    aktRoky.forEach(r => tfoot += `<td style="text-align:right;padding:4px 8px">${aktivni[r]>0?_n(Math.round(soucty[r]/aktivni[r])):"—"}</td>`);
+    vsRoky.forEach(r => tfoot += `<td style="text-align:right;padding:4px 8px">${aktivni[r]>0?_n(Math.round(soucty[r]/aktivni[r])):"—"}</td>`);
     tfoot += `</tr>`;
-    elPrum.innerHTML = `<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.85rem">${thead}<tbody>${tbody}</tbody><tfoot>${tfoot}</tfoot></table></div>`;
+    elPrum.innerHTML = `<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.85rem">${thead}<tbody>${tbody}</tbody><tfoot>${tfoot}</tfoot></table></div><div style="font-size:.75rem;color:var(--txt2);margin-top:.4rem">✎ = ruční data · klikni na + pro zadání</div>`;
   }
 
-  // ── Tabulka 2: Náklady po měsících ──
+    // ── Tabulka 2: Náklady po měsících ──
   const elNakl = document.getElementById("plNaklady");
   if (elNakl) {
     const aktRoky = roky.filter(r => mesice.some(m => m[r]?.naklady > 0));
@@ -3242,6 +3264,31 @@ async function loadTrzbyMesice() {
       <td style="text-align:right;padding:4px 8px">${_f(tot.bgulas/totDni)}</td>
     </tr></tfoot>
   </table></div>`;
+}
+
+async function editStatPrumer(rok, mesic, aktHodnota) {
+  const MCZ = ["","Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
+  const nazev = MCZ[parseInt(mesic)] || mesic;
+  const nova = prompt(`Průměrná denní tržba vč.PK — ${nazev} ${rok}:\n(zadej 0 pro smazání)`, aktHodnota || "");
+  if (nova === null) return;
+  const val = parseFloat(nova.replace(/\s/g,"").replace(",","."));
+  if (isNaN(val)) { toast("Neplatná hodnota"); return; }
+  if (val === 0) {
+    await api("/api/statistiky/rucni-data", {
+      method: "DELETE",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({rok, mesic, typ: "trzba_vcpk_prumer"})
+    });
+    toast("Záznam smazán ✓");
+  } else {
+    await api("/api/statistiky/rucni-data", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({rok, mesic, hodnota: val, typ: "trzba_vcpk_prumer"})
+    });
+    toast(`Uloženo: ${nazev} ${rok} = ${val.toLocaleString("cs-CZ")} ✓`);
+  }
+  loadPL();
 }
 
 async function toggleTmDetail(id) {
