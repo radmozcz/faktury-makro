@@ -1043,6 +1043,121 @@ function renderNahrat() {
   rUpdateTotal();
 }
 
+function renderSoukromeNahrat() {
+  window._vydajTyp = "soukrome";
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">Nahrát soukromý doklad</h1>
+      <button class="btn btn-secondary btn-sm" onclick="renderVydaje('soukrome')">← Zpět</button>
+    </div>
+    <div class="card" style="max-width:900px">
+      <div class="form-group">
+        <label class="form-label">Lokace</label>
+        <select id="soukrNahratLokace" class="form-control" style="max-width:200px">
+          <option>Praha</option>
+          <option>Třebovle</option>
+          <option>UNI</option>
+        </select>
+      </div>
+
+      <div style="display:flex;gap:.5rem;margin-bottom:1rem;border-bottom:2px solid var(--border);padding-bottom:0">
+        <button id="soukrTabPdf" class="tab-btn tab-active" onclick="soukrSwitchTab('pdf')">📄 PDF / foto</button>
+        <button id="soukrTabRucni" class="tab-btn" onclick="soukrSwitchTab('rucni')">✏️ Ruční zadání</button>
+      </div>
+
+      <div id="soukrTabPanelPdf">
+        <div class="dropzone" id="soukrDropzone">
+          <div class="dropzone-icon">🧾</div>
+          <div class="dropzone-text">
+            <strong>Přetáhněte foto nebo PDF dokladu</strong> nebo klikněte<br>
+            <small>Doklad bude rozpoznán automaticky</small>
+          </div>
+          <input type="file" id="soukrFileInput" accept="image/*,.pdf">
+        </div>
+        <div id="soukrUploadStatus" style="margin-top:1rem;font-size:.9rem"></div>
+      </div>
+
+      <div id="soukrTabPanelRucni" style="display:none">
+        <div class="grid-2" style="gap:1rem;margin-top:1rem">
+          <div class="form-group"><label class="form-label">Dodavatel</label><input id="srDodavatel" class="form-control" placeholder="Název obchodu"></div>
+          <div class="form-group"><label class="form-label">Datum</label><input type="date" id="srDatum" class="form-control" value="${new Date().toISOString().split('T')[0]}"></div>
+          <div class="form-group"><label class="form-label">Částka (Kč) *</label><input type="number" step="0.01" id="srCastka" class="form-control"></div>
+          <div class="form-group"><label class="form-label">Způsob úhrady</label>
+            <select id="srUhrada" class="form-control">
+              <option>hotovost</option><option>karta</option><option>převodem</option>
+            </select>
+          </div>
+          <div class="form-group" style="grid-column:1/-1"><label class="form-label">Popis / účel</label><input id="srPopis" class="form-control" placeholder="Co to bylo?"></div>
+          <div class="form-group" style="grid-column:1/-1"><label class="form-label">Poznámka</label><input id="srPoznamka" class="form-control"></div>
+        </div>
+        <div class="btn-group" style="margin-top:1.2rem">
+          <button class="btn btn-primary" onclick="ulozitSoukromeRucni()">💾 Uložit doklad</button>
+        </div>
+      </div>
+
+      <div id="soukrNahratForm" style="display:none;margin-top:1.5rem"></div>
+    </div>`;
+
+  // Dropzone setup
+  const dz  = document.getElementById("soukrDropzone");
+  const inp = document.getElementById("soukrFileInput");
+  inp.style.display = "none";
+  dz.addEventListener("click", () => inp.click());
+  inp.addEventListener("change", () => { if (inp.files[0]) doSoukromeNahrat(inp.files[0]); });
+  dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag-over"); });
+  dz.addEventListener("dragleave", () => dz.classList.remove("drag-over"));
+  dz.addEventListener("drop", e => {
+    e.preventDefault(); dz.classList.remove("drag-over");
+    if (e.dataTransfer.files[0]) doSoukromeNahrat(e.dataTransfer.files[0]);
+  });
+}
+
+function soukrSwitchTab(tab) {
+  document.getElementById("soukrTabPanelPdf").style.display   = tab === "pdf"   ? "" : "none";
+  document.getElementById("soukrTabPanelRucni").style.display = tab === "rucni" ? "" : "none";
+  document.getElementById("soukrTabPdf").classList.toggle("tab-active",   tab === "pdf");
+  document.getElementById("soukrTabRucni").classList.toggle("tab-active", tab === "rucni");
+}
+
+async function doSoukromeNahrat(file) {
+  const statusEl = document.getElementById("soukrUploadStatus");
+  statusEl.innerHTML = `<span class="spinner"></span> Zpracovávám doklad...`;
+  const fd = new FormData();
+  fd.append("soubor", file);
+  fd.append("firma_zkratka", document.getElementById("soukrNahratLokace")?.value || "Praha");
+  fd.append("typ", "soukrome");
+  try {
+    const data = await api("/api/vydaje/nahrat", { method:"POST", body:fd });
+    statusEl.innerHTML = `✅ Doklad rozpoznán`;
+    const formEl = document.getElementById("soukrNahratForm");
+    if (formEl) { formEl.style.display = "block"; _renderVydajForm(formEl, data); }
+  } catch(e) {
+    statusEl.innerHTML = `❌ Chyba: ${e.message}`;
+  }
+}
+
+async function ulozitSoukromeRucni() {
+  const lokace = document.getElementById("soukrNahratLokace")?.value || "Praha";
+  const castka = parseFloat(document.getElementById("srCastka")?.value || 0);
+  if (!castka) { toast("Vyplň částku"); return; }
+  const payload = {
+    firma_zkratka: lokace,
+    dodavatel:     document.getElementById("srDodavatel")?.value || "",
+    datum:         document.getElementById("srDatum")?.value || "",
+    castka,
+    zpusob_uhrady: document.getElementById("srUhrada")?.value || "hotovost",
+    popis:         document.getElementById("srPopis")?.value || "",
+    poznamka:      document.getElementById("srPoznamka")?.value || "",
+    stav:          "zaplaceno",
+    zdroj:         "rucni",
+    typ:           "soukrome",
+    polozky:       []
+  };
+  await api("/api/vydaje", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+  toast("Doklad uložen ✓");
+  renderVydaje("soukrome");
+}
+
 async function zkontrolovatDriveMobil() {
   const statusEl = document.getElementById("mobilDriveStatus");
   if (statusEl) statusEl.innerHTML = `<span class="spinner"></span> Kontroluji Drive složku...`;
@@ -4241,8 +4356,11 @@ async function renderVydaje(typ = "provozni") {
   const nazev = jeSoukrome ? "Soukromé výdaje" : "Výdaje";
   const pravoUpravit = jeSoukrome ? "soukrome_vydaje_upravit" : "vydaje_upravit";
   const tlacitka = maPravo(pravoUpravit)
-    ? `<button class="btn btn-primary btn-sm" onclick="openVydajNahrat('${typ}')">📷 Nahrát doklad</button>
-       <button class="btn btn-sm" onclick="openVydajRucni('${typ}')">✏️ Ruční zadání</button>`
+    ? jeSoukrome
+      ? `<button class="btn btn-primary btn-sm" onclick="renderSoukromeNahrat()">📷 Nahrát doklad</button>
+         <button class="btn btn-sm" onclick="openVydajRucni()">✏️ Ruční zadání</button>`
+      : `<button class="btn btn-primary btn-sm" onclick="openVydajNahrat('${typ}')">📷 Nahrát doklad</button>
+         <button class="btn btn-sm" onclick="openVydajRucni()">✏️ Ruční zadání</button>`
     : "";
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
@@ -4251,10 +4369,12 @@ async function renderVydaje(typ = "provozni") {
     </div>
     <div id="vydajeNezaplacene"></div>
     <div class="filters">
-      <label>Firma:</label>
-      <select id="vFirma" class="firma-select" onchange="loadVydaje()">
-        <option value="">Všechny firmy</option>
-        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+      <label>${jeSoukrome ? "Lokace:" : "Firma:"}</label>
+      <select id="vFirma" class="${jeSoukrome ? "" : "firma-select"}" onchange="loadVydaje()">
+        <option value="">${jeSoukrome ? "Všechny lokace" : "Všechny firmy"}</option>
+        ${jeSoukrome
+          ? ["Praha","Třebovle","UNI"].map(l=>`<option>${l}</option>`).join("")
+          : App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
       </select>
       <label>Stav:</label>
       <select id="vStav" onchange="loadVydaje()">
@@ -4401,7 +4521,7 @@ async function loadVydaje() {
   el.innerHTML = `
     <table>
       <thead><tr>
-        <th>Stav</th><th>Datum</th><th>Firma</th><th>Dodavatel</th>
+        <th>Stav</th><th>Datum</th><th>${jeSoukrome ? "Lokace" : "Firma"}</th><th>Dodavatel</th>
         <th>Popis / účel</th><th>Položky</th>
         <th>Způsob úhrady</th><th>Uhrazeno</th><th style="text-align:right">Částka</th><th>Doklad</th><th></th>
       </tr></thead>
@@ -4444,7 +4564,9 @@ async function loadVydaje() {
     </table>`;
 }
 
-function _vydajModal(titul, v, onSave) {
+function _vydajModal(titul, v, onSave, typ) {
+  const jeSoukrome = typ === "soukrome";
+  const lokace = ["Praha","Třebovle","UNI"];
   const polozkyHtml = (v.polozky||[]).map((p,i)=>`
     <tr id="vp_${i}">
       <td><input class="form-control vp-nazev" style="font-size:.85rem" value="${escHtml(p.nazev||'')}" placeholder="Název položky"></td>
@@ -4454,9 +4576,11 @@ function _vydajModal(titul, v, onSave) {
 
   openModal(titul, `
     <div class="grid-2" style="gap:1rem">
-      <div class="form-group"><label class="form-label">Firma *</label>
+      <div class="form-group"><label class="form-label">${jeSoukrome ? "Lokace *" : "Firma *"}</label>
         <select id="evFirma" class="form-control">
-          ${App.config.firmy.map(f=>`<option ${v.firma_zkratka===f?'selected':''}>${f}</option>`).join("")}
+          ${jeSoukrome
+            ? lokace.map(l=>`<option ${v.firma_zkratka===l?'selected':''}>${l}</option>`).join("")
+            : App.config.firmy.map(f=>`<option ${v.firma_zkratka===f?'selected':''}>${f}</option>`).join("")}
         </select>
       </div>
       <div class="form-group"><label class="form-label">Dodavatel</label>
@@ -4548,32 +4672,40 @@ function _vydajGetPayload() {
 }
 
 function openVydajRucni() {
-  _vydajModal("Nový výdaj", { firma_zkratka: App.config.firmy[0]||"", polozky:[] }, async function() {
-    const payload = { ..._vydajGetPayload(), zdroj:"rucni", typ: window._vydajTyp || "provozni" };
-    if (!payload.firma_zkratka || !payload.castka) { toast("Vyplň firmu a částku"); return; }
+  const typ = window._vydajTyp || "provozni";
+  const jeSoukrome = typ === "soukrome";
+  const defaultFirma = jeSoukrome ? "Praha" : (App.config.firmy[0]||"");
+  _vydajModal("Nový výdaj", { firma_zkratka: defaultFirma, polozky:[] }, async function() {
+    const payload = { ..._vydajGetPayload(), zdroj:"rucni", typ };
+    if (!payload.firma_zkratka || !payload.castka) { toast("Vyplň lokaci a částku"); return; }
     await api("/api/vydaje", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
     toast("Výdaj uložen ✓"); closeModal(); loadVydaje(); loadVydajeNezaplacene();
-  });
+  }, typ);
 }
 
 async function openVydajEdit(id) {
   const data = await api("/api/vydaje");
   const v = data.vydaje.find(x=>x.id===id);
   if (!v) return;
+  const typ = window._vydajTyp || "provozni";
   _vydajModal("Upravit výdaj", v, async function() {
     const payload = _vydajGetPayload();
     await api(`/api/vydaje/${id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
     toast("Uloženo ✓"); closeModal(); loadVydaje(); loadVydajeNezaplacene();
-  });
+  }, typ);
 }
 
 function openVydajNahrat(typ = null) {
   const t = typ || window._vydajTyp || "provozni";
+  const jeSoukromeNahrat = t === "soukrome";
+  const lokaceNahrat = ["Praha","Třebovle","UNI"];
   openModal("Nahrát doklad výdaje", `
     <div class="form-group" style="margin-bottom:1rem">
-      <label class="form-label">Firma</label>
+      <label class="form-label">${jeSoukromeNahrat ? "Lokace" : "Firma"}</label>
       <select id="vNahratFirma" class="form-control">
-        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+        ${jeSoukromeNahrat
+          ? lokaceNahrat.map(l=>`<option>${l}</option>`).join("")
+          : App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
       </select>
     </div>
     <div class="dropzone" id="vydajDropzone" style="padding:1.5rem">
