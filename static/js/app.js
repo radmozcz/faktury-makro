@@ -2978,6 +2978,14 @@ async function renderNastaveni() {
         <button class="btn btn-primary" onclick="saveConfig()">💾 Uložit nastavení</button>
         <button class="btn" style="background:var(--accent);color:#fff" onclick="opravDuplicity()">🔍 Zkontrolovat duplicity</button>
         <button class="btn" style="background:#6c757d;color:#fff" onclick="normalizujNazvy()">🧹 Odstranit ARO/MC/FL prefixy</button>
+        <button class="btn" style="background:#2563eb;color:#fff" onclick="stahnoutZalohu()">📦 Vytvořit zálohu DB</button>
+      </div>
+
+      <div style="margin-top:1rem">
+        <div style="font-size:.85rem;font-weight:600;margin-bottom:.5rem">📋 Uložené zálohy v Google Cloud</div>
+        <div id="zalohySeznam"><div class="loading-center"><span class="spinner"></span></div></div>
+      </div>
+        <button class="btn" style="background:#2563eb;color:#fff" onclick="stahnoutZalohu()">📦 Stáhnout zálohu DB</button>
       </div>
 
       <hr style="margin:1.5rem 0">
@@ -3033,6 +3041,7 @@ async function renderNastaveni() {
         <button class="btn" style="background:#c00;color:#fff" onclick="smazatVseFaktury()">🗑️ Smazat všechny faktury</button>
       </div>
     </div>`;
+  loadZalohy();
 }
 
 async function ulozitPrava() {
@@ -3211,6 +3220,34 @@ async function stahnoutZalohu() {
     if (statusEl) statusEl.textContent = "❌ " + e.message;
     toast("Záloha selhala: " + e.message, true);
   }
+}
+
+async function stahnoutZalohu() {
+  toast("Vytvářím zálohu...");
+  try {
+    const r = await api("/api/admin/zaloha-export", {method:"POST"});
+    if (r.ok) {
+      toast(`Záloha uložena do GCS: ${r.soubor} ✓`);
+      loadZalohy();
+    }
+  } catch { toast("Chyba při záloze", true); }
+}
+
+async function loadZalohy() {
+  const el = document.getElementById("zalohySeznam");
+  if (!el) return;
+  try {
+    const r = await api("/api/admin/zalohy");
+    if (!r.zalohy?.length) { el.innerHTML = `<div style="color:var(--txt2);font-size:.85rem">Žádné zálohy</div>`; return; }
+    el.innerHTML = r.zalohy.map(z => `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:.4rem 0;border-bottom:0.5px solid var(--border)">
+        <div>
+          <span style="font-size:.85rem">${escHtml(z.nazev)}</span>
+          <small style="color:var(--txt2);margin-left:.5rem">${z.velikost ? Math.round(z.velikost/1024)+' KB' : ''}</small>
+        </div>
+        <a href="/api/admin/zaloha-stahnout/${encodeURIComponent(z.nazev)}" class="btn btn-secondary btn-sm">⬇ Stáhnout</a>
+      </div>`).join("");
+  } catch { el.innerHTML = `<div style="color:var(--txt2);font-size:.85rem">Nepodařilo se načíst</div>`; }
 }
 
 async function opravDuplicity() {

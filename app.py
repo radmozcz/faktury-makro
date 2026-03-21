@@ -4570,6 +4570,77 @@ def api_zaloha_db():
     return resp
 
 
+@app.route("/api/admin/zaloha-export", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_zaloha_export():
+    import datetime as _dt, json as _json
+    tabulky = [
+        "faktury", "polozky_faktury", "reporty", "vydaje", "vyplaty",
+        "zbozi", "kalkulace", "kalkulace_polozky", "stat_rucni_data",
+        "pausalni_odvody", "bankovni_pohyby"
+    ]
+    export = {"datum": _dt.datetime.now().isoformat(), "tabulky": {}}
+    with get_db() as conn:
+        for t in tabulky:
+            try:
+                rows = conn.execute(f"SELECT * FROM {t}").fetchall()
+                export["tabulky"][t] = [dict(r) for r in rows]
+            except Exception:
+                export["tabulky"][t] = []
+    datum_str = _dt.datetime.now().strftime("%Y%m%d_%H%M")
+    filename = f"zaloha_{datum_str}.json"
+    json_bytes = _json.dumps(export, ensure_ascii=False, default=str).encode("utf-8")
+    # Uložit do GCS
+    bucket = get_gcs_client()
+    if bucket:
+        blob = bucket.blob(f"zalohy/{filename}")
+        blob.upload_from_string(json_bytes, content_type="application/json")
+        return jsonify({"ok": True, "soubor": filename, "ulozeno": "gcs"})
+    else:
+        # Fallback – stáhnout přímo
+        from flask import Response
+        return Response(
+            json_bytes,
+            status=200,
+            mimetype="application/json",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+
+@app.route("/api/admin/zalohy")
+@vyzaduj_prihlaseni
+def api_zalohy_seznam():
+    bucket = get_gcs_client()
+    if not bucket:
+        return jsonify({"zalohy": [], "error": "GCS není nakonfigurováno"})
+    blobs = sorted(bucket.list_blobs(prefix="zalohy/"), key=lambda b: b.updated, reverse=True)
+    result = []
+    for b in blobs:
+        if b.name.endswith(".json"):
+            result.append({
+                "nazev": b.name.replace("zalohy/", ""),
+                "velikost": b.size,
+                "datum": b.updated.isoformat() if b.updated else "",
+                "url": b.generate_signed_url(expiration=3600) if hasattr(b, 'generate_signed_url') else ""
+            })
+    return jsonify({"zalohy": result})
+
+@app.route("/api/admin/zaloha-stahnout/<nazev>")
+@vyzaduj_prihlaseni
+def api_zaloha_stahnout(nazev):
+    from flask import Response
+    bucket = get_gcs_client()
+    if not bucket:
+        return jsonify({"error": "GCS není nakonfigurováno"}), 500
+    blob = bucket.blob(f"zalohy/{nazev}")
+    data = blob.download_as_bytes()
+    return Response(
+        data,
+        status=200,
+        mimetype="application/json",
+        headers={"Content-Disposition": f"attachment; filename={nazev}"}
+    )
+
+
 @app.route("/api/smazat-vse-faktury", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_smazat_vse_faktury():
