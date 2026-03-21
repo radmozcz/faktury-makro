@@ -2880,25 +2880,33 @@ async function renderStatistiky() {
       <div id="tmTabulka"><div class="loading-center"><span class="spinner"></span></div></div>
     </div>
 
-    <div class="card" style="margin-bottom:1.5rem">
-      <div class="card-title" style="margin-bottom:.75rem">📊 Průměrná denní tržba vč. poukazek — přehled po měsících a letech</div>
-      <div id="plPrumery"><div class="loading-center"><span class="spinner"></span></div></div>
-    </div>
-
-    <div class="card" style="margin-bottom:1.5rem">
-      <div class="card-title" style="margin-bottom:.75rem">🧾 Náklady po měsících (faktury + výdaje + výplaty + odvody)</div>
-      <div style="display:flex;gap:.5rem;margin-bottom:.75rem;flex-wrap:wrap">
-        <select id="plRok" onchange="loadPL()" style="font-size:.85rem">
-          <option value="">Vše</option>
-          ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}">${r}</option>`).join("")}
-        </select>
+    <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem;margin-bottom:1rem">
+      <div class="card">
+        <div class="card-title" style="margin-bottom:.75rem">Průměrná denní tržba vč. PK — po letech</div>
+        <div id="plPrumery"><div class="loading-center"><span class="spinner"></span></div></div>
       </div>
-      <div id="plNaklady"><div class="loading-center"><span class="spinner"></span></div></div>
-    </div>
-
-    <div class="card" style="margin-bottom:1.5rem">
-      <div class="card-title" style="margin-bottom:.75rem">📈 Marže — tržba vs. nákupy surovin (faktury)</div>
-      <div id="plMarze"><div class="loading-center"><span class="spinner"></span></div></div>
+      <div style="display:flex;flex-direction:column;gap:1rem">
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+            <span class="card-title" style="margin:0">Náklady po měsících</span>
+            <select id="plRok" onchange="loadPL()" style="font-size:.82rem">
+              <option value="">Vše</option>
+              ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}" ${r==rokAkt?"selected":""}>${r}</option>`).join("")}
+            </select>
+          </div>
+          <div id="plNaklady"><div class="loading-center"><span class="spinner"></span></div></div>
+        </div>
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+            <span class="card-title" style="margin:0">Marže — tržba vs. faktury</span>
+            <select id="plRokMarze" onchange="loadPL()" style="font-size:.82rem">
+              <option value="">Vše</option>
+              ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}" ${r==rokAkt?"selected":""}>${r}</option>`).join("")}
+            </select>
+          </div>
+          <div id="plMarze"><div class="loading-center"><span class="spinner"></span></div></div>
+        </div>
+      </div>
     </div>
 
     <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem;margin-bottom:1.5rem">
@@ -2967,14 +2975,28 @@ async function renderStatistiky() {
 const MCZ_NAZVY = ["","Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
 
 async function loadPL() {
-  const firma = document.getElementById("tmFirma")?.value || "";
-  const rok   = document.getElementById("plRok")?.value || "";
-  let data;
-  try { data = await api(`/api/statistiky/prehled-pl?firma=${encodeURIComponent(firma)}&rok=${rok}`); }
-  catch { return; }
+  const firma    = document.getElementById("tmFirma")?.value || "";
+  const rok      = document.getElementById("plRok")?.value || "";
+  const rokMarze = document.getElementById("plRokMarze")?.value || rok;
+  const rokPL    = document.getElementById("plRokPL")?.value || rok;
+  let data, dataNakl, dataMarze, dataPL;
+  try {
+    [data, dataNakl, dataMarze, dataPL] = await Promise.all([
+      api(`/api/statistiky/prehled-pl?firma=${encodeURIComponent(firma)}`),
+      api(`/api/statistiky/prehled-pl?firma=${encodeURIComponent(firma)}&rok=${rok}`),
+      api(`/api/statistiky/prehled-pl?firma=${encodeURIComponent(firma)}&rok=${rokMarze}`),
+      api(`/api/statistiky/prehled-pl?firma=${encodeURIComponent(firma)}&rok=${rokPL}`)
+    ]);
+  } catch { return; }
 
   const mesice = data.mesice || [];
   const roky   = data.roky   || [];
+  const mesiceNakl  = dataNakl.mesice  || [];
+  const rokyNakl    = dataNakl.roky    || [];
+  const mesiceMarze = dataMarze.mesice || [];
+  const rokyMarze   = dataMarze.roky   || [];
+  const mesicePL    = dataPL.mesice    || [];
+  const rokyPL      = dataPL.roky      || [];
   const _n = v => v ? Math.round(v).toLocaleString("cs-CZ") : "—";
   const _pct = v => v !== null && v !== undefined ? v.toFixed(1)+"%" : "—";
   const _zisk = v => {
@@ -3046,7 +3068,7 @@ async function loadPL() {
     // ── Tabulka 2: Náklady po měsících ──
   const elNakl = document.getElementById("plNaklady");
   if (elNakl) {
-    const aktRoky = roky.filter(r => mesice.some(m => m[r]?.naklady > 0));
+    const aktRoky = rokyNakl.filter(r => mesiceNakl.some(m => m[r]?.naklady > 0));
     if (!aktRoky.length) { elNakl.innerHTML = `<div style="color:var(--txt2);padding:.5rem">Žádná data</div>`; }
     else {
       let thead = `<tr style="font-size:.78rem;color:var(--txt2)"><th style="text-align:left;padding:5px 8px">Měsíc</th>`;
@@ -3057,7 +3079,7 @@ async function loadPL() {
       let tbody = "";
       let tots = {};
       aktRoky.forEach(r => tots[r]={f:0,v:0,p:0,n:0});
-      mesice.forEach(m => {
+      mesiceNakl.forEach(m => {
         const mi = parseInt(m.mesic);
         const mame = aktRoky.some(r => m[r]?.naklady > 0);
         if (!mame) return;
@@ -3088,7 +3110,7 @@ async function loadPL() {
   // ── Tabulka 3: Marže ──
   const elMarze = document.getElementById("plMarze");
   if (elMarze) {
-    const aktRoky = roky.filter(r => mesice.some(m => m[r]?.trzba > 0));
+    const aktRoky = rokyMarze.filter(r => mesiceMarze.some(m => m[r]?.trzba > 0));
     if (!aktRoky.length) { elMarze.innerHTML = `<div style="color:var(--txt2);padding:.5rem">Žádná data</div>`; }
     else {
       let thead = `<tr style="font-size:.78rem;color:var(--txt2)"><th style="text-align:left;padding:5px 8px">Měsíc</th>`;
@@ -3099,7 +3121,7 @@ async function loadPL() {
       let tbody = "";
       let tots = {};
       aktRoky.forEach(r => tots[r]={t:0,f:0});
-      mesice.forEach(m => {
+      mesiceMarze.forEach(m => {
         const mi = parseInt(m.mesic);
         const mame = aktRoky.some(r => m[r]?.trzba > 0);
         if (!mame) return;
@@ -3131,7 +3153,7 @@ async function loadPL() {
   // ── Tabulka 4: P&L ──
   const elPL = document.getElementById("plTotal");
   if (elPL) {
-    const aktRoky = roky.filter(r => mesice.some(m => m[r]?.trzba_vcpk > 0 || m[r]?.naklady > 0));
+    const aktRoky = rokyPL.filter(r => mesicePL.some(m => m[r]?.trzba_vcpk > 0 || m[r]?.naklady > 0));
     if (!aktRoky.length) { elPL.innerHTML = `<div style="color:var(--txt2);padding:.5rem">Žádná data</div>`; }
     else {
       let thead = `<tr style="font-size:.78rem;color:var(--txt2)"><th style="text-align:left;padding:5px 8px">Měsíc</th>`;
@@ -3142,7 +3164,7 @@ async function loadPL() {
       let tbody = "";
       let tots = {};
       aktRoky.forEach(r => tots[r]={t:0,n:0,p:0});
-      mesice.forEach(m => {
+      mesicePL.forEach(m => {
         const mi = parseInt(m.mesic);
         const mame = aktRoky.some(r => m[r]?.trzba_vcpk > 0);
         if (!mame) return;
