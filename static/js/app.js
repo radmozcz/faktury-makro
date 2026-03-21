@@ -2879,72 +2879,411 @@ async function renderStatistiky() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════
 //  NASTAVENÍ
 // ═══════════════════════════════════════════════════════════════
-
 async function renderNastaveni() {
+  const cfg = await api("/api/config").catch(()=>App.config);
+  const icoMap = cfg.ico_map || {};
+  const firmy  = cfg.firmy || [];
+
+  const icoRows = firmy.map(f => `
+    <tr>
+      <td style="padding:.4rem .5rem;font-weight:600">${escHtml(f)}</td>
+      <td style="padding:.4rem .5rem">
+        <input class="form-control ico-input" data-firma="${escHtml(f)}"
+          value="${escHtml(icoMap[Object.keys(icoMap).find(k=>icoMap[k]===f)||'']||'')}"
+          placeholder="IČO firmy (8 číslic)" style="max-width:180px">
+      </td>
+    </tr>`).join("");
+
+  // Načti aktuální oprávnění
+  let prava = {};
+  try { prava = await api("/api/prava"); } catch(e) {}
+
+  const SEKCE = [
+    { klic: "faktury_zobrazit",  label: "Faktury — zobrazit" },
+    { klic: "faktury_upravit",   label: "Faktury — přidat / upravit" },
+    { klic: "faktury_smazat",    label: "Faktury — mazat" },
+    { klic: "faktury_export",    label: "Faktury — export" },
+    { klic: "reporty_zobrazit",  label: "Reporty — zobrazit" },
+    { klic: "reporty_upravit",   label: "Reporty — přidat / upravit" },
+    { klic: "vyplaty_zobrazit",  label: "Výplaty — zobrazit" },
+    { klic: "vyplaty_upravit",   label: "Výplaty — upravit" },
+    { klic: "zbozi_zobrazit",    label: "Zboží — zobrazit" },
+    { klic: "vydaje_zobrazit",          label: "Výdaje — zobrazit" },
+    { klic: "vydaje_upravit",           label: "Výdaje — přidat/upravit" },
+    { klic: "vydaje_smazat",            label: "Výdaje — mazat" },
+    { klic: "soukrome_vydaje_zobrazit", label: "Soukromé výdaje — zobrazit" },
+    { klic: "soukrome_vydaje_upravit",  label: "Soukromé výdaje — přidat/upravit" },
+    { klic: "soukrome_vydaje_smazat",   label: "Soukromé výdaje — mazat" },
+    { klic: "naklady_zobrazit",  label: "Náklady — zobrazit" },
+    { klic: "bankovni_vypisy",   label: "Bankovní výpisy" },
+    { klic: "statistiky",        label: "Statistiky" },
+    { klic: "nastaveni",         label: "Nastavení" },
+  ];
+
+  const pravaNastaveniRows = SEKCE.map(s => {
+    const chkV = (prava.verunka?.[s.klic]) ? "checked" : "";
+    const chkU = (prava.ucetni?.[s.klic])  ? "checked" : "";
+    return `<tr>
+      <td style="padding:.5rem .5rem">${s.label}</td>
+      <td style="padding:.5rem .5rem;text-align:center">
+        <input type="checkbox" class="prava-check" data-role="verunka" data-sekce="${s.klic}" ${chkV}
+          style="width:18px;height:18px;cursor:pointer">
+      </td>
+      <td style="padding:.5rem .5rem;text-align:center">
+        <input type="checkbox" class="prava-check" data-role="ucetni" data-sekce="${s.klic}" ${chkU}
+          style="width:18px;height:18px;cursor:pointer">
+      </td>
+    </tr>`;
+  }).join("");
+
   document.getElementById("mainContent").innerHTML = `
-    <div class="page-header"><h1 class="page-title">⚙️ Nastavení</h1></div>
-    <div class="card" style="margin-bottom:1rem">
-      <div class="card-title">Paušální odvody</div>
-      <div id="odvodySeznam"><div class="loading-center"><span class="spinner"></span></div></div>
-      <button class="btn btn-secondary btn-sm" style="margin-top:.75rem" onclick="pridatOdvod()">+ Přidat odvod</button>
-    </div>
-    <div class="card">
-      <div class="card-title">Přístupová práva</div>
-      <div id="pravaSeznam"><div class="loading-center"><span class="spinner"></span></div></div>
+    <div class="page-header"><h1 class="page-title">Nastavení</h1></div>
+    <div class="card" style="max-width:560px">
+      <div class="form-group">
+        <label class="form-label">Název aplikace</label>
+        <input id="cfgNazev" class="form-control" value="${escHtml(cfg.app_nazev)}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Zkratky firem (oddělte čárkou)</label>
+        <input id="cfgFirmy" class="form-control" value="${escHtml(firmy.join(", "))}">
+        <small style="color:var(--txt2)">Příklad: FP, MR, CFF</small>
+      </div>
+      <div class="form-group">
+        <label class="form-label">IČO firem <small style="color:var(--txt2)">(pro automatické rozpoznání při nahrání faktury)</small></label>
+        <table style="width:100%">
+          <thead><tr>
+            <th style="padding:.4rem .5rem;text-align:left">Firma</th>
+            <th style="padding:.4rem .5rem;text-align:left">IČO</th>
+          </tr></thead>
+          <tbody>${icoRows}</tbody>
+        </table>
+      </div>
+      <div class="grid-2" style="gap:.8rem;margin-top:1rem;max-width:500px">
+        <div class="form-group">
+          <label class="form-label">💳 Limit terminálu / měsíc (Kč)</label>
+          <input type="number" id="cfgTerminalLimit" class="form-control"
+            value="${App.config.terminal_limit||100000}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">📊 Roční DPH limit (Kč)</label>
+          <input type="number" id="cfgDphLimit" class="form-control"
+            value="${App.config.dph_limit||2000000}">
+        </div>
+      </div>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-top:.5rem">
+        <button class="btn btn-primary" onclick="saveConfig()">💾 Uložit nastavení</button>
+        <button class="btn" style="background:var(--accent);color:#fff" onclick="opravDuplicity()">🔍 Zkontrolovat duplicity</button>
+        <button class="btn" style="background:#6c757d;color:#fff" onclick="normalizujNazvy()">🧹 Odstranit ARO/MC/FL prefixy</button>
+      </div>
+
+      <hr style="margin:1.5rem 0">
+
+      <!-- MATICE OPRÁVNĚNÍ -->
+      <div>
+        <h3 style="margin:0 0 .75rem;font-size:1rem">👥 Oprávnění uživatelů</h3>
+        <p style="color:var(--txt2);font-size:.85rem;margin-bottom:1rem">
+          Admin má vždy vše. Kliknutím na čtvereček povoluješ nebo zakazuješ přístup.
+        </p>
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="border-bottom:2px solid var(--border)">
+              <th style="padding:.5rem;text-align:left">Sekce</th>
+              <th style="padding:.5rem;text-align:center;width:90px">VERUNKA</th>
+              <th style="padding:.5rem;text-align:center;width:90px">UCETNI</th>
+            </tr>
+          </thead>
+          <tbody id="pravaTbody">${pravaNastaveniRows}</tbody>
+        </table>
+        <button class="btn btn-primary" style="margin-top:1rem" onclick="ulozitPrava()">
+          💾 Uložit oprávnění
+        </button>
+        <span id="pravaSaveStatus" style="margin-left:.75rem;font-size:.9rem;color:var(--txt2)"></span>
+      </div>
+
+      <hr style="margin:1.5rem 0">
+      <div style="border:1px solid var(--border);border-radius:8px;padding:1rem">
+        <div style="font-weight:600;margin-bottom:.5rem">📱 Automatické nahrávání z mobilu</div>
+        <div style="color:var(--txt2);font-size:.9rem;margin-bottom:.75rem">
+          Sleduje složku <strong>faktury-nahrat</strong> v Google Drive. Nové PDF se automaticky zpracují OCR a objeví se v sekci Faktury se stavem <em>Ke zpracování</em>.
+        </div>
+        <button class="btn btn-primary" onclick="registrovatDriveWebhook()">🔗 Aktivovat sledování Drive složky</button>
+        <span id="driveWebhookStatus" style="margin-left:.75rem;font-size:.9rem;color:var(--txt2)"></span>
+        <button class="btn btn-secondary" onclick="zkontrolovatDriveNyni()" style="margin-top:.5rem">🔄 Zkontrolovat Drive nyní</button>
+        <span id="driveCheckStatus" style="margin-left:.75rem;font-size:.9rem;color:var(--txt2)"></span>
+      </div>
+
+      <hr style="margin:1.5rem 0">
+      <div style="border:1px solid var(--border);border-radius:8px;padding:1rem">
+        <div style="font-weight:600;margin-bottom:.5rem">💾 Záloha databáze</div>
+        <div style="color:var(--txt2);font-size:.9rem;margin-bottom:.75rem">
+          Stáhne kompletní SQL dump celé databáze (PostgreSQL). Doporučujeme zálohovat pravidelně.
+        </div>
+        <button class="btn btn-primary" onclick="stahnoutZalohu()">⬇ Stáhnout zálohu (.sql)</button>
+        <span id="zalohaStatus" style="margin-left:.75rem;font-size:.9rem;color:var(--txt2)"></span>
+      </div>
+
+      <hr style="margin:1.5rem 0">
+      <div style="border:1px solid #e55;border-radius:8px;padding:1rem;background:#fff5f5">
+        <div style="font-weight:600;color:#c00;margin-bottom:.5rem">⚠️ Nebezpečná zóna</div>
+        <div style="color:var(--txt2);font-size:.9rem;margin-bottom:.75rem">Smaže všechny faktury a položky. Akce je nevratná!</div>
+        <button class="btn" style="background:#c00;color:#fff" onclick="smazatVseFaktury()">🗑️ Smazat všechny faktury</button>
+      </div>
     </div>`;
-  loadOdvody();
-  loadPrava();
 }
 
-async function loadOdvody() {
-  const el = document.getElementById("odvodySeznam");
-  if (!el) return;
+async function ulozitPrava() {
+  const statusEl = document.getElementById("pravaSaveStatus");
+  statusEl.textContent = "Ukládám...";
+  const prava = { verunka: {}, ucetni: {} };
+  document.querySelectorAll(".prava-check").forEach(chk => {
+    const role  = chk.dataset.role;
+    const sekce = chk.dataset.sekce;
+    prava[role][sekce] = chk.checked;
+  });
   try {
-    const data = await api("/api/nastaveni/odvody");
-    if (!data.odvody?.length) { el.innerHTML = `<div style="color:var(--txt2);font-size:.85rem">Žádné odvody</div>`; return; }
-    el.innerHTML = `<table style="width:100%;font-size:.85rem;border-collapse:collapse">
-      <thead><tr style="color:var(--txt2);font-size:.78rem"><th style="text-align:left;padding:4px 8px">Název</th><th style="text-align:right;padding:4px 8px">Částka</th><th></th></tr></thead>
-      <tbody>${data.odvody.map(o=>`<tr style="border-top:0.5px solid var(--border)">
-        <td style="padding:5px 8px">${escHtml(o.nazev)}</td>
-        <td style="text-align:right;padding:5px 8px">${czMoney(o.castka)}</td>
-        <td style="padding:5px 8px"><button class="btn btn-danger btn-sm" onclick="smazatOdvod(${o.id})">🗑</button></td>
-      </tr>`).join("")}</tbody>
-      <tfoot><tr style="font-weight:600;border-top:1px solid var(--border)"><td style="padding:5px 8px">Celkem/měsíc</td><td style="text-align:right;padding:5px 8px">${czMoney(data.odvody_suma)}</td><td></td></tr></tfoot>
-    </table>`;
-  } catch { el.innerHTML = `<div style="color:var(--txt2)">Nepodařilo se načíst</div>`; }
+    await api("/api/prava", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(prava)
+    });
+    statusEl.textContent = "✅ Uloženo";
+    setTimeout(() => statusEl.textContent = "", 2000);
+    // Aktualizuj oprávnění v App (pokud jsme sami verunka/ucetni — nepravděpodobné ale pro jistotu)
+    if (App.role !== "admin") {
+      App.prava = prava[App.role] || {};
+      skryjNepovoleneMenu();
+    }
+  } catch(e) {
+    statusEl.textContent = "❌ Chyba při ukládání";
+  }
 }
 
-function pridatOdvod() {
-  openModal("Přidat paušální odvod", `
-    <div class="form-group"><label class="form-label">Název</label>
-      <input id="odNazev" class="form-control" placeholder="např. Zdravotní pojištění"></div>
-    <div class="form-group"><label class="form-label">Částka (Kč/měsíc)</label>
-      <input type="number" id="odCastka" class="form-control" placeholder="2000"></div>
-    <button class="btn btn-primary" style="margin-top:.5rem" onclick="App._odvodSave&&App._odvodSave()">💾 Uložit</button>`);
-  App._odvodSave = async () => {
-    const nazev = document.getElementById("odNazev").value.trim();
-    const castka = parseFloat(document.getElementById("odCastka").value);
-    if (!nazev || isNaN(castka)) { toast("Vyplň název a částku"); return; }
-    await api("/api/nastaveni/odvody", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({nazev,castka})});
-    toast("Odvod přidán ✓"); closeModal(); loadOdvody();
-  };
+// ===== GOOGLE DRIVE PICKER =====
+let _driveClientId = null;
+let _driveAccessToken = null;
+let _drivePickerCallback = null;
+
+async function getDriveClientId() {
+  if (_driveClientId) return _driveClientId;
+  const cfg = await api("/api/drive-config");
+  _driveClientId = cfg.client_id;
+  return _driveClientId;
 }
 
-async function smazatOdvod(id) {
-  if (!confirm("Smazat tento odvod?")) return;
-  await api(`/api/nastaveni/odvody/${id}`, {method:"DELETE"});
-  toast("Smazáno ✓"); loadOdvody();
+function loadGapiIfNeeded() {
+  return new Promise((resolve) => {
+    if (window.gapi && window.gapi.load) { resolve(); return; }
+    const check = setInterval(() => {
+      if (window.gapi && window.gapi.load) { clearInterval(check); resolve(); }
+    }, 100);
+  });
 }
 
-async function loadPrava() {
-  const el = document.getElementById("pravaSeznam");
-  if (!el) return;
-  el.innerHTML = `<div style="color:var(--txt2);font-size:.85rem;padding:.5rem">Správa práv probíhá v Nastavení → uživatelé.</div>`;
+async function openDrivePicker(callback) {
+  _drivePickerCallback = callback;
+  const clientId = await getDriveClientId();
+  if (!clientId) { toast("Google Drive není nakonfigurováno", true); return; }
+
+  // Pokud již máme token, rovnou otevřít picker
+  if (_driveAccessToken) { _openPickerWithToken(_driveAccessToken); return; }
+
+  // Přihlásit přes Google OAuth
+  try {
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: "https://www.googleapis.com/auth/drive.readonly",
+      callback: (resp) => {
+        if (resp.error) { toast("Přihlášení Google selhalo: " + resp.error, true); return; }
+        _driveAccessToken = resp.access_token;
+        _openPickerWithToken(_driveAccessToken);
+      }
+    });
+    client.requestAccessToken();
+  } catch(e) {
+    toast("Chyba Google přihlášení: " + e.message, true);
+  }
 }
 
+async function _openPickerWithToken(token) {
+  await loadGapiIfNeeded();
+  gapi.load("picker", () => {
+    const view = new google.picker.DocsView(google.picker.ViewId.DOCS)
+      .setMimeTypes("application/pdf")
+      .setMode(google.picker.DocsViewMode.LIST);
+    const picker = new google.picker.PickerBuilder()
+      .addView(view)
+      .setOAuthToken(token)
+      .setTitle("Vyberte PDF fakturu z Google Drive")
+      .setCallback(async (data) => {
+        if (data.action !== google.picker.Action.PICKED) return;
+        const file = data.docs[0];
+        toast("⏳ Stahuji z Google Drive...");
+        try {
+          const res = await api("/api/drive-download", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({ file_id: file.id, access_token: token, filename: file.name })
+          });
+          if (res.error) { toast("Chyba: " + res.error, true); return; }
+          if (_drivePickerCallback) _drivePickerCallback(res);
+        } catch(e) { toast("Chyba stahování: " + e.message, true); }
+      })
+      .build();
+    picker.setVisible(true);
+  });
+}
 
+async function registrovatDriveWebhook() {
+  const statusEl = document.getElementById("driveWebhookStatus");
+  if (statusEl) statusEl.textContent = "⏳ Aktivuji...";
+  try {
+    const res = await api("/api/drive-registruj", { method: "POST" });
+    if (res.error) { if (statusEl) statusEl.textContent = "❌ " + res.error; return; }
+    const exp = res.expiration ? new Date(parseInt(res.expiration)).toLocaleDateString("cs-CZ") : "7 dní";
+    if (statusEl) statusEl.textContent = `✅ Aktivováno (platí do ${exp})`;
+  } catch(e) {
+    if (statusEl) statusEl.textContent = "❌ " + e.message;
+  }
+}
+async function zkontrolovatDriveMobil() {
+  const statusEl = document.getElementById("mobilDriveStatus");
+  if (statusEl) statusEl.innerHTML = `<span class="spinner"></span> Kontroluji Drive složku...`;
+  try {
+    const res = await api("/api/drive-zkontrolovat", { method: "POST" });
+    if (res.error) {
+      if (statusEl) statusEl.innerHTML = `❌ Chyba: ${res.error}`;
+      return;
+    }
+    const stazeno = res.stazeno || 0;
+    const preskoceno = res.preskoceno || 0;
+    const chyby = res.chyby || 0;
+    let msg = stazeno > 0
+      ? `✅ Staženo <strong>${stazeno}</strong> nových faktur`
+      : `ℹ️ Žádné nové faktury`;
+    if (preskoceno > 0) msg += ` &nbsp;|&nbsp; ⏭ ${preskoceno} přeskočeno (již zpracováno)`;
+    if (chyby > 0) msg += ` &nbsp;|&nbsp; ⚠️ ${chyby} chyb`;
+    if (statusEl) statusEl.innerHTML = msg;
+    if (stazeno > 0) loadFaktury();
+  } catch(e) {
+    if (statusEl) statusEl.innerHTML = `❌ ${e.message}`;
+  }
+}
+
+async function zkontrolovatDriveNyni() {
+  const statusEl = document.getElementById("driveCheckStatus");
+  if (statusEl) statusEl.textContent = "⏳ Kontroluji...";
+  try {
+    const res = await api("/api/drive-zkontrolovat", { method: "POST" });
+    if (res.error) { if (statusEl) statusEl.textContent = "❌ " + res.error; return; }
+    if (statusEl) statusEl.textContent = `✅ Hotovo – staženo ${res.stazeno} souborů`;
+  } catch(e) {
+    if (statusEl) statusEl.textContent = "❌ " + e.message;
+  }
+}
+
+async function stahnoutZalohu() {
+  const statusEl = document.getElementById("zalohaStatus");
+  if (statusEl) statusEl.textContent = "⏳ Připravuji zálohu...";
+  try {
+    const resp = await fetch("/api/zaloha-db", { credentials: "same-origin" });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ error: resp.statusText }));
+      throw new Error(err.error || resp.statusText);
+    }
+    const blob = await resp.blob();
+    const cd = resp.headers.get("Content-Disposition") || "";
+    const gcsUrl = resp.headers.get("X-GCS-URL");
+    const fnMatch = cd.match(/filename=([^\s;]+)/);
+    const filename = fnMatch ? fnMatch[1] : "zaloha.sql";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    const gcsInfo = gcsUrl ? " + uloženo do GCS" : "";
+    if (statusEl) { statusEl.textContent = `✅ Staženo${gcsInfo}`; setTimeout(() => statusEl.textContent = "", 4000); }
+  } catch(e) {
+    if (statusEl) statusEl.textContent = "❌ " + e.message;
+    toast("Záloha selhala: " + e.message, true);
+  }
+}
+
+async function opravDuplicity() {
+  try {
+    const res = await api("/api/oprav-duplicity", { method: "POST" });
+    if (res.ok) {
+      toast(`Hotovo – označeno ${res.opraveno} duplikát${res.opraveno === 1 ? "" : res.opraveno < 5 ? "y" : "ů"} ✓`);
+    } else {
+      toast("Chyba: " + (res.chyba || "neznámá"), true);
+    }
+  } catch (e) {
+    toast("Chyba při kontrole duplicit", true);
+  }
+}
+
+async function smazatVseFaktury() {
+  if (!confirm("Opravdu smazat VŠECHNY faktury? Tato akce je nevratná!")) return;
+  if (!confirm("Jste si 100% jistý? Smažou se všechny faktury a položky.")) return;
+  try {
+    const res = await api("/api/smazat-vse-faktury", { method: "POST" });
+    if (res.ok) {
+      toast(`Smazáno ${res.smazano} faktur ✓`);
+      navigate("faktury");
+    } else {
+      toast("Chyba při mazání", true);
+    }
+  } catch (e) {
+    toast("Chyba při mazání", true);
+  }
+}
+
+async function normalizujNazvy() {
+  if (!confirm("Odstranit prefixy ARO, MC, FL z názvů všech položek? Akce je nevratná.")) return;
+  try {
+    const res = await api("/api/normalizuj-nazvy", { method: "POST" });
+    if (res.ok) {
+      toast(`Hotovo – upraveno ${res.opraveno} názvů ✓`);
+    } else {
+      toast("Chyba", true);
+    }
+  } catch (e) {
+    toast("Chyba při normalizaci", true);
+  }
+}
+
+async function saveConfig() {
+  const nazev = document.getElementById("cfgNazev").value.trim();
+  const firmy = document.getElementById("cfgFirmy").value.split(",").map(s=>s.trim()).filter(Boolean);
+  if (!firmy.length) { toast("Zadejte alespoň jednu firmu", true); return; }
+
+  const ico_map = {};
+  document.querySelectorAll(".ico-input").forEach(inp => {
+    const ico = inp.value.trim().replace(/\s/g,"");
+    const firma = inp.dataset.firma;
+    if (ico && firma) ico_map[ico] = firma;
+  });
+
+  await api("/api/config", {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({
+      app_nazev: nazev, firmy, ico_map,
+      terminal_limit: parseInt(document.getElementById("cfgTerminalLimit")?.value)||100000,
+      dph_limit: parseInt(document.getElementById("cfgDphLimit")?.value)||2000000
+    })
+  });
+  await loadConfig();
+  toast("Nastavení uloženo ✓");
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Util
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
 function renderAiAsistent() {
   const rok = new Date().getFullYear();
   document.getElementById("mainContent").innerHTML = `
