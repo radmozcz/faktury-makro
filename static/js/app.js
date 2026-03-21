@@ -2131,70 +2131,92 @@ async function loadKalkulace() {
     el.innerHTML = `<div style="text-align:center;color:var(--txt2);padding:3rem">Žádné kalkulace. <button class="btn btn-primary btn-sm" onclick="openNovaKalkulace()">+ Přidat první</button></div>`;
     return;
   }
-  el.innerHTML = data.map(k => {
-    const naklady = _kalcSumaNakladu(k.polozky, k.pausalni);
-    const dopCena = naklady * (1 + (k.cil_marze_pct||200)/100);
-    const skutMarze = k.prodejni_cena > 0 ? ((k.prodejni_cena - naklady)/naklady*100) : null;
-    const marzeBadge = skutMarze !== null
-      ? `<span style="font-size:.85rem;font-weight:600;color:${skutMarze>=100?'#16a34a':skutMarze>=50?'#d97706':'#dc2626'}">${Math.round(skutMarze)}%</span>`
-      : `<span style="color:var(--txt2);font-size:.85rem">—</span>`;
-    return `
-    <div class="card" style="margin-bottom:1rem">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
-        <div><strong style="font-size:1.05rem">${escHtml(k.nazev)}</strong>
-          ${k.popis?`<small style="color:var(--txt2);margin-left:.5rem">${escHtml(k.popis)}</small>`:""}</div>
-        <div style="display:flex;gap:.5rem">
-          <button class="btn btn-secondary btn-sm" onclick="openEditKalkulace(${k.id})">✏️ Upravit</button>
-          <button class="btn btn-danger btn-sm" onclick="smazatKalkulaci(${k.id})">🗑</button>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;margin-bottom:.75rem">
-        <div style="background:var(--bg);border-radius:8px;padding:.75rem;text-align:center">
-          <div style="font-size:.75rem;color:var(--txt2)">Náklady/ks</div>
-          <div style="font-size:1.1rem;font-weight:700;color:#dc2626">${czMoney(naklady)}</div>
-        </div>
-        <div style="background:var(--bg);border-radius:8px;padding:.75rem;text-align:center">
-          <div style="font-size:.75rem;color:var(--txt2)">Doporučená (+${k.cil_marze_pct||200}%)</div>
-          <div style="font-size:1.1rem;font-weight:700;color:#2563eb">${czMoney(dopCena)}</div>
-        </div>
-        <div style="background:var(--bg);border-radius:8px;padding:.75rem;text-align:center">
-          <div style="font-size:.75rem;color:var(--txt2)">Prodejní cena</div>
-          <div style="font-size:1.1rem;font-weight:700">${k.prodejni_cena?czMoney(k.prodejni_cena):"—"}</div>
-        </div>
-        <div style="background:var(--bg);border-radius:8px;padding:.75rem;text-align:center">
-          <div style="font-size:.75rem;color:var(--txt2)">Skutečná marže</div>
-          <div style="font-size:1.1rem">${marzeBadge}</div>
-        </div>
-      </div>
-      <table style="width:100%;font-size:.85rem;border-collapse:collapse">
-        <thead><tr style="color:var(--txt2);font-size:.78rem;border-bottom:1px solid var(--border)">
-          <th style="text-align:left;padding:4px 6px">Surovina</th>
-          <th style="text-align:right;padding:4px 6px">Množství</th>
-          <th style="text-align:right;padding:4px 6px">Cena/ks</th>
-          <th style="text-align:right;padding:4px 6px">Celkem</th>
-          <th style="padding:4px 6px">Zdroj</th>
-        </tr></thead>
-        <tbody>${k.polozky.map(p=>{
-          const cks = p.je_baleni ? p.cena_za_jednotku/(p.baleni_ks||1) : p.cena_za_jednotku;
-          return `<tr style="border-top:0.5px solid var(--border)">
-            <td style="padding:4px 6px">${escHtml(p.nazev)}</td>
-            <td style="text-align:right;padding:4px 6px">${p.mnozstvi} ${escHtml(p.jednotka||"ks")}</td>
-            <td style="text-align:right;padding:4px 6px">${czMoney(cks)}</td>
-            <td style="text-align:right;padding:4px 6px"><strong>${czMoney(cks*p.mnozstvi)}</strong></td>
-            <td style="padding:4px 6px;color:var(--txt2);font-size:.75rem">${p.zdroj_ceny==="faktura"?"📄 FA":"✏️"}</td>
-          </tr>`;
-        }).join("")}
-        ${(k.pausalni||[]).map(p=>`<tr style="border-top:0.5px solid var(--border);background:var(--bg)">
-          <td style="padding:4px 6px;color:#6366f1">${escHtml(p.nazev)} <small>(paušál)</small></td>
-          <td style="text-align:right;padding:4px 6px">1 ks</td>
-          <td style="text-align:right;padding:4px 6px">${czMoney(p.castka)}</td>
-          <td style="text-align:right;padding:4px 6px"><strong>${czMoney(p.castka)}</strong></td>
-          <td></td>
-        </tr>`).join("")}
-        </tbody>
-      </table>
-    </div>`;
+  // Jednoduchá tabulka - jen řádek s klíčovými daty
+  let rows = data.map(k => {
+    const naklady   = _kalcSumaNakladu(k.polozky, k.pausalni);
+    const skutMarze = k.prodejni_cena > 0 && naklady > 0 ? Math.round((k.prodejni_cena - naklady)/naklady*100) : null;
+    const mc = skutMarze !== null ? (skutMarze>=100?"#16a34a":skutMarze>=50?"#d97706":"#dc2626") : "var(--txt2)";
+    return `<tr style="cursor:pointer" onclick="zobrazitKalkulaci(${k.id})" class="tm-month">
+      <td style="padding:8px 10px;font-weight:600">${escHtml(k.nazev)}${k.popis?` <small style="color:var(--txt2);font-weight:400">${escHtml(k.popis)}</small>`:""}</td>
+      <td style="padding:8px 10px;text-align:right;color:#dc2626;font-weight:600">${czMoney(naklady)}</td>
+      <td style="padding:8px 10px;text-align:right">${k.prodejni_cena?czMoney(k.prodejni_cena):"—"}</td>
+      <td style="padding:8px 10px;text-align:right;font-weight:600;color:${mc}">${skutMarze!==null?skutMarze+"%":"—"}</td>
+      <td style="padding:8px 10px;text-align:right;white-space:nowrap">
+        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openEditKalkulace(${k.id})">✏️</button>
+        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();smazatKalkulaci(${k.id})">🗑</button>
+      </td>
+    </tr>`;
   }).join("");
+  el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.92rem">
+    <thead><tr style="font-size:.78rem;color:var(--txt2);border-bottom:1px solid var(--border)">
+      <th style="padding:6px 10px;text-align:left">Produkt</th>
+      <th style="padding:6px 10px;text-align:right">Náklady/ks</th>
+      <th style="padding:6px 10px;text-align:right">Prodejní cena</th>
+      <th style="padding:6px 10px;text-align:right">Marže</th>
+      <th></th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+}
+
+async function zobrazitKalkulaci(id) {
+  let k;
+  try { k = await api(`/api/kalkulace/${id}`); } catch { return; }
+  const naklady   = _kalcSumaNakladu(k.polozky, k.pausalni);
+  const dopCena   = naklady * (1 + (k.cil_marze_pct||200)/100);
+  const skutMarze = k.prodejni_cena > 0 && naklady > 0 ? Math.round((k.prodejni_cena - naklady)/naklady*100) : null;
+  const mc = skutMarze !== null ? (skutMarze>=100?"#16a34a":skutMarze>=50?"#d97706":"#dc2626") : "var(--txt2)";
+
+  const radky = [
+    ...k.polozky.map(p => {
+      const cks = p.je_baleni ? p.cena_za_jednotku/(p.baleni_ks||1) : p.cena_za_jednotku;
+      return `<tr style="border-top:0.5px solid var(--border)">
+        <td style="padding:5px 8px">${escHtml(p.nazev)}</td>
+        <td style="padding:5px 8px;color:var(--txt2);font-size:.82rem">${p.mnozstvi} ${escHtml(p.jednotka||"ks")} ${p.je_baleni?`<small>(z bal. ${p.baleni_ks}ks)</small>`:""}</td>
+        <td style="text-align:right;padding:5px 8px">${czMoney(cks*p.mnozstvi)}</td>
+        <td style="padding:5px 8px;color:var(--txt2);font-size:.75rem">${p.zdroj_ceny==="faktura"?"📄 FA":"✏️"}</td>
+      </tr>`;
+    }),
+    ...(k.pausalni||[]).map(p => `<tr style="border-top:0.5px solid var(--border);background:var(--bg)">
+      <td style="padding:5px 8px;color:#6366f1">${escHtml(p.nazev)}</td>
+      <td style="padding:5px 8px;color:var(--txt2);font-size:.82rem">paušál</td>
+      <td style="text-align:right;padding:5px 8px">${czMoney(p.castka)}</td>
+      <td></td>
+    </tr>`)
+  ].join("");
+
+  openModal(`${escHtml(k.nazev)}`, `
+    <table style="width:100%;border-collapse:collapse;font-size:.88rem;margin-bottom:1rem">
+      <thead><tr style="font-size:.75rem;color:var(--txt2);border-bottom:1px solid var(--border)">
+        <th style="text-align:left;padding:5px 8px">Položka</th>
+        <th style="padding:5px 8px;color:var(--txt2)">Množství</th>
+        <th style="text-align:right;padding:5px 8px">Celkem</th>
+        <th></th>
+      </tr></thead>
+      <tbody>${radky}</tbody>
+      <tfoot>
+        <tr style="border-top:1.5px solid var(--border);font-weight:600">
+          <td colspan="2" style="padding:6px 8px">Náklady celkem / ks</td>
+          <td style="text-align:right;padding:6px 8px;color:#dc2626">${czMoney(naklady)}</td><td></td>
+        </tr>
+        <tr style="color:var(--txt2)">
+          <td colspan="2" style="padding:4px 8px">Doporučená cena (+${k.cil_marze_pct||200}%)</td>
+          <td style="text-align:right;padding:4px 8px;color:#2563eb;font-weight:600">${czMoney(dopCena)}</td><td></td>
+        </tr>
+        <tr>
+          <td colspan="2" style="padding:4px 8px">Prodejní cena</td>
+          <td style="text-align:right;padding:4px 8px;font-weight:600">${k.prodejni_cena?czMoney(k.prodejni_cena):"—"}</td><td></td>
+        </tr>
+        <tr>
+          <td colspan="2" style="padding:4px 8px">Skutečná marže</td>
+          <td style="text-align:right;padding:4px 8px;font-weight:600;color:${mc}">${skutMarze!==null?skutMarze+"%":"—"}</td><td></td>
+        </tr>
+      </tfoot>
+    </table>
+    <div style="display:flex;gap:.5rem;justify-content:flex-end">
+      <button class="btn btn-secondary btn-sm" onclick="closeModal();openEditKalkulace(${k.id})">✏️ Upravit</button>
+      <button class="btn btn-danger btn-sm" onclick="closeModal();smazatKalkulaci(${k.id})">🗑 Smazat</button>
+    </div>`);
 }
 
 function _kalcSumaNakladu(polozky, pausalni) {
@@ -3045,7 +3067,7 @@ async function renderNastaveni() {
       </div>
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-top:.5rem">
         <button class="btn btn-primary" onclick="saveConfig()">💾 Uložit nastavení</button>
-        <button class="btn" style="background:var(--accent);color:#fff" onclick="opravDuplicity()">🔍 Najít duplicity</button>
+        <button class="btn" style="background:var(--accent);color:#1a1a1a" onclick="opravDuplicity()">🔍 Najít duplicity</button>
         <button class="btn" style="background:#6c757d;color:#fff" onclick="normalizujNazvy()">🧹 Odstranit ARO/MC/FL prefixy</button>
         <button class="btn" style="background:#2563eb;color:#fff" onclick="stahnoutZalohu()">📦 Záloha do GCS</button>
         <button class="btn btn-secondary btn-sm" onclick="stahnoutSqlDump()">💾 SQL záloha → GCS</button>
