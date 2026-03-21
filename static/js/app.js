@@ -2001,10 +2001,8 @@ async function loadKalkulace() {
     return `
     <div class="card" style="margin-bottom:1rem">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
-        <div>
-          <strong style="font-size:1.05rem">${escHtml(k.nazev)}</strong>
-          ${k.popis?`<small style="color:var(--txt2);margin-left:.5rem">${escHtml(k.popis)}</small>`:""}
-        </div>
+        <div><strong style="font-size:1.05rem">${escHtml(k.nazev)}</strong>
+          ${k.popis?`<small style="color:var(--txt2);margin-left:.5rem">${escHtml(k.popis)}</small>`:""}</div>
         <div style="display:flex;gap:.5rem">
           <button class="btn btn-secondary btn-sm" onclick="openEditKalkulace(${k.id})">✏️ Upravit</button>
           <button class="btn btn-danger btn-sm" onclick="smazatKalkulaci(${k.id})">🗑</button>
@@ -2081,14 +2079,10 @@ function _renderKalcPage(k) {
       <div>
         <div class="card" style="margin-bottom:1rem">
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem">
-            <div class="form-group">
-              <label class="form-label">Název produktu *</label>
-              <input id="klNazev" class="form-control" value="${escHtml(k.nazev||"")}" placeholder="Párek v rohlíku">
-            </div>
-            <div class="form-group">
-              <label class="form-label">Popis</label>
-              <input id="klPopis" class="form-control" value="${escHtml(k.popis||"")}" placeholder="Volitelný popis">
-            </div>
+            <div class="form-group"><label class="form-label">Název produktu *</label>
+              <input id="klNazev" class="form-control" value="${escHtml(k.nazev||"")}" placeholder="Párek v rohlíku"></div>
+            <div class="form-group"><label class="form-label">Popis</label>
+              <input id="klPopis" class="form-control" value="${escHtml(k.popis||"")}" placeholder="Volitelný popis"></div>
           </div>
         </div>
         <div class="card">
