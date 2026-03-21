@@ -1689,7 +1689,6 @@ def api_karty_stats():
 @app.route("/api/dashboard")
 @vyzaduj_prihlaseni
 def api_dashboard():
-    update_stav_po_splatnosti()
     firma = request.args.get("firma", "")
     with get_db() as conn:
         mesic = date.today().strftime("%Y-%m")
@@ -1713,8 +1712,9 @@ def api_dashboard():
         castka_po_spl = row2["castka"] if isinstance(row2, dict) else row2[1]
 
         datum_filter = "AND datum_vystaveni::date >= CURRENT_DATE - INTERVAL '12 months'" if _USE_PG else "AND datum_vystaveni >= date('now','-12 months')"
+        graf_sql = "TO_CHAR(NULLIF(datum_vystaveni,'')::date,'YYYY-MM')" if _USE_PG else "strftime('%Y-%m', datum_vystaveni)"
         graf = conn.execute(f"""
-            SELECT strftime('%Y-%m', datum_vystaveni) as m, COALESCE(SUM(celkem_s_dph),0) as castka
+            SELECT {graf_sql} as m, COALESCE(SUM(celkem_s_dph),0) as castka
             FROM faktury
             WHERE datum_vystaveni IS NOT NULL AND datum_vystaveni != '' {datum_filter} {where_firma}
             GROUP BY m ORDER BY m
@@ -1730,7 +1730,7 @@ def api_dashboard():
         karty_row = conn.execute("""
             SELECT COALESCE(SUM(karty),0) as karty
             FROM reporty
-            WHERE datum >= date('now','-12 months')
+            WHERE datum >= CURRENT_DATE - INTERVAL '12 months'
         """).fetchone()
         karty_12m = karty_row["karty"] if isinstance(karty_row, dict) else karty_row[0]
 
