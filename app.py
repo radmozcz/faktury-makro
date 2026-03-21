@@ -1778,7 +1778,8 @@ def api_faktury():
     with get_db() as conn:
         rows = conn.execute(f"""
             SELECT id, firma_zkratka, dodavatel, cislo_faktury,
-                   datum_vystaveni, datum_splatnosti, celkem_s_dph, stav, zdroj, duplicita_id
+                   datum_vystaveni, datum_splatnosti, celkem_s_dph, stav, zdroj, duplicita_id,
+                   soubor_url
             FROM faktury {where}
             ORDER BY datum_vystaveni DESC, created_at DESC
         """, params).fetchall()
