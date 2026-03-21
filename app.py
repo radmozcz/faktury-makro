@@ -2026,6 +2026,36 @@ def api_vyplaty_souhrn(jmeno):
         "odvody_suma":  round(odvody_suma, 2),
     })
 
+@app.route("/api/nastaveni/odvody")
+@vyzaduj_prihlaseni
+def api_nastaveni_odvody_get():
+    with get_db() as conn:
+        rows = conn.execute("SELECT id, jmeno, nazev, castka FROM pausalni_odvody ORDER BY jmeno, poradi, nazev").fetchall()
+    odvody = [dict(r) for r in rows]
+    suma = sum(float(r["castka"]) for r in odvody)
+    return jsonify({"odvody": odvody, "odvody_suma": round(suma, 2)})
+
+@app.route("/api/nastaveni/odvody", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_nastaveni_odvody_post():
+    data = request.json or {}
+    nazev  = str(data.get("nazev","")).strip()
+    castka = float(data.get("castka", 0) or 0)
+    jmeno  = str(data.get("jmeno","admin")).strip() or "admin"
+    if not nazev:
+        return jsonify({"error": "Chybí název"}), 400
+    with get_db() as conn:
+        conn.execute("INSERT INTO pausalni_odvody (jmeno, nazev, castka, poradi) VALUES (?,?,?,0)", (jmeno, nazev, castka))
+    return jsonify({"ok": True})
+
+@app.route("/api/nastaveni/odvody/<int:oid>", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_nastaveni_odvody_delete(oid):
+    with get_db() as conn:
+        conn.execute("DELETE FROM pausalni_odvody WHERE id=?", (oid,))
+    return jsonify({"ok": True})
+
+
 @app.route("/api/pausalni-odvody/<jmeno>", methods=["GET"])
 @vyzaduj_prihlaseni
 def api_pausalni_get(jmeno):
