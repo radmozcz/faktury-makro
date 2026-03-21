@@ -625,6 +625,7 @@ async function loadFaktury() {
               <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
               <td>${f.duplicita_id ? '<span class="badge" style="background:#0d6efd;color:#fff;cursor:pointer" onclick="event.stopPropagation();openFakturaDetail(' + f.duplicita_id + ')">🔗 Duplikát</span>' : stavBadge(f.stav)}</td>
               <td onclick="event.stopPropagation()" style="white-space:nowrap">
+                ${f.soubor_url ? `<a href="${f.soubor_url}" target="_blank" class="btn btn-secondary btn-sm" title="Zobrazit originál" style="padding:.2rem .4rem">📎</a>` : ""}
                 ${f.stav === 'ke_zpracovani' ? `
                   <button class="btn btn-xs btn-success" onclick="potvrdFakturu(${f.id})" title="Potvrdit — zůstane v Faktury">✅</button>
                   <button class="btn btn-xs btn-outline" onclick="premistFakturu(${f.id})" title="Přemístit jinam">↪</button>

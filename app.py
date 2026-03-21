@@ -3287,73 +3287,76 @@ def api_ai_dotaz():
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         return jsonify({"chyba": "ANTHROPIC_API_KEY není nastaven"}), 500
+
+    # Zjistit práva přihlášeného uživatele
+    role = session.get("role", "")
+    je_admin = (role == "admin")
+    def ma_pravo(sekce):
+        if je_admin: return True
+        prava = get_prava_z_db()
+        return prava.get(role, {}).get(sekce, False)
+
     try:
         with get_db() as conn:
             fw = "AND firma_zkratka=?" if firma else ""
             fp = [firma] if firma else []
-            # Měsíční přehled reportů
-            rep = conn.execute(f"""
-                SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY-MM') as mesic,
-                    ROUND(SUM(karty)::numeric,0) as karty,
-                    ROUND(SUM(hotovost)::numeric,0) as hotovost,
-                    ROUND(SUM(trzba_vcpk)::numeric,0) as trzba,
-                    ROUND(SUM(vydaje)::numeric,0) as vydaje,
-                    ROUND(SUM(pk_celkem)::numeric,0) as poukazky,
-                    SUM(burger) as burger, SUM(burtgulas) as burtgulas,
-                    SUM(pizza_cela) as pizza_cela, SUM(pizza_ctvrt) as pizza_ctvrt,
-                    SUM(talire) as talire, COUNT(*) as dni
-                FROM reporty WHERE datum >= ? AND datum <= ? {fw}
-                GROUP BY mesic ORDER BY mesic
-            """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
-            # Denní data za posledních 90 dní
-            dny = conn.execute(f"""
-                SELECT datum, firma_zkratka, karty, hotovost, trzba_vcpk as trzba,
-                    vydaje, pk_celkem, burger, burtgulas, pizza_cela, pizza_ctvrt, talire, smena
-                FROM reporty
-                WHERE datum >= ? {fw}
-                ORDER BY datum DESC LIMIT 90
-            """, [(_dt.date.today() - _dt.timedelta(days=90)).isoformat()] + fp).fetchall()
-            # Faktury měsíčně
-            fakt = conn.execute(f"""
-                SELECT TO_CHAR(NULLIF(datum_vystaveni,'')::date,'YYYY-MM') as mesic,
-                    dodavatel, ROUND(SUM(celkem_s_dph)::numeric,0) as castka, COUNT(*) as pocet
-                FROM faktury WHERE datum_vystaveni >= ? AND datum_vystaveni <= ?
-                {"AND firma_zkratka=?" if firma else ""}
-                GROUP BY mesic, dodavatel ORDER BY mesic, castka DESC
-            """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
-            # Výplaty
-            vypl = conn.execute(f"""
-                SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY-MM') as mesic,
-                    jmeno, ROUND(SUM(castka)::numeric,0) as castka
-                FROM vyplaty WHERE datum >= ? AND datum <= ?
-                {"AND firma_zkratka=?" if firma else ""}
-                GROUP BY mesic, jmeno ORDER BY mesic, jmeno
-            """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
+            kontext_casti = [f"Jsi analytik restaurace/bistra. Máš přístup k těmto datům za rok {rok}{' pro firmu '+firma if firma else ''}:"]
 
-        from decimal import Decimal
-        def _conv(v): return float(v) if isinstance(v, Decimal) else v
-        def rows(r): return [{k: _conv(v) for k,v in dict(x).items()} for x in r]
-        kontext = f"""Jsi analytik restaurace/bistra. Máš přístup k těmto datům za rok {rok}{' pro firmu '+firma if firma else ''}:
+            # Reporty – právo statistiky nebo reporty
+            if ma_pravo("statistiky") or ma_pravo("reporty"):
+                rep = conn.execute(f"""
+                    SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY-MM') as mesic,
+                        ROUND(SUM(karty)::numeric,0) as karty,
+                        ROUND(SUM(hotovost)::numeric,0) as hotovost,
+                        ROUND(SUM(trzba_vcpk)::numeric,0) as trzba,
+                        ROUND(SUM(vydaje)::numeric,0) as vydaje,
+                        ROUND(SUM(pk_celkem)::numeric,0) as poukazky,
+                        SUM(burger) as burger, SUM(burtgulas) as burtgulas,
+                        SUM(pizza_cela) as pizza_cela, SUM(pizza_ctvrt) as pizza_ctvrt,
+                        SUM(talire) as talire, COUNT(*) as dni
+                    FROM reporty WHERE datum >= ? AND datum <= ? {fw}
+                    GROUP BY mesic ORDER BY mesic
+                """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
+                dny = conn.execute(f"""
+                    SELECT datum, firma_zkratka, karty, hotovost, trzba_vcpk as trzba,
+                        vydaje, pk_celkem, burger, burtgulas, pizza_cela, pizza_ctvrt, talire, smena
+                    FROM reporty
+                    WHERE datum >= ? {fw}
+                    ORDER BY datum DESC LIMIT 90
+                """, [(_dt.date.today() - _dt.timedelta(days=90)).isoformat()] + fp).fetchall()
+                kontext_casti.append(f"\nMĚSÍČNÍ PŘEHLED REPORTŮ (tržby v Kč):\n{json.dumps([{k: float(v) if hasattr(v,'__float__') else v for k,v in dict(r).items()} for r in rep], ensure_ascii=False, indent=2)}")
+                kontext_casti.append(f"\nDENNÍ DATA (posledních 90 dní):\n{json.dumps([{k: float(v) if hasattr(v,'__float__') else v for k,v in dict(r).items()} for r in dny], ensure_ascii=False, indent=2)}")
+            else:
+                kontext_casti.append("\n[Tržby a reporty: nemáš oprávnění]")
 
-MĚSÍČNÍ PŘEHLED REPORTŮ (tržby v Kč):
-{json.dumps(rows(rep), ensure_ascii=False, indent=2)}
+            # Faktury – právo faktury
+            if ma_pravo("faktury"):
+                fakt = conn.execute(f"""
+                    SELECT TO_CHAR(NULLIF(datum_vystaveni,'')::date,'YYYY-MM') as mesic,
+                        dodavatel, ROUND(SUM(celkem_s_dph)::numeric,0) as castka, COUNT(*) as pocet
+                    FROM faktury WHERE datum_vystaveni >= ? AND datum_vystaveni <= ?
+                    {"AND firma_zkratka=?" if firma else ""}
+                    GROUP BY mesic, dodavatel ORDER BY mesic, castka DESC
+                """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
+                kontext_casti.append(f"\nFAKTURY (náklady podle dodavatele):\n{json.dumps([{k: float(v) if hasattr(v,'__float__') else v for k,v in dict(r).items()} for r in fakt], ensure_ascii=False, indent=2)}")
+            else:
+                kontext_casti.append("\n[Faktury: nemáš oprávnění]")
 
-DENNÍ DATA (posledních 90 dní):
-{json.dumps(rows(dny), ensure_ascii=False, indent=2)}
+            # Výplaty – právo vyplaty
+            if ma_pravo("vyplaty"):
+                vypl = conn.execute(f"""
+                    SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY-MM') as mesic,
+                        jmeno, ROUND(SUM(castka)::numeric,0) as castka
+                    FROM vyplaty WHERE datum >= ? AND datum <= ?
+                    {"AND firma_zkratka=?" if firma else ""}
+                    GROUP BY mesic, jmeno ORDER BY mesic, jmeno
+                """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
+                kontext_casti.append(f"\nVÝPLATY:\n{json.dumps([{k: float(v) if hasattr(v,'__float__') else v for k,v in dict(r).items()} for r in vypl], ensure_ascii=False, indent=2)}")
+            else:
+                kontext_casti.append("\n[Výplaty: nemáš oprávnění]")
 
-FAKTURY (náklady podle dodavatele):
-{json.dumps(rows(fakt), ensure_ascii=False, indent=2)}
-
-VÝPLATY:
-{json.dumps(rows(vypl), ensure_ascii=False, indent=2)}
-
-Odpovídej stručně a konkrétně v češtině.
-Pokud uživatel žádá export dat (CSV, tabulka, seznam), vrať odpověď ve formátu:
-EXPORT_CSV:nazev_souboru.csv
-datum,hodnota1,hodnota2
-řádek1...
-
-Jinak odpovídej normálně jako text."""
+        kontext_casti.append("\nOdpovídej stručně a konkrétně v češtině.\nPokud uživatel žádá export dat (CSV, tabulka, seznam), vrať odpověď ve formátu:\nEXPORT_CSV:nazev_souboru.csv\ndatum,hodnota1,hodnota2\nřádek1...\n\nJinak odpovídej normálně jako text.")
+        kontext = "\n".join(kontext_casti)
 
         client = anthropic.Anthropic(api_key=api_key)
         msg = client.messages.create(
