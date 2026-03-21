@@ -2882,30 +2882,24 @@ async function renderStatistiky() {
 
     <div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:1rem;margin-bottom:1rem">
       <div class="card">
-        <div class="card-title" style="margin-bottom:.75rem">Průměrná denní tržba vč. PK — po letech</div>
-        <div id="plPrumery"><div class="loading-center"><span class="spinner"></span></div></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+          <span class="card-title" style="margin:0">Náklady po měsících</span>
+          <select id="plRok" onchange="loadPL()" style="font-size:.82rem">
+            <option value="">Vše</option>
+            ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}" ${r==rokAkt?"selected":""}>${r}</option>`).join("")}
+          </select>
+        </div>
+        <div id="plNaklady"><div class="loading-center"><span class="spinner"></span></div></div>
       </div>
-      <div style="display:flex;flex-direction:column;gap:1rem">
-        <div class="card">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
-            <span class="card-title" style="margin:0">Náklady po měsících</span>
-            <select id="plRok" onchange="loadPL()" style="font-size:.82rem">
-              <option value="">Vše</option>
-              ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}" ${r==rokAkt?"selected":""}>${r}</option>`).join("")}
-            </select>
-          </div>
-          <div id="plNaklady"><div class="loading-center"><span class="spinner"></span></div></div>
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+          <span class="card-title" style="margin:0">Marže — tržba vs. faktury</span>
+          <select id="plRokMarze" onchange="loadPL()" style="font-size:.82rem">
+            <option value="">Vše</option>
+            ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}" ${r==rokAkt?"selected":""}>${r}</option>`).join("")}
+          </select>
         </div>
-        <div class="card">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
-            <span class="card-title" style="margin:0">Marže — tržba vs. faktury</span>
-            <select id="plRokMarze" onchange="loadPL()" style="font-size:.82rem">
-              <option value="">Vše</option>
-              ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}" ${r==rokAkt?"selected":""}>${r}</option>`).join("")}
-            </select>
-          </div>
-          <div id="plMarze"><div class="loading-center"><span class="spinner"></span></div></div>
-        </div>
+        <div id="plMarze"><div class="loading-center"><span class="spinner"></span></div></div>
       </div>
     </div>
 
@@ -2920,8 +2914,21 @@ async function renderStatistiky() {
         </div>
         <div id="plTotal"><div class="loading-center"><span class="spinner"></span></div></div>
       </div>
-      <div class="card" style="display:flex;align-items:center;justify-content:center;min-height:150px;color:var(--txt2);font-size:.85rem;border-style:dashed">
-        — připraveno pro další tabulku —
+      <div class="card">
+        <div class="card-title" style="margin-bottom:.75rem">Průměrná denní tržba vč. PK — po letech</div>
+        <div id="plPrumery"><div class="loading-center"><span class="spinner"></span></div></div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:1.5rem">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.5rem">
+        <span class="card-title" style="margin:0">Grafy</span>
+        <select id="grafTyp" style="font-size:.82rem">
+          <option value="">— vybrat graf —</option>
+        </select>
+      </div>
+      <div id="grafContainer" style="min-height:120px;display:flex;align-items:center;justify-content:center;color:var(--txt2);font-size:.85rem">
+        Vyberte graf ze seznamu
       </div>
     </div>
 
@@ -3001,7 +3008,7 @@ async function loadPL() {
         const rucni = rucniData[klic];
         if (d?.dni > 0) {
           const prumer = Math.round(d.trzba_vcpk / d.dni);
-          soucty[r] += d.trzba_vcpk; aktivni[r]++;
+          soucty[r] += prumer; aktivni[r]++;
           radek += `<td style="text-align:right;padding:5px 8px">${prumer.toLocaleString("cs-CZ")}</td>`;
         } else if (rucni) {
           soucty[r] += rucni; aktivni[r]++;
@@ -3014,11 +3021,11 @@ async function loadPL() {
       tbody += radek;
     }
 
-    let tfoot = `<tr style="font-weight:600;border-top:1.5px solid var(--border)"><td style="padding:5px 8px">Součet</td>`;
+    let tfoot = `<tr style="font-weight:600;border-top:1.5px solid var(--border)"><td style="padding:5px 8px">Σ ø/den za rok</td>`;
     vsRoky.forEach(r => tfoot += `<td style="text-align:right;padding:5px 8px">${_n(soucty[r])}</td>`);
     tfoot += `</tr><tr style="font-size:.78rem;color:var(--txt2)"><td style="padding:4px 8px">Aktivních měs.</td>`;
     vsRoky.forEach(r => tfoot += `<td style="text-align:right;padding:4px 8px">${aktivni[r]}</td>`);
-    tfoot += `</tr><tr style="font-size:.78rem;color:var(--txt2)"><td style="padding:4px 8px">Průměr/měs.</td>`;
+    tfoot += `</tr><tr style="font-size:.78rem;color:var(--txt2)"><td style="padding:4px 8px">Průměr měs./ø/den</td>`;
     vsRoky.forEach(r => tfoot += `<td style="text-align:right;padding:4px 8px">${aktivni[r]>0?_n(Math.round(soucty[r]/aktivni[r])):"—"}</td>`);
     tfoot += `</tr>`;
     elPrum.innerHTML = `<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.85rem">${thead}<tbody>${tbody}</tbody><tfoot>${tfoot}</tfoot></table></div><div style="font-size:.75rem;color:var(--txt2);margin-top:.4rem">✎ = ruční data · klikni na + pro zadání</div>`;
@@ -3114,7 +3121,7 @@ async function loadPL() {
       let thead = `<tr style="font-size:.78rem;color:var(--txt2)"><th style="text-align:left;padding:5px 8px">Měsíc</th>`;
       aktRoky.forEach(r => thead += `<th style="text-align:right;padding:5px 8px" colspan="3">${r}</th>`);
       thead += `</tr><tr style="font-size:.75rem;color:var(--txt2)"><th></th>`;
-      aktRoky.forEach(() => thead += `<th style="text-align:right;padding:4px 6px">Příjmy</th><th style="text-align:right;padding:4px 6px">Výdaje</th><th style="text-align:right;padding:4px 6px">Zůstatek</th>`);
+      aktRoky.forEach(() => thead += `<th style="text-align:right;padding:4px 6px">Všechny příjmy</th><th style="text-align:right;padding:4px 6px">Všechny výdaje</th><th style="text-align:right;padding:4px 6px">Zůstatek</th>`);
       thead += `</tr>`;
       let tbody = "";
       let tots = {};
