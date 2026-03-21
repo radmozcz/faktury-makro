@@ -3938,6 +3938,23 @@ def api_zbozi_detail(zbozi_id):
         "nakupy": [dict(r) for r in nakupy]
     })
 
+@app.route("/api/zbozi-search")
+@vyzaduj_prihlaseni
+def api_zbozi_search():
+    q = request.args.get("q", "").strip()
+    if not q:
+        return jsonify([])
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT DISTINCT nazev_canonical as nazev_canonical
+            FROM zbozi
+            WHERE LOWER(nazev_canonical) LIKE LOWER(?)
+            ORDER BY nazev_canonical
+            LIMIT 10
+        """, (f"%{q}%",)).fetchall()
+    return jsonify([{"nazev_canonical": r["nazev_canonical"] if isinstance(r, dict) else r[0]} for r in rows])
+
+
 @app.route("/api/zbozi")
 @vyzaduj_prihlaseni
 def api_zbozi_list():
