@@ -2132,7 +2132,7 @@ async function loadKalkulace() {
     return;
   }
   el.innerHTML = data.map(k => {
-    const naklady = _kalcSumaNakladu(k.polozky);
+    const naklady = _kalcSumaNakladu(k.polozky, k.pausalni);
     const dopCena = naklady * (1 + (k.cil_marze_pct||200)/100);
     const skutMarze = k.prodejni_cena > 0 ? ((k.prodejni_cena - naklady)/naklady*100) : null;
     const marzeBadge = skutMarze !== null
@@ -2183,17 +2183,27 @@ async function loadKalkulace() {
             <td style="text-align:right;padding:4px 6px"><strong>${czMoney(cks*p.mnozstvi)}</strong></td>
             <td style="padding:4px 6px;color:var(--txt2);font-size:.75rem">${p.zdroj_ceny==="faktura"?"📄 FA":"✏️"}</td>
           </tr>`;
-        }).join("")}</tbody>
+        }).join("")}
+        ${(k.pausalni||[]).map(p=>`<tr style="border-top:0.5px solid var(--border);background:var(--bg)">
+          <td style="padding:4px 6px;color:#6366f1">${escHtml(p.nazev)} <small>(paušál)</small></td>
+          <td style="text-align:right;padding:4px 6px">1 ks</td>
+          <td style="text-align:right;padding:4px 6px">${czMoney(p.castka)}</td>
+          <td style="text-align:right;padding:4px 6px"><strong>${czMoney(p.castka)}</strong></td>
+          <td></td>
+        </tr>`).join("")}
+        </tbody>
       </table>
     </div>`;
   }).join("");
 }
 
-function _kalcSumaNakladu(polozky) {
-  return (polozky||[]).reduce((s,p) => {
+function _kalcSumaNakladu(polozky, pausalni) {
+  const s1 = (polozky||[]).reduce((s,p) => {
     const cks = p.je_baleni ? p.cena_za_jednotku/(p.baleni_ks||1) : p.cena_za_jednotku;
     return s + cks*(p.mnozstvi||1);
   }, 0);
+  const s2 = (pausalni||[]).reduce((s,p) => s + (p.castka||0), 0);
+  return s1 + s2;
 }
 
 function openNovaKalkulace() {
@@ -2232,6 +2242,14 @@ function _renderKalcPage(k) {
           </div>
           <div id="klPolozkyWrap">${polozky.map((p,i)=>_kalcPolozkaHtml(i,p)).join("")}</div>
           ${polozky.length===0?`<div style="color:var(--txt2);font-size:.85rem;padding:.5rem 0">Zatím žádné suroviny</div>`:""}
+        </div>
+        <div class="card" style="margin-top:1rem">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+            <strong>Paušální položky</strong>
+            <button class="btn btn-secondary btn-sm" onclick="klPridatPausal()">+ Přidat</button>
+          </div>
+          <div id="klPausalWrap">${(k.pausalni||[]).map((p,i)=>_kalcPausalHtml(i,p)).join("")}</div>
+          ${!(k.pausalni||[]).length?`<div style="color:var(--txt2);font-size:.85rem;padding:.5rem 0">Např. ubrousek, tácek, olej...</div>`:""}
         </div>
       </div>
       <div>
@@ -2305,6 +2323,23 @@ function klPridatPolozku() {
   klRecalc();
 }
 
+function _kalcPausalHtml(i, p = {}) {
+  return `<div class="kl-pausal" style="display:grid;grid-template-columns:1fr 120px auto;gap:.5rem;align-items:center;margin-bottom:.4rem">
+    <input class="form-control kl-pausal-nazev" style="font-size:.85rem" value="${escHtml(p.nazev||"")}" placeholder="Ubrousek, tácek..." oninput="klRecalc()">
+    <input type="number" step="0.01" class="form-control kl-pausal-castka" style="font-size:.85rem" value="${p.castka||""}" placeholder="Kč" oninput="klRecalc()">
+    <button onclick="this.closest('.kl-pausal').remove();klRecalc()" style="background:none;border:none;cursor:pointer;color:var(--txt2);font-size:1rem">✕</button>
+  </div>`;
+}
+
+function klPridatPausal() {
+  const wrap = document.getElementById("klPausalWrap");
+  if (!wrap) return;
+  const div = document.createElement("div");
+  div.innerHTML = _kalcPausalHtml(++_klIdx);
+  wrap.appendChild(div.firstElementChild);
+  klRecalc();
+}
+
 function klToggleBaleni(uid) {
   const el = document.getElementById(uid);
   if (!el) return;
@@ -2325,7 +2360,7 @@ async function klNaseptavac(input, uid) {
   if (q.length < 2) { box.style.display = "none"; return; }
   _nasTimer[uid] = setTimeout(async () => {
     try {
-      const data = await api(`/api/zbozi-search?q=${encodeURIComponent(q)}`);
+      const data = await api(`/api/zbozi-search?q=${encodeURIComponent(q)}&unaccent=1`);
       if (!data.length) { box.style.display = "none"; return; }
       box.innerHTML = data.map(z =>
         `<div style="padding:.4rem .6rem;cursor:pointer;font-size:.85rem;border-bottom:0.5px solid var(--border)" onmousedown="klVybratZbozi('${uid}','${escHtml(z.nazev_canonical)}')">${escHtml(z.nazev_canonical)}</div>`
@@ -2360,13 +2395,26 @@ async function klVybratZbozi(uid, nazev) {
 
 function klRecalc() {
   const polozky = document.querySelectorAll(".kl-polozka");
+  const radky = [];
   let naklady = 0;
   polozky.forEach(p => {
+    const nazev = p.querySelector(".kl-nazev")?.value?.trim() || "—";
     const cena  = parseFloat(p.querySelector(".kl-cena")?.value || 0);
     const mnoz  = parseFloat(p.querySelector(".kl-mnozstvi")?.value || 1);
+    const jedn  = p.querySelector(".kl-jednotka")?.value || "ks";
     const jeB   = p.querySelector(".kl-jebaleni")?.checked;
     const balKs = parseFloat(p.querySelector(".kl-baleni-ks")?.value || 1);
-    naklady += (jeB ? cena/(balKs||1) : cena) * mnoz;
+    const cks   = jeB ? cena/(balKs||1) : cena;
+    const celkem = cks * mnoz;
+    naklady += celkem;
+    if (nazev && cks > 0) radky.push({nazev, mnoz, jedn, cks, celkem});
+  });
+  // Paušální položky
+  document.querySelectorAll(".kl-pausal").forEach(p => {
+    const nazev  = p.querySelector(".kl-pausal-nazev")?.value?.trim() || "—";
+    const castka = parseFloat(p.querySelector(".kl-pausal-castka")?.value || 0);
+    naklady += castka;
+    if (nazev && castka > 0) radky.push({nazev, mnoz:1, jedn:"ks", cks:castka, celkem:castka, pausal:true});
   });
   const cilMarze  = parseFloat(document.getElementById("klCilMarze")?.value || 200);
   const prodejni  = parseFloat(document.getElementById("klProdejniCena")?.value || 0);
@@ -2374,17 +2422,31 @@ function klRecalc() {
   const skutMarze = prodejni > 0 && naklady > 0 ? ((prodejni-naklady)/naklady*100) : null;
   const el = document.getElementById("klVysledek");
   if (!el) return;
-  const row = (label, val, color) =>
-    `<div style="display:flex;justify-content:space-between;padding:.4rem 0;border-bottom:0.5px solid var(--border)">
-      <span style="color:var(--txt2)">${label}</span>
-      <strong style="color:${color||"inherit"}">${val}</strong></div>`;
-  el.innerHTML =
-    row("Náklady celkem / ks", czMoney(naklady), "#dc2626") +
-    row(`Doporučená cena (+${Math.round(cilMarze)}%)`, czMoney(dopCena), "#2563eb") +
-    row("Prodejní cena", prodejni ? czMoney(prodejni) : "—") +
-    row("Skutečná marže",
-      skutMarze !== null ? `${Math.round(skutMarze)}%` : "—",
-      skutMarze !== null ? (skutMarze>=100?"#16a34a":skutMarze>=50?"#d97706":"#dc2626") : "var(--txt2)");
+
+  const sep = `<div style="border-top:1.5px solid var(--border);margin:.4rem 0"></div>`;
+  const rowItem = (nazev, mnoz, jedn, cena, celkem, pausal) =>
+    `<div style="display:flex;justify-content:space-between;padding:.25rem 0;font-size:.85rem">
+      <span style="color:var(--txt2)">${escHtml(nazev)}${!pausal&&mnoz!==1?` <small>(${mnoz} ${jedn})</small>`:""}${pausal?' <small style="color:#6366f1">(paušál)</small>':""}</span>
+      <span>${czMoney(celkem)}</span>
+    </div>`;
+  const rowSum = (label, val, color, bold) =>
+    `<div style="display:flex;justify-content:space-between;padding:.35rem 0;border-bottom:0.5px solid var(--border)">
+      <span style="color:var(--txt2);${bold?"font-weight:600":""};">${label}</span>
+      <strong style="color:${color||"inherit"}">${val}</strong>
+    </div>`;
+
+  let html = "";
+  if (radky.length) {
+    html += radky.map(r => rowItem(r.nazev, r.mnoz, r.jedn, r.cks, r.celkem, r.pausal)).join("");
+    html += sep;
+  }
+  html += rowSum("Náklady celkem / ks", czMoney(naklady), "#dc2626", true);
+  html += rowSum(`Doporučená cena (+${Math.round(cilMarze)}%)`, czMoney(dopCena), "#2563eb", false);
+  html += rowSum("Prodejní cena", prodejni ? czMoney(prodejni) : "—", "inherit", false);
+  html += rowSum("Skutečná marže",
+    skutMarze !== null ? `${Math.round(skutMarze)}%` : "—",
+    skutMarze !== null ? (skutMarze>=100?"#16a34a":skutMarze>=50?"#d97706":"#dc2626") : "var(--txt2)", false);
+  el.innerHTML = html;
 }
 
 function _kalcGetPayload() {
@@ -2403,12 +2465,19 @@ function _kalcGetPayload() {
       zdroj_ceny:       p.querySelector(".kl-cena")?.dataset?.zdroj||"rucni",
     });
   });
+  const pausalni = [];
+  document.querySelectorAll(".kl-pausal").forEach(p => {
+    const nazev  = p.querySelector(".kl-pausal-nazev")?.value?.trim();
+    const castka = parseFloat(p.querySelector(".kl-pausal-castka")?.value||0);
+    if (nazev && castka > 0) pausalni.push({nazev, castka});
+  });
   return {
     nazev:         document.getElementById("klNazev")?.value?.trim(),
     popis:         document.getElementById("klPopis")?.value||"",
     cil_marze_pct: parseFloat(document.getElementById("klCilMarze")?.value||200),
     prodejni_cena: parseFloat(document.getElementById("klProdejniCena")?.value||0),
     polozky,
+    pausalni,
   };
 }
 

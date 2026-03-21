@@ -592,6 +592,12 @@ def migrate_db():
             created_at      TEXT DEFAULT NOW(),
             updated_at      TEXT DEFAULT NOW()
         )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS kalkulace_pausalni (
+            id              SERIAL PRIMARY KEY,
+            kalkulace_id    INTEGER NOT NULL,
+            nazev           TEXT NOT NULL,
+            castka          REAL DEFAULT 0
+        )""")
         conn.execute("""CREATE TABLE IF NOT EXISTS kalkulace_polozky (
             id              SERIAL PRIMARY KEY,
             kalkulace_id    INTEGER NOT NULL,
@@ -3971,18 +3977,38 @@ def api_zbozi_detail(zbozi_id):
 @app.route("/api/zbozi-search")
 @vyzaduj_prihlaseni
 def api_zbozi_search():
+    import unicodedata
     q = request.args.get("q", "").strip()
+    unaccent = request.args.get("unaccent", "0") == "1"
     if not q:
         return jsonify([])
+
+    def _strip(s):
+        return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn').lower()
+
     with get_db() as conn:
+        # Zkusit nejdřív přímý LIKE
         rows = conn.execute("""
-            SELECT DISTINCT nazev_canonical as nazev_canonical
+            SELECT DISTINCT nazev_canonical
             FROM zbozi
             WHERE LOWER(nazev_canonical) LIKE LOWER(?)
             ORDER BY nazev_canonical
-            LIMIT 10
+            LIMIT 20
         """, (f"%{q}%",)).fetchall()
-    return jsonify([{"nazev_canonical": r["nazev_canonical"] if isinstance(r, dict) else r[0]} for r in rows])
+        result = [r["nazev_canonical"] if isinstance(r, dict) else r[0] for r in rows]
+
+        # Pokud unaccent=1 a nenašli jsme dost, doplníme Python filtrací
+        if unaccent and len(result) < 10:
+            q_stripped = _strip(q)
+            all_rows = conn.execute("SELECT DISTINCT nazev_canonical FROM zbozi ORDER BY nazev_canonical").fetchall()
+            for r in all_rows:
+                n = r["nazev_canonical"] if isinstance(r, dict) else r[0]
+                if n not in result and q_stripped in _strip(n):
+                    result.append(n)
+                if len(result) >= 10:
+                    break
+
+    return jsonify([{"nazev_canonical": n} for n in result[:10]])
 
 
 @app.route("/api/zbozi")
@@ -4714,6 +4740,10 @@ def api_kalkulace_list():
                 "SELECT * FROM kalkulace_polozky WHERE kalkulace_id=? ORDER BY id", (d["id"],)
             ).fetchall()
             d["polozky"] = [dict(p) for p in polozky]
+            pausalni = conn.execute(
+                "SELECT * FROM kalkulace_pausalni WHERE kalkulace_id=? ORDER BY id", (d["id"],)
+            ).fetchall()
+            d["pausalni"] = [dict(p) for p in pausalni]
             result.append(d)
     return jsonify(result)
 
@@ -4729,6 +4759,10 @@ def api_kalkulace_get(kid):
             "SELECT * FROM kalkulace_polozky WHERE kalkulace_id=? ORDER BY id", (kid,)
         ).fetchall()
         d["polozky"] = [dict(p) for p in polozky]
+        pausalni = conn.execute(
+            "SELECT * FROM kalkulace_pausalni WHERE kalkulace_id=? ORDER BY id", (kid,)
+        ).fetchall()
+        d["pausalni"] = [dict(p) for p in pausalni]
     return jsonify(d)
 
 @app.route("/api/kalkulace", methods=["POST"])
@@ -4737,7 +4771,8 @@ def api_kalkulace_ulozit():
     data = request.json
     if not data.get("nazev"):
         return jsonify({"error": "Chybí název"}), 400
-    polozky = data.pop("polozky", [])
+    polozky  = data.pop("polozky", [])
+    pausalni = data.pop("pausalni", [])
     with get_db() as conn:
         cur = conn.execute("""
             INSERT INTO kalkulace (nazev, popis, prodejni_cena, cil_marze_pct, updated_at)
@@ -4755,13 +4790,17 @@ def api_kalkulace_ulozit():
                   p.get("jednotka","ks"), float(p.get("cena_za_jednotku",0) or 0),
                   1 if p.get("je_baleni") else 0,
                   float(p.get("baleni_ks",1) or 1), p.get("zdroj_ceny","rucni")))
+        for p in pausalni:
+            conn.execute("INSERT INTO kalkulace_pausalni (kalkulace_id, nazev, castka) VALUES (?,?,?)",
+                         (kid, p.get("nazev",""), float(p.get("castka",0) or 0)))
     return jsonify({"ok": True, "id": kid})
 
 @app.route("/api/kalkulace/<int:kid>", methods=["PUT"])
 @vyzaduj_prihlaseni
 def api_kalkulace_edit(kid):
     data = request.json
-    polozky = data.pop("polozky", [])
+    polozky  = data.pop("polozky", [])
+    pausalni = data.pop("pausalni", [])
     with get_db() as conn:
         conn.execute("""
             UPDATE kalkulace SET nazev=?, popis=?, prodejni_cena=?, cil_marze_pct=?, updated_at=NOW()
@@ -4770,6 +4809,7 @@ def api_kalkulace_edit(kid):
               float(data.get("prodejni_cena",0) or 0),
               float(data.get("cil_marze_pct",200) or 200), kid))
         conn.execute("DELETE FROM kalkulace_polozky WHERE kalkulace_id=?", (kid,))
+        conn.execute("DELETE FROM kalkulace_pausalni WHERE kalkulace_id=?", (kid,))
         for p in polozky:
             conn.execute("""
                 INSERT INTO kalkulace_polozky
@@ -4779,6 +4819,9 @@ def api_kalkulace_edit(kid):
                   p.get("jednotka","ks"), float(p.get("cena_za_jednotku",0) or 0),
                   1 if p.get("je_baleni") else 0,
                   float(p.get("baleni_ks",1) or 1), p.get("zdroj_ceny","rucni")))
+        for p in pausalni:
+            conn.execute("INSERT INTO kalkulace_pausalni (kalkulace_id, nazev, castka) VALUES (?,?,?)",
+                         (kid, p.get("nazev",""), float(p.get("castka",0) or 0)))
     return jsonify({"ok": True})
 
 @app.route("/api/kalkulace/<int:kid>", methods=["DELETE"])
@@ -4786,6 +4829,7 @@ def api_kalkulace_edit(kid):
 def api_kalkulace_smazat(kid):
     with get_db() as conn:
         conn.execute("DELETE FROM kalkulace_polozky WHERE kalkulace_id=?", (kid,))
+        conn.execute("DELETE FROM kalkulace_pausalni WHERE kalkulace_id=?", (kid,))
         conn.execute("DELETE FROM kalkulace WHERE id=?", (kid,))
     return jsonify({"ok": True})
 
