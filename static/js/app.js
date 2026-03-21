@@ -647,6 +647,14 @@ async function loadFaktury() {
   });
 }
 
+async function navigujNaFakturu(id) {
+  // Přejde na sekci Faktury a otevře detail dané faktury
+  const navItem = document.querySelector("[data-page='faktury']");
+  if (navItem) navItem.click();
+  // Počkáme na načtení sekce, pak otevřeme detail
+  setTimeout(() => openFakturaDetail(id), 600);
+}
+
 async function openFakturaDetail(id) {
   let data;
   try { data = await api(`/api/faktury/${id}`); } catch { return; }
@@ -1913,17 +1921,21 @@ async function openZboziDetail(zbozi_id, nazev) {
     <h4 style="font-family:var(--font-head);margin-bottom:.7rem">Historie nákupů</h4>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Datum</th><th>Dodavatel</th><th>Firma</th><th>Množství</th><th>Cena/jedn.</th><th>Celkem</th></tr></thead>
+        <thead><tr><th>Datum</th><th>Dodavatel</th><th>Firma</th><th>Množství</th><th>Cena/jedn.</th><th>Celkem</th><th></th></tr></thead>
         <tbody>
           ${data.nakupy.map(n => `
-            <tr style="cursor:pointer" onclick="closeModal();openFakturaDetail(${n.faktura_id})" title="Zobrazit fakturu">
+            <tr>
               <td>${czDate(n.datum_vystaveni)}</td>
               <td>${escHtml(n.dodavatel)}</td>
               <td>${n.firma_zkratka}</td>
               <td>${Number(n.mnozstvi).toLocaleString("cs-CZ")} ${n.jednotka}</td>
               <td>${czMoney(n.cena_za_jednotku_s_dph)}</td>
-              <td><strong>${czMoney(n.celkem_s_dph)}</strong> <span style="color:var(--txt2);font-size:.8rem">→</span></td>
-            </tr>`).join("") || "<tr><td colspan='6' style='text-align:center;color:var(--txt2)'>Žádné nákupy</td></tr>"}
+              <td><strong>${czMoney(n.celkem_s_dph)}</strong></td>
+              <td style="white-space:nowrap">
+                ${n.soubor_url ? `<a href="${n.soubor_url}" target="_blank" class="btn btn-secondary btn-sm" title="Zobrazit originál">📎</a>` : ""}
+                <button class="btn btn-secondary btn-sm" onclick="closeModal();navigujNaFakturu(${n.faktura_id})" title="Přejít na fakturu">🧾</button>
+              </td>
+            </tr>`).join("") || "<tr><td colspan='7' style='text-align:center;color:var(--txt2)'>Žádné nákupy</td></tr>"}
         </tbody>
       </table>
     </div>`;

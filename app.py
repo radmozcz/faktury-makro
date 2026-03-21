@@ -3693,7 +3693,8 @@ def api_zbozi_detail(zbozi_id):
             return jsonify({"error": "Nenalezeno"}), 404
         aliasy = conn.execute("SELECT alias FROM zbozi_aliasy WHERE zbozi_id=?", (zbozi_id,)).fetchall()
         nakupy = conn.execute("""
-            SELECT p.*, f.dodavatel, f.datum_vystaveni, f.firma_zkratka, f.id as faktura_id
+            SELECT p.*, f.dodavatel, f.datum_vystaveni, f.firma_zkratka, f.id as faktura_id,
+                   f.soubor_url, f.cislo_faktury
             FROM polozky p
             JOIN faktury f ON f.id = p.faktura_id
             WHERE p.zbozi_id=?
