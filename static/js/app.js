@@ -183,6 +183,7 @@ function navigateTo(page) {
     vyplaty:    renderVyplaty,
     reporty:    renderReporty,
     statistiky: renderStatistiky,
+    kalkulace:  renderKalkulace,
     "ai-asistent": renderAiAsistent,
     nastaveni:  renderNastaveni,
     banky:      renderBanky,
@@ -1953,6 +1954,243 @@ function exportPolozky(fmt) {
   window.location.href = `/api/export/polozky?${params}`;
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+//  KALKULACE
+// ═══════════════════════════════════════════════════════════════
+let _kalkulaceList = [];
+
+async function renderKalkulace() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">🧮 Kalkulace</h1>
+      <button class="btn btn-primary btn-sm" onclick="openNovaKalkulace()">+ Nová kalkulace</button>
+    </div>
+    <div id="kalkulaceList"><div class="loading-center"><span class="spinner"></span></div></div>`;
+  await loadKalkulaceList();
+}
+
+async function loadKalkulaceList() {
+  const el = document.getElementById("kalkulaceList");
+  if (!el) return;
+  try {
+    _kalkulaceList = await api("/api/kalkulace");
+  } catch { el.innerHTML = "<p>Chyba načítání</p>"; return; }
+  if (!_kalkulaceList.length) {
+    el.innerHTML = `<div style="text-align:center;color:var(--txt2);padding:3rem">
+      Žádné kalkulace. <button class="btn btn-primary btn-sm" onclick="openNovaKalkulace()">+ Přidat první</button>
+    </div>`; return;
+  }
+  el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:1rem;margin-top:1rem">
+    ${_kalkulaceList.map(k => `
+      <div class="card" style="cursor:pointer" onclick="openKalkulaceDetail(${k.id})">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <strong style="font-size:1.05rem">${escHtml(k.nazev)}</strong>
+          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();smazatKalkulaci(${k.id})" title="Smazat">🗑</button>
+        </div>
+        ${k.poznamka ? `<div style="font-size:.85rem;color:var(--txt2);margin-top:.3rem">${escHtml(k.poznamka)}</div>` : ""}
+        <div style="margin-top:.5rem;font-size:.9rem">
+          Prodejní cena: <strong>${czMoney(k.prodejni_cena)}</strong>
+        </div>
+      </div>`).join("")}
+  </div>`;
+}
+
+function openNovaKalkulace() {
+  _openKalkulaceModal(null, { nazev:"", prodejni_cena:"", poznamka:"", polozky:[] });
+}
+
+async function openKalkulaceDetail(id) {
+  const data = await api(`/api/kalkulace/${id}`);
+  _openKalkulaceModal(id, { ...data.kalkulace, polozky: data.polozky });
+}
+
+function _openKalkulaceModal(id, k) {
+  const polozkyHtml = () => {
+    const rows = (k.polozky||[]).map((p,i) => _kalcPolozkaRow(i, p)).join("");
+    return rows || _kalcPolozkaRow(0, {});
+  };
+
+  openModal(id ? `Upravit: ${escHtml(k.nazev)}` : "Nová kalkulace", `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:1rem">
+      <div class="form-group" style="grid-column:1/-1">
+        <label class="form-label">Název produktu *</label>
+        <input id="klNazev" class="form-control" value="${escHtml(k.nazev||"")}" placeholder="Párek v rohlíku, Burger...">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Skutečná prodejní cena (Kč)</label>
+        <input type="number" step="0.01" id="klProdejni" class="form-control" value="${k.prodejni_cena||""}" oninput="kalcPrepocti()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Poznámka</label>
+        <input id="klPoznamka" class="form-control" value="${escHtml(k.poznamka||"")}">
+      </div>
+    </div>
+
+    <h4 style="font-family:var(--font-head);margin:.5rem 0">Suroviny / složení</h4>
+    <table style="width:100%;font-size:.85rem" id="klPolozkyTable">
+      <thead><tr>
+        <th>Surovina</th><th style="width:70px">Mn.</th><th style="width:50px">Jedn.</th>
+        <th style="width:90px">Cena/jedn.</th><th style="width:80px">Balení ks</th>
+        <th style="width:90px">Cena bal.</th><th style="width:70px">Celkem</th><th style="width:30px"></th>
+      </tr></thead>
+      <tbody id="klPolozkyBody">${polozkyHtml()}</tbody>
+    </table>
+    <button class="btn btn-secondary btn-sm" style="margin-top:.5rem" onclick="kalcPridatPolozku()">+ Přidat surovinu</button>
+
+    <div id="kalcVysledek" style="margin-top:1.25rem;padding:1rem;background:var(--bg);border-radius:8px;font-size:.92rem"></div>
+
+    <div style="margin-top:1rem;text-align:right">
+      <button class="btn btn-primary" onclick="ulozitKalkulaci(${id||"null"})">💾 Uložit</button>
+    </div>`);
+
+  // Nastavit event listenery po vykreslení
+  setTimeout(() => {
+    document.querySelectorAll(".kl-cena-j, .kl-mn, .kl-baleni-ks, .kl-baleni-cena").forEach(el => {
+      el.addEventListener("input", kalcPrepocti);
+    });
+    document.querySelectorAll(".kl-nazev").forEach(el => {
+      el.addEventListener("blur", kalcHledatCenu);
+    });
+    kalcPrepocti();
+  }, 50);
+}
+
+function _kalcPolozkaRow(i, p = {}) {
+  return `<tr id="klr_${i}">
+    <td><input class="form-control kl-nazev" style="font-size:.82rem" value="${escHtml(p.nazev||"")}" placeholder="např. párek"></td>
+    <td><input type="number" step="0.001" class="form-control kl-mn" style="font-size:.82rem" value="${p.mnozstvi||1}"></td>
+    <td><input class="form-control kl-jed" style="font-size:.82rem" value="${escHtml(p.jednotka||"ks")}"></td>
+    <td><input type="number" step="0.0001" class="form-control kl-cena-j" style="font-size:.82rem" value="${p.cena_za_jednotku||""}" placeholder="Kč/jedn."></td>
+    <td><input type="number" step="1" class="form-control kl-baleni-ks" style="font-size:.82rem" value="${p.baleni_kusu||1}" placeholder="ks"></td>
+    <td><input type="number" step="0.01" class="form-control kl-baleni-cena" style="font-size:.82rem" value="${p.cena_baleni||""}" placeholder="Kč"></td>
+    <td class="kl-celkem" style="text-align:right;font-weight:600;padding:.3rem">—</td>
+    <td><button type="button" onclick="this.closest('tr').remove();kalcPrepocti()" style="background:none;border:none;cursor:pointer;color:#dc2626">✕</button></td>
+  </tr>`;
+}
+
+let _kalcRowIdx = 100;
+function kalcPridatPolozku() {
+  const tbody = document.getElementById("klPolozkyBody");
+  if (!tbody) return;
+  const tr = document.createElement("tr");
+  tr.id = `klr_${_kalcRowIdx++}`;
+  tr.innerHTML = _kalcPolozkaRow(_kalcRowIdx, {}).replace(/<tr[^>]*>|<\/tr>/g,"");
+  tbody.appendChild(tr);
+  tr.querySelectorAll(".kl-cena-j, .kl-mn, .kl-baleni-ks, .kl-baleni-cena").forEach(el => el.addEventListener("input", kalcPrepocti));
+  tr.querySelector(".kl-nazev").addEventListener("blur", kalcHledatCenu);
+}
+
+async function kalcHledatCenu(e) {
+  const nazev = e.target.value.trim();
+  if (!nazev) return;
+  const tr = e.target.closest("tr");
+  if (!tr) return;
+  try {
+    const r = await api(`/api/kalkulace/cena-polozky?nazev=${encodeURIComponent(nazev)}`);
+    if (r.cena) {
+      const cenaJ = tr.querySelector(".kl-cena-j");
+      if (cenaJ && !cenaJ.value) {
+        cenaJ.value = r.cena.toFixed(4);
+        const jed = tr.querySelector(".kl-jed");
+        if (jed && r.jednotka) jed.value = r.jednotka;
+        toast(`💡 Cena z faktury (${r.dodavatel}, ${czDateShort(r.datum)}): ${czMoney(r.cena)}/${r.jednotka}`);
+        kalcPrepocti();
+      }
+    }
+  } catch {}
+}
+
+function kalcPrepocti() {
+  const rows = document.querySelectorAll("#klPolozkyBody tr");
+  let naklady = 0;
+  rows.forEach(tr => {
+    const mn      = parseFloat(tr.querySelector(".kl-mn")?.value || 1) || 1;
+    const cenaJ   = parseFloat(tr.querySelector(".kl-cena-j")?.value || 0);
+    const baleniKs = parseInt(tr.querySelector(".kl-baleni-ks")?.value || 1) || 1;
+    const baleniC  = parseFloat(tr.querySelector(".kl-baleni-cena")?.value || 0);
+    // Pokud je zadána cena balení, přepočítej cena/ks
+    let cj = cenaJ;
+    if (baleniC && baleniKs) {
+      cj = baleniC / baleniKs;
+      const celaEl = tr.querySelector(".kl-cena-j");
+      if (celaEl && !celaEl.value) celaEl.value = cj.toFixed(4);
+    }
+    const radek = mn * cj;
+    naklady += radek;
+    const cel = tr.querySelector(".kl-celkem");
+    if (cel) cel.textContent = radek ? czMoney(radek) : "—";
+  });
+
+  const prodejni = parseFloat(document.getElementById("klProdejni")?.value || 0);
+  const el = document.getElementById("kalcVysledek");
+  if (!el) return;
+
+  const marze200 = naklady * 3; // náklady + 200% = 3× náklady
+  const skutMarze = prodejni > 0 ? ((prodejni - naklady) / prodejni * 100) : null;
+  const foodCost  = prodejni > 0 ? (naklady / prodejni * 100) : null;
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem">
+      <div>📦 Náklady na suroviny:</div><div><strong>${czMoney(naklady)}</strong></div>
+      <div>💡 Doporučená cena (+200%):</div><div><strong style="color:#16a34a">${czMoney(marze200)}</strong></div>
+      ${prodejni ? `
+      <div>🏷 Skutečná prodejní cena:</div><div><strong>${czMoney(prodejni)}</strong></div>
+      <div>📊 Skutečná marže:</div><div><strong style="color:${skutMarze>50?'#16a34a':skutMarze>30?'#f59e0b':'#dc2626'}">${skutMarze?.toFixed(1)}%</strong></div>
+      <div>🍽 Food cost:</div><div><strong>${foodCost?.toFixed(1)}%</strong></div>
+      ` : ""}
+    </div>`;
+}
+
+function _kalcZiskejPolozky() {
+  const rows = document.querySelectorAll("#klPolozkyBody tr");
+  const polozky = [];
+  rows.forEach(tr => {
+    const nazev = tr.querySelector(".kl-nazev")?.value?.trim();
+    if (!nazev) return;
+    const baleniKs = parseInt(tr.querySelector(".kl-baleni-ks")?.value || 1) || 1;
+    const baleniC  = parseFloat(tr.querySelector(".kl-baleni-cena")?.value || 0);
+    let celaJ = parseFloat(tr.querySelector(".kl-cena-j")?.value || 0);
+    if (baleniC && baleniKs) celaJ = baleniC / baleniKs;
+    polozky.push({
+      nazev,
+      mnozstvi:        parseFloat(tr.querySelector(".kl-mn")?.value || 1),
+      jednotka:        tr.querySelector(".kl-jed")?.value || "ks",
+      cena_za_jednotku: celaJ,
+      baleni_kusu:     baleniKs,
+      cena_baleni:     baleniC,
+      zdroj:           "rucni",
+    });
+  });
+  return polozky;
+}
+
+async function ulozitKalkulaci(id) {
+  const nazev = document.getElementById("klNazev")?.value?.trim();
+  if (!nazev) { toast("Vyplň název produktu"); return; }
+  const payload = {
+    nazev,
+    prodejni_cena: parseFloat(document.getElementById("klProdejni")?.value || 0),
+    poznamka:      document.getElementById("klPoznamka")?.value || "",
+    polozky:       _kalcZiskejPolozky(),
+  };
+  if (id) {
+    await api(`/api/kalkulace/${id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+  } else {
+    await api("/api/kalkulace", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+  }
+  toast("Kalkulace uložena ✓");
+  closeModal();
+  loadKalkulaceList();
+}
+
+async function smazatKalkulaci(id) {
+  if (!confirm("Opravdu smazat tuto kalkulaci?")) return;
+  await api(`/api/kalkulace/${id}`, { method:"DELETE" });
+  toast("Smazáno ✓");
+  loadKalkulaceList();
+}
+
 // ═══════════════════════════════════════════════════════════════
 //  VÝPLATY
 // ═══════════════════════════════════════════════════════════════
@@ -3095,6 +3333,302 @@ async function saveConfig() {
 // ═══════════════════════════════════════════════════════════════
 //  Util
 // ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+//  KALKULACE
+// ═══════════════════════════════════════════════════════════════
+
+async function renderKalkulace() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">🧮 Kalkulace</h1>
+      <button class="btn btn-primary btn-sm" onclick="openNovalKalkulace()">+ Nová kalkulace</button>
+    </div>
+    <div id="kalkulaceList"><div class="loading-center"><span class="spinner"></span></div></div>`;
+  loadKalkulace();
+}
+
+async function loadKalkulace() {
+  const el = document.getElementById("kalkulaceList");
+  if (!el) return;
+  let data;
+  try { data = await api("/api/kalkulace"); } catch { return; }
+  if (!data.length) {
+    el.innerHTML = `<div style="text-align:center;color:var(--txt2);padding:3rem">
+      Žádné kalkulace. <button class="btn btn-primary btn-sm" onclick="openNovalKalkulace()">+ Přidat první</button>
+    </div>`;
+    return;
+  }
+  el.innerHTML = data.map(k => {
+    const naklady = _kalcNaklady(k.polozky);
+    const doporucena = naklady * (1 + (k.cil_marze_pct||200)/100);
+    const skutMarze = k.prodejni_cena > 0 ? ((k.prodejni_cena - naklady) / naklady * 100) : null;
+    return `
+    <div class="card" style="margin-bottom:1rem">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+        <div>
+          <strong style="font-size:1.05rem">${escHtml(k.nazev)}</strong>
+          ${k.popis ? `<small style="color:var(--txt2);margin-left:.5rem">${escHtml(k.popis)}</small>` : ""}
+        </div>
+        <div style="display:flex;gap:.5rem">
+          <button class="btn btn-secondary btn-sm" onclick="openEditKalkulace(${k.id})">✏️ Upravit</button>
+          <button class="btn btn-danger btn-sm" onclick="smazatKalkulaci(${k.id})">🗑</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:1rem;margin-bottom:.75rem">
+        <div style="background:var(--bg);border-radius:8px;padding:.75rem;text-align:center">
+          <div style="font-size:.78rem;color:var(--txt2)">Náklady</div>
+          <div style="font-size:1.2rem;font-weight:700;color:#dc2626">${czMoney(naklady)}</div>
+        </div>
+        <div style="background:var(--bg);border-radius:8px;padding:.75rem;text-align:center">
+          <div style="font-size:.78rem;color:var(--txt2)">Doporučená cena (+${czInt(k.cil_marze_pct||200)}%)</div>
+          <div style="font-size:1.2rem;font-weight:700;color:#2563eb">${czMoney(doporucena)}</div>
+        </div>
+        <div style="background:var(--bg);border-radius:8px;padding:.75rem;text-align:center">
+          <div style="font-size:.78rem;color:var(--txt2)">Skutečná cena</div>
+          <div style="font-size:1.2rem;font-weight:700">${k.prodejni_cena ? czMoney(k.prodejni_cena) : "—"}</div>
+        </div>
+        <div style="background:var(--bg);border-radius:8px;padding:.75rem;text-align:center">
+          <div style="font-size:.78rem;color:var(--txt2)">Skutečná marže</div>
+          <div style="font-size:1.2rem;font-weight:700;color:${skutMarze !== null && skutMarze >= 0 ? '#16a34a' : '#dc2626'}">
+            ${skutMarze !== null ? czInt(skutMarze) + "%" : "—"}
+          </div>
+        </div>
+      </div>
+      <table style="width:100%;font-size:.88rem">
+        <thead><tr style="color:var(--txt2)">
+          <th style="text-align:left;padding:.3rem 0">Surovina</th>
+          <th style="text-align:right">Množství</th>
+          <th style="text-align:right">Cena/jedn.</th>
+          <th style="text-align:right">Celkem</th>
+          <th style="text-align:left;padding-left:.5rem;color:var(--txt2);font-size:.78rem">Zdroj</th>
+        </tr></thead>
+        <tbody>
+          ${k.polozky.map(p => {
+            const cena_ks = p.je_baleni ? (p.cena_za_jednotku / (p.baleni_ks||1)) : p.cena_za_jednotku;
+            const celkem = cena_ks * p.mnozstvi;
+            return `<tr>
+              <td style="padding:.3rem 0">${escHtml(p.nazev)}</td>
+              <td style="text-align:right">${p.mnozstvi} ${escHtml(p.jednotka||"ks")}</td>
+              <td style="text-align:right">${czMoney(cena_ks)}</td>
+              <td style="text-align:right"><strong>${czMoney(celkem)}</strong></td>
+              <td style="padding-left:.5rem;color:var(--txt2);font-size:.78rem">${p.zdroj_ceny==="faktura"?"📄 z FA":"✏️ ručně"}</td>
+            </tr>`;
+          }).join("")}
+        </tbody>
+      </table>
+    </div>`;
+  }).join("");
+}
+
+function _kalcNaklady(polozky) {
+  return (polozky||[]).reduce((s, p) => {
+    const cena_ks = p.je_baleni ? (p.cena_za_jednotku / (p.baleni_ks||1)) : p.cena_za_jednotku;
+    return s + cena_ks * (p.mnozstvi||1);
+  }, 0);
+}
+
+function _kalcModalHtml(k = {}) {
+  const polozky = k.polozky || [];
+  return `
+    <div class="grid-2" style="gap:1rem;margin-bottom:1rem">
+      <div class="form-group"><label class="form-label">Název produktu *</label>
+        <input id="klNazev" class="form-control" value="${escHtml(k.nazev||"")}" placeholder="Párek v rohlíku">
+      </div>
+      <div class="form-group"><label class="form-label">Popis</label>
+        <input id="klPopis" class="form-control" value="${escHtml(k.popis||"")}" placeholder="Volitelný popis">
+      </div>
+      <div class="form-group"><label class="form-label">Cílová marže (%)</label>
+        <input type="number" id="klCilMarze" class="form-control" value="${k.cil_marze_pct||200}">
+      </div>
+      <div class="form-group"><label class="form-label">Skutečná prodejní cena (Kč)</label>
+        <input type="number" step="0.01" id="klProdejniCena" class="form-control" value="${k.prodejni_cena||""}" placeholder="179">
+      </div>
+    </div>
+    <h4 style="font-family:var(--font-head);margin:.5rem 0 .75rem">Suroviny</h4>
+    <div id="klPolozkyWrap">
+      ${polozky.map((p,i) => _kalcPolozkaHtml(i, p)).join("")}
+    </div>
+    <button class="btn btn-secondary btn-sm" style="margin-top:.5rem" onclick="klPridatPolozku()">+ Přidat surovinu</button>
+    <div style="margin-top:1rem;padding:.75rem;background:var(--bg);border-radius:8px" id="klSouhrn"></div>`;
+}
+
+function _kalcPolozkaHtml(i, p = {}) {
+  const jeBaleni = p.je_baleni ? "checked" : "";
+  return `<div class="kl-polozka" id="klp_${i}" style="border:1px solid var(--border);border-radius:8px;padding:.75rem;margin-bottom:.5rem">
+    <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:.5rem;align-items:end">
+      <div class="form-group" style="margin:0">
+        <label class="form-label" style="font-size:.78rem">Surovina</label>
+        <div style="display:flex;gap:.25rem">
+          <input class="form-control kl-nazev" style="font-size:.85rem" value="${escHtml(p.nazev||"")}" placeholder="Párek" oninput="klHledatCenu(this,${i})">
+          <button class="btn btn-secondary btn-sm" title="Hledat v FA" onclick="klHledatCenuBtn(${i})">🔍</button>
+        </div>
+        <div id="klCenaInfo_${i}" style="font-size:.75rem;color:var(--txt2);margin-top:.2rem"></div>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label" style="font-size:.78rem">Množství</label>
+        <input type="number" step="0.001" class="form-control kl-mnozstvi" style="font-size:.85rem" value="${p.mnozstvi||1}" oninput="klRecalc()">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label" style="font-size:.78rem">Jednotka</label>
+        <input class="form-control kl-jednotka" style="font-size:.85rem;width:60px" value="${escHtml(p.jednotka||"ks")}">
+      </div>
+      <button onclick="document.getElementById('klp_${i}').remove();klRecalc()" style="background:none;border:none;cursor:pointer;color:#dc2626;padding:.25rem;margin-top:1.2rem">✕</button>
+    </div>
+    <div style="display:grid;grid-template-columns:auto 1fr 1fr;gap:.5rem;margin-top:.5rem;align-items:center">
+      <label style="font-size:.78rem;display:flex;align-items:center;gap:.3rem;cursor:pointer">
+        <input type="checkbox" class="kl-jebaleni" ${jeBaleni} onchange="klToggleBaleni(${i})"> Balení
+      </label>
+      <div id="klBaleniWrap_${i}" style="display:${p.je_baleni?'':'none'}">
+        <label class="form-label" style="font-size:.78rem">Ks v balení</label>
+        <input type="number" step="1" class="form-control kl-baleni-ks" style="font-size:.85rem" value="${p.baleni_ks||1}" oninput="klRecalc()">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label class="form-label" style="font-size:.78rem">Cena za ${p.je_baleni?'balení':'ks'} (Kč)</label>
+        <input type="number" step="0.01" class="form-control kl-cena" style="font-size:.85rem" value="${p.cena_za_jednotku||""}" data-zdroj="${p.zdroj_ceny||'rucni'}" oninput="this.dataset.zdroj='rucni';klRecalc()">
+      </div>
+    </div>
+  </div>`;
+}
+
+let _klPolozkaIdx = 0;
+function klPridatPolozku() {
+  const wrap = document.getElementById("klPolozkyWrap");
+  if (!wrap) return;
+  const i = Date.now();
+  const div = document.createElement("div");
+  div.innerHTML = _kalcPolozkaHtml(i);
+  wrap.appendChild(div.firstElementChild);
+  klRecalc();
+}
+
+function klToggleBaleni(i) {
+  const chk = document.querySelector(`#klp_${i} .kl-jebaleni`);
+  const wrap = document.getElementById(`klBaleniWrap_${i}`);
+  const cenaLabel = document.querySelector(`#klp_${i} .form-group:last-child label`);
+  if (wrap) wrap.style.display = chk?.checked ? "" : "none";
+  if (cenaLabel) cenaLabel.textContent = `Cena za ${chk?.checked ? "balení" : "ks"} (Kč)`;
+  klRecalc();
+}
+
+let _klHledatTimer = null;
+function klHledatCenu(input, i) {
+  clearTimeout(_klHledatTimer);
+  _klHledatTimer = setTimeout(() => klHledatCenuBtn(i), 800);
+}
+
+async function klHledatCenuBtn(i) {
+  const el = document.querySelector(`#klp_${i}`);
+  if (!el) return;
+  const nazev = el.querySelector(".kl-nazev")?.value?.trim();
+  if (!nazev) return;
+  const info = document.getElementById(`klCenaInfo_${i}`);
+  if (info) info.textContent = "🔍 Hledám...";
+  try {
+    const r = await api(`/api/kalkulace/cena-polozky?nazev=${encodeURIComponent(nazev)}`);
+    if (r.cena !== null) {
+      const cenaInput = el.querySelector(".kl-cena");
+      if (cenaInput && !cenaInput.value) {
+        cenaInput.value = r.cena.toFixed(2);
+        cenaInput.dataset.zdroj = "faktura";
+      }
+      if (info) info.innerHTML = `📄 Nalezeno: ${czMoney(r.cena)}/${r.jednotka||"ks"} – ${escHtml(r.dodavatel||"")} (${czDateShort(r.datum)})`;
+      klRecalc();
+    } else {
+      if (info) info.textContent = "Nenalezeno v FA – zadej ručně";
+    }
+  } catch { if (info) info.textContent = "Chyba hledání"; }
+}
+
+function klRecalc() {
+  const polozky = document.querySelectorAll(".kl-polozka");
+  let naklady = 0;
+  polozky.forEach(p => {
+    const cena = parseFloat(p.querySelector(".kl-cena")?.value || 0);
+    const mnoz = parseFloat(p.querySelector(".kl-mnozstvi")?.value || 1);
+    const jeBaleni = p.querySelector(".kl-jebaleni")?.checked;
+    const baleniKs = parseFloat(p.querySelector(".kl-baleni-ks")?.value || 1);
+    const cena_ks = jeBaleni ? cena / (baleniKs||1) : cena;
+    naklady += cena_ks * mnoz;
+  });
+  const cilMarze = parseFloat(document.getElementById("klCilMarze")?.value || 200);
+  const prodCena = parseFloat(document.getElementById("klProdejniCena")?.value || 0);
+  const doporucena = naklady * (1 + cilMarze/100);
+  const skutMarze = prodCena > 0 ? ((prodCena - naklady) / naklady * 100) : null;
+  const souhrn = document.getElementById("klSouhrn");
+  if (souhrn) souhrn.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.75rem;text-align:center">
+      <div><div style="font-size:.75rem;color:var(--txt2)">Náklady</div><strong style="color:#dc2626">${czMoney(naklady)}</strong></div>
+      <div><div style="font-size:.75rem;color:var(--txt2)">Doporučená (+${czInt(cilMarze)}%)</div><strong style="color:#2563eb">${czMoney(doporucena)}</strong></div>
+      <div><div style="font-size:.75rem;color:var(--txt2)">Skutečná cena</div><strong>${prodCena ? czMoney(prodCena) : "—"}</strong></div>
+      <div><div style="font-size:.75rem;color:var(--txt2)">Skutečná marže</div><strong style="color:${skutMarze!==null&&skutMarze>=0?'#16a34a':'#dc2626'}">${skutMarze!==null?czInt(skutMarze)+"%":"—"}</strong></div>
+    </div>`;
+}
+
+function _kalcGetPayload() {
+  const polozky = [];
+  document.querySelectorAll(".kl-polozka").forEach(p => {
+    const nazev = p.querySelector(".kl-nazev")?.value?.trim();
+    if (!nazev) return;
+    const jeBaleni = p.querySelector(".kl-jebaleni")?.checked || false;
+    polozky.push({
+      nazev,
+      mnozstvi:        parseFloat(p.querySelector(".kl-mnozstvi")?.value || 1),
+      jednotka:        p.querySelector(".kl-jednotka")?.value || "ks",
+      cena_za_jednotku: parseFloat(p.querySelector(".kl-cena")?.value || 0),
+      je_baleni:       jeBaleni,
+      baleni_ks:       parseFloat(p.querySelector(".kl-baleni-ks")?.value || 1),
+      zdroj_ceny:      p.querySelector(".kl-cena")?.dataset?.zdroj || "rucni",
+    });
+  });
+  return {
+    nazev:          document.getElementById("klNazev")?.value?.trim(),
+    popis:          document.getElementById("klPopis")?.value || "",
+    cil_marze_pct:  parseFloat(document.getElementById("klCilMarze")?.value || 200),
+    prodejni_cena:  parseFloat(document.getElementById("klProdejniCena")?.value || 0),
+    polozky,
+  };
+}
+
+function openNovalKalkulace() {
+  openModal("Nová kalkulace", _kalcModalHtml());
+  klRecalc();
+  document.getElementById("modalBody").insertAdjacentHTML("beforeend",
+    `<div class="btn-group" style="margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitKalkulaci()">💾 Uložit</button>
+    </div>`);
+}
+
+async function openEditKalkulace(id) {
+  let k;
+  try { k = await api(`/api/kalkulace/${id}`); } catch { return; }
+  openModal(`Upravit: ${k.nazev}`, _kalcModalHtml(k));
+  klRecalc();
+  document.getElementById("modalBody").insertAdjacentHTML("beforeend",
+    `<div class="btn-group" style="margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitKalkulaci(${id})">💾 Uložit změny</button>
+    </div>`);
+}
+
+async function ulozitKalkulaci(id = null) {
+  const payload = _kalcGetPayload();
+  if (!payload.nazev) { toast("Vyplň název produktu"); return; }
+  if (id) {
+    await api(`/api/kalkulace/${id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+  } else {
+    await api("/api/kalkulace", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+  }
+  toast("Kalkulace uložena ✓");
+  closeModal();
+  renderKalkulace();
+}
+
+async function smazatKalkulaci(id) {
+  if (!confirm("Smazat tuto kalkulaci?")) return;
+  await api(`/api/kalkulace/${id}`, { method:"DELETE" });
+  toast("Smazáno ✓");
+  loadKalkulace();
+}
+
 function renderAiAsistent() {
   const rok = new Date().getFullYear();
   document.getElementById("mainContent").innerHTML = `

@@ -581,6 +581,28 @@ def migrate_db():
             id SERIAL PRIMARY KEY, file_id TEXT UNIQUE, zpracovano_at TEXT)""")
         conn.execute("""CREATE TABLE IF NOT EXISTS drive_channels (
             id SERIAL PRIMARY KEY, channel_id TEXT, resource_id TEXT, expiration TEXT)""")
+    # Kalkulace
+    with get_db() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS kalkulace (
+            id              SERIAL PRIMARY KEY,
+            nazev           TEXT NOT NULL,
+            popis           TEXT DEFAULT '',
+            prodejni_cena   REAL DEFAULT 0,
+            cil_marze_pct   REAL DEFAULT 200,
+            created_at      TEXT DEFAULT NOW(),
+            updated_at      TEXT DEFAULT NOW()
+        )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS kalkulace_polozky (
+            id              SERIAL PRIMARY KEY,
+            kalkulace_id    INTEGER NOT NULL,
+            nazev           TEXT NOT NULL,
+            mnozstvi        REAL DEFAULT 1,
+            jednotka        TEXT DEFAULT 'ks',
+            cena_za_jednotku REAL DEFAULT 0,
+            je_baleni       INTEGER DEFAULT 0,
+            baleni_ks       REAL DEFAULT 1,
+            zdroj_ceny      TEXT DEFAULT 'rucni'
+        )""")
     # paska_url ve vyplaty
     with get_db() as conn:
         if _USE_PG:
@@ -4323,6 +4345,126 @@ def api_oprav_duplicity():
         return jsonify({"ok": True, "opraveno": opraveno})
     except Exception as e:
         return jsonify({"ok": False, "chyba": str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════
+#  KALKULACE
+# ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/kalkulace")
+@vyzaduj_prihlaseni
+def api_kalkulace_list():
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM kalkulace ORDER BY nazev").fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            polozky = conn.execute(
+                "SELECT * FROM kalkulace_polozky WHERE kalkulace_id=? ORDER BY id", (d["id"],)
+            ).fetchall()
+            d["polozky"] = [dict(p) for p in polozky]
+            result.append(d)
+    return jsonify(result)
+
+@app.route("/api/kalkulace/<int:kid>")
+@vyzaduj_prihlaseni
+def api_kalkulace_get(kid):
+    with get_db() as conn:
+        r = conn.execute("SELECT * FROM kalkulace WHERE id=?", (kid,)).fetchone()
+        if not r:
+            return jsonify({"error": "Nenalezeno"}), 404
+        d = dict(r)
+        polozky = conn.execute(
+            "SELECT * FROM kalkulace_polozky WHERE kalkulace_id=? ORDER BY id", (kid,)
+        ).fetchall()
+        d["polozky"] = [dict(p) for p in polozky]
+    return jsonify(d)
+
+@app.route("/api/kalkulace", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_kalkulace_ulozit():
+    data = request.json
+    if not data.get("nazev"):
+        return jsonify({"error": "Chybí název"}), 400
+    polozky = data.pop("polozky", [])
+    with get_db() as conn:
+        cur = conn.execute("""
+            INSERT INTO kalkulace (nazev, popis, prodejni_cena, cil_marze_pct, updated_at)
+            VALUES (?,?,?,?,NOW())
+        """, (data["nazev"], data.get("popis",""),
+              float(data.get("prodejni_cena",0) or 0),
+              float(data.get("cil_marze_pct",200) or 200)))
+        kid = cur.lastrowid
+        for p in polozky:
+            conn.execute("""
+                INSERT INTO kalkulace_polozky
+                (kalkulace_id, nazev, mnozstvi, jednotka, cena_za_jednotku, je_baleni, baleni_ks, zdroj_ceny)
+                VALUES (?,?,?,?,?,?,?,?)
+            """, (kid, p.get("nazev",""), float(p.get("mnozstvi",1) or 1),
+                  p.get("jednotka","ks"), float(p.get("cena_za_jednotku",0) or 0),
+                  1 if p.get("je_baleni") else 0,
+                  float(p.get("baleni_ks",1) or 1), p.get("zdroj_ceny","rucni")))
+    return jsonify({"ok": True, "id": kid})
+
+@app.route("/api/kalkulace/<int:kid>", methods=["PUT"])
+@vyzaduj_prihlaseni
+def api_kalkulace_edit(kid):
+    data = request.json
+    polozky = data.pop("polozky", [])
+    with get_db() as conn:
+        conn.execute("""
+            UPDATE kalkulace SET nazev=?, popis=?, prodejni_cena=?, cil_marze_pct=?, updated_at=NOW()
+            WHERE id=?
+        """, (data.get("nazev",""), data.get("popis",""),
+              float(data.get("prodejni_cena",0) or 0),
+              float(data.get("cil_marze_pct",200) or 200), kid))
+        conn.execute("DELETE FROM kalkulace_polozky WHERE kalkulace_id=?", (kid,))
+        for p in polozky:
+            conn.execute("""
+                INSERT INTO kalkulace_polozky
+                (kalkulace_id, nazev, mnozstvi, jednotka, cena_za_jednotku, je_baleni, baleni_ks, zdroj_ceny)
+                VALUES (?,?,?,?,?,?,?,?)
+            """, (kid, p.get("nazev",""), float(p.get("mnozstvi",1) or 1),
+                  p.get("jednotka","ks"), float(p.get("cena_za_jednotku",0) or 0),
+                  1 if p.get("je_baleni") else 0,
+                  float(p.get("baleni_ks",1) or 1), p.get("zdroj_ceny","rucni")))
+    return jsonify({"ok": True})
+
+@app.route("/api/kalkulace/<int:kid>", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_kalkulace_smazat(kid):
+    with get_db() as conn:
+        conn.execute("DELETE FROM kalkulace_polozky WHERE kalkulace_id=?", (kid,))
+        conn.execute("DELETE FROM kalkulace WHERE id=?", (kid,))
+    return jsonify({"ok": True})
+
+@app.route("/api/kalkulace/cena-polozky")
+@vyzaduj_prihlaseni
+def api_kalkulace_cena_polozky():
+    """Najde poslední cenu položky z faktur podle názvu (fuzzy match)."""
+    nazev = request.args.get("nazev", "").strip()
+    if not nazev:
+        return jsonify({"cena": None, "zdroj": None})
+    with get_db() as conn:
+        # Hledáme v položkách faktur – poslední faktura kde se položka vyskytuje
+        row = conn.execute("""
+            SELECT p.cena_za_jednotku_s_dph, p.jednotka, f.datum_vystaveni, f.dodavatel
+            FROM polozky p
+            JOIN faktury f ON f.id = p.faktura_id
+            WHERE LOWER(p.nazev) LIKE LOWER(?)
+            ORDER BY f.datum_vystaveni DESC
+            LIMIT 1
+        """, (f"%{nazev}%",)).fetchone()
+        if row:
+            d = dict(row)
+            return jsonify({
+                "cena": float(d["cena_za_jednotku_s_dph"]),
+                "jednotka": d["jednotka"],
+                "datum": d["datum_vystaveni"],
+                "dodavatel": d["dodavatel"],
+                "zdroj": "faktura"
+            })
+    return jsonify({"cena": None, "zdroj": None})
 
 
 @app.route("/ping")
