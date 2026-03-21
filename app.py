@@ -531,6 +531,7 @@ def migrate_db():
                     END $$;
                 """)
             except Exception: pass
+            cur2 = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='faktury'")
             fakt_cols = [r["column_name"] for r in cur2.fetchall()]
         else:
             fakt_cols = [row[1] for row in conn.execute("PRAGMA table_info(faktury)").fetchall()]
@@ -2923,8 +2924,7 @@ def api_report_update(rid):
         trzba_vcpk = trzba + pk_celkem
 
         # Zachovat stávající soubor_url pokud nebylo nahráno nové
-        ex = dict(existing) if hasattr(existing, "keys") else dict(zip([d[0] for d in conn.execute("SELECT * FROM reporty WHERE id=?", (rid,)).description or []], existing))
-        soubor_url = data.get("soubor_url") or (existing["soubor_url"] if isinstance(existing, dict) else None)
+        soubor_url = data.get("soubor_url") or (existing.get("soubor_url") if hasattr(existing, "get") else None)
 
         conn.execute("""
             UPDATE reporty SET datum=?,den=?,smena=?,karty=?,kov=?,papir=?,hotovost=?,
