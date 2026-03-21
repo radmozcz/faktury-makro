@@ -519,17 +519,15 @@ def migrate_db():
         # Odebrat UNIQUE constraint na datum v reporty (povolit duplicity)
         if _USE_PG:
             try:
-                conn.execute("""
-                    DO $$ BEGIN
-                        IF EXISTS (
-                            SELECT 1 FROM information_schema.table_constraints
-                            WHERE table_name='reporty' AND constraint_type='UNIQUE'
-                            AND constraint_name LIKE '%datum%'
-                        ) THEN
-                            ALTER TABLE reporty DROP CONSTRAINT reporty_datum_key;
-                        END IF;
-                    END $$;
-                """)
+                # Zjistit název constraintu
+                row = conn.execute("""
+                    SELECT constraint_name FROM information_schema.table_constraints
+                    WHERE table_name='reporty' AND constraint_type='UNIQUE'
+                    AND constraint_name LIKE '%datum%'
+                """).fetchone()
+                if row:
+                    cname = row["constraint_name"] if isinstance(row, dict) else row[0]
+                    conn.execute(f"ALTER TABLE reporty DROP CONSTRAINT {cname}")
             except Exception: pass
             cur2 = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='faktury'")
             fakt_cols = [r["column_name"] for r in cur2.fetchall()]
