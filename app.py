@@ -3145,6 +3145,45 @@ def api_karty_alert():
     })
 
 
+@app.route("/api/statistiky/trzby-mesice")
+@vyzaduj_prihlaseni
+def api_statistiky_trzby_mesice():
+    firma = request.args.get("firma", "")
+    rok   = request.args.get("rok", "")
+    clauses = ["datum <= ?"]
+    params  = [date.today().isoformat()]
+    if firma:
+        clauses.append("firma_zkratka=?"); params.append(firma)
+    if rok:
+        clauses.append("datum >= ?"); params.append(f"{rok}-01-01")
+        clauses.append("datum <= ?"); params.append(f"{rok}-12-31")
+    where = "WHERE " + " AND ".join(clauses)
+    with get_db() as conn:
+        rows = conn.execute(f"""
+            SELECT
+                TO_CHAR(NULLIF(datum,'')::date,'YYYY') as rok,
+                TO_CHAR(NULLIF(datum,'')::date,'MM')   as mesic,
+                COUNT(*) as dni,
+                ROUND(SUM(karty+hotovost+vydaje)::numeric,0)  as trzba,
+                ROUND(SUM(trzba_vcpk)::numeric,0)             as trzba_vcpk,
+                ROUND(SUM(karty)::numeric,0)                  as karty,
+                ROUND(SUM(hotovost)::numeric,0)               as hotovost,
+                COALESCE(SUM(pk50_ks),0)                      as pk50,
+                COALESCE(SUM(pk100_ks),0)                     as pk100,
+                COALESCE(SUM(pizza_cela),0)                   as pizza,
+                COALESCE(SUM(pizza_ctvrt),0)                  as pizza_ctvrt,
+                COALESCE(SUM(burger),0)                       as burger,
+                COALESCE(SUM(burtgulas),0)                    as bgulas
+            FROM reporty {where}
+            AND trzba_vcpk > 0
+            GROUP BY rok, mesic
+            ORDER BY rok DESC, mesic DESC
+        """, params).fetchall()
+    from decimal import Decimal
+    def _f(v): return int(v) if isinstance(v, Decimal) else (float(v) if v is not None else 0)
+    return jsonify([{k: _f(v) for k,v in dict(r).items()} for r in rows])
+
+
 @app.route("/api/statistiky/mesice")
 @vyzaduj_prihlaseni
 def api_statistiky_mesice():

@@ -2859,9 +2859,48 @@ async function renderStatistiky() {
   const od = new Date(); od.setFullYear(od.getFullYear()-1);
   const odStr = od.toISOString().split("T")[0];
   const doStr = new Date().toISOString().split("T")[0];
+  const rokAkt = new Date().getFullYear();
 
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header"><h1 class="page-title">Statistiky</h1></div>
+
+    <div class="card" style="margin-bottom:1.5rem">
+      <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;flex-wrap:wrap">
+        <label style="font-size:.85rem;color:var(--txt2)">Rok:</label>
+        <select id="tmRok" onchange="loadTrzbyMesice()" style="font-size:.85rem">
+          <option value="">Vše</option>
+          ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}">${r}</option>`).join("")}
+        </select>
+        <label style="font-size:.85rem;color:var(--txt2)">Firma:</label>
+        <select id="tmFirma" class="firma-select" onchange="loadTrzbyMesice()" style="font-size:.85rem">
+          <option value="">Všechny</option>
+          ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+        </select>
+      </div>
+      <div id="tmTabulka"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:1.5rem">
+      <div class="card-title">📅 Měsíční přehled – tržby a náklady</div>
+      <div class="filters" style="margin-bottom:1rem;flex-wrap:wrap;gap:.5rem">
+        <label>Firma:</label>
+        <select id="srFirma" class="firma-select" onchange="loadStatRozsirene()">
+          <option value="">Všechny</option>
+          ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
+        </select>
+        <label>Rok:</label>
+        <select id="srRok" onchange="loadStatRozsirene()">
+          ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}">${r}</option>`).join("")}
+        </select>
+        <label>Porovnat s:</label>
+        <select id="srRok2" onchange="loadStatRozsirene()">
+          <option value="">—</option>
+          ${[rokAkt,rokAkt-1,rokAkt-2,rokAkt-3,rokAkt-4].map(r=>`<option value="${r}">${r}</option>`).join("")}
+        </select>
+      </div>
+      <div id="statRozsirene"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>
+
     <div class="filters" style="margin-bottom:1rem">
       <label>Firma:</label>
       <select id="sFirma" class="firma-select" onchange="loadPrehledStatistik();loadMesicniStatistiky()">
@@ -2880,9 +2919,173 @@ async function renderStatistiky() {
     <div id="statPrehled" style="margin-top:1.5rem"></div>
     <div id="statReporty" style="margin-top:1.5rem"></div>`;
 
+  loadTrzbyMesice();
+  loadStatRozsirene();
   loadStatistiky();
   loadPrehledStatistik();
   loadMesicniStatistiky();
+}
+
+const MCZ_NAZVY = ["","Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
+
+async function loadTrzbyMesice() {
+  const el = document.getElementById("tmTabulka");
+  if (!el) return;
+  el.innerHTML = `<div class="loading-center"><span class="spinner"></span></div>`;
+  const firma = document.getElementById("tmFirma")?.value || "";
+  const rok   = document.getElementById("tmRok")?.value || "";
+  let data;
+  try { data = await api(`/api/statistiky/trzby-mesice?firma=${encodeURIComponent(firma)}&rok=${rok}`); }
+  catch { el.innerHTML = "Chyba načítání"; return; }
+  if (!data.length) { el.innerHTML = `<div style="color:var(--txt2);padding:1rem;text-align:center">Žádná data</div>`; return; }
+
+  const _n = v => (v||0).toLocaleString("cs-CZ");
+  const _f = v => v ? (v/1).toFixed(1) : "—";
+
+  // Součty
+  const tot = {trzba:0,trzba_vcpk:0,karty:0,hotovost:0,pk50:0,pk100:0,pizza:0,pizza_ctvrt:0,burger:0,bgulas:0,dni:0};
+  data.forEach(d => { Object.keys(tot).forEach(k => tot[k] += d[k]||0); });
+
+  // Unikátní roky pro záhlaví skupin
+  const roky = [...new Set(data.map(d=>d.rok))];
+
+  let rows = "";
+  data.forEach(d => {
+    const mi = parseInt(d.mesic);
+    const id = `tm_${d.rok}_${d.mesic}`;
+    const dn = d.dni || 1;
+    rows += `
+    <tr class="tm-month" onclick="toggleTmDetail('${id}')" style="cursor:pointer">
+      <td><span id="arr_${id}" style="display:inline-block;margin-right:4px;font-size:10px;transition:transform .15s">&#9654;</span>
+        <strong>${roky.length>1?d.rok+" – ":""}${MCZ_NAZVY[mi]||d.mesic}</strong>
+      </td>
+      <td style="text-align:right">${_n(d.trzba)}</td>
+      <td style="text-align:right">${_n(d.trzba_vcpk)}</td>
+      <td style="text-align:right">${_n(d.karty)}</td>
+      <td style="text-align:right">${_n(d.hotovost)}</td>
+      <td style="text-align:right">${_n(d.pk50)}</td>
+      <td style="text-align:right">${_n(d.pk100)}</td>
+      <td style="text-align:right">${_n(d.pizza)}</td>
+      <td style="text-align:right">${_n(d.pizza_ctvrt)}</td>
+      <td style="text-align:right">${_n(d.burger)}</td>
+      <td style="text-align:right">${_n(d.bgulas)}</td>
+    </tr>
+    <tr style="background:var(--bg);font-size:.8rem;color:var(--txt2)">
+      <td style="padding-left:1.5rem">ø/den (${d.dni} dní)</td>
+      <td style="text-align:right">${_n(Math.round(d.trzba/dn))}</td>
+      <td style="text-align:right">${_n(Math.round(d.trzba_vcpk/dn))}</td>
+      <td style="text-align:right">${_n(Math.round(d.karty/dn))}</td>
+      <td style="text-align:right">${_n(Math.round(d.hotovost/dn))}</td>
+      <td style="text-align:right">${_f(d.pk50/dn)}</td>
+      <td style="text-align:right">${_f(d.pk100/dn)}</td>
+      <td style="text-align:right">${_f(d.pizza/dn)}</td>
+      <td style="text-align:right">${_f(d.pizza_ctvrt/dn)}</td>
+      <td style="text-align:right">${_f(d.burger/dn)}</td>
+      <td style="text-align:right">${_f(d.bgulas/dn)}</td>
+    </tr>
+    <tr id="${id}" style="display:none">
+      <td colspan="11" style="padding:0">
+        <div id="${id}_content" style="padding:.5rem 1rem;background:var(--bg)">
+          <div class="loading-center"><span class="spinner"></span></div>
+        </div>
+      </td>
+    </tr>`;
+  });
+
+  const totDni = tot.dni || 1;
+  el.innerHTML = `<div style="overflow-x:auto"><table style="width:100%;min-width:800px;border-collapse:collapse;font-size:.85rem">
+    <thead><tr style="font-size:.78rem;color:var(--txt2);border-bottom:1px solid var(--border)">
+      <th style="text-align:left;padding:6px 8px;min-width:130px">Měsíc</th>
+      <th style="text-align:right;padding:6px 8px">Tržba</th>
+      <th style="text-align:right;padding:6px 8px">Tržba vč.PK</th>
+      <th style="text-align:right;padding:6px 8px">Karty</th>
+      <th style="text-align:right;padding:6px 8px">Hotovost</th>
+      <th style="text-align:right;padding:6px 8px">PK 50</th>
+      <th style="text-align:right;padding:6px 8px">PK 100</th>
+      <th style="text-align:right;padding:6px 8px">Pizza</th>
+      <th style="text-align:right;padding:6px 8px">¼ Pizza</th>
+      <th style="text-align:right;padding:6px 8px">Burger</th>
+      <th style="text-align:right;padding:6px 8px">B-guláš</th>
+    </tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr style="font-weight:600;border-top:1.5px solid var(--border)">
+      <td style="padding:6px 8px">Celkem</td>
+      <td style="text-align:right;padding:6px 8px">${_n(tot.trzba)}</td>
+      <td style="text-align:right;padding:6px 8px">${_n(tot.trzba_vcpk)}</td>
+      <td style="text-align:right;padding:6px 8px">${_n(tot.karty)}</td>
+      <td style="text-align:right;padding:6px 8px">${_n(tot.hotovost)}</td>
+      <td style="text-align:right;padding:6px 8px">${_n(tot.pk50)}</td>
+      <td style="text-align:right;padding:6px 8px">${_n(tot.pk100)}</td>
+      <td style="text-align:right;padding:6px 8px">${_n(tot.pizza)}</td>
+      <td style="text-align:right;padding:6px 8px">${_n(tot.pizza_ctvrt)}</td>
+      <td style="text-align:right;padding:6px 8px">${_n(tot.burger)}</td>
+      <td style="text-align:right;padding:6px 8px">${_n(tot.bgulas)}</td>
+    </tr>
+    <tr style="font-size:.78rem;color:var(--txt2)">
+      <td style="padding:4px 8px">ø/den celkem</td>
+      <td style="text-align:right;padding:4px 8px">${_n(Math.round(tot.trzba/totDni))}</td>
+      <td style="text-align:right;padding:4px 8px">${_n(Math.round(tot.trzba_vcpk/totDni))}</td>
+      <td style="text-align:right;padding:4px 8px">${_n(Math.round(tot.karty/totDni))}</td>
+      <td style="text-align:right;padding:4px 8px">${_n(Math.round(tot.hotovost/totDni))}</td>
+      <td style="text-align:right;padding:4px 8px">${_f(tot.pk50/totDni)}</td>
+      <td style="text-align:right;padding:4px 8px">${_f(tot.pk100/totDni)}</td>
+      <td style="text-align:right;padding:4px 8px">${_f(tot.pizza/totDni)}</td>
+      <td style="text-align:right;padding:4px 8px">${_f(tot.pizza_ctvrt/totDni)}</td>
+      <td style="text-align:right;padding:4px 8px">${_f(tot.burger/totDni)}</td>
+      <td style="text-align:right;padding:4px 8px">${_f(tot.bgulas/totDni)}</td>
+    </tr></tfoot>
+  </table></div>`;
+}
+
+async function toggleTmDetail(id) {
+  const row = document.getElementById(id);
+  const arr = document.getElementById(`arr_${id}`);
+  if (!row) return;
+  const open = row.style.display !== "none";
+  row.style.display = open ? "none" : "";
+  if (arr) arr.style.transform = open ? "" : "rotate(90deg)";
+  if (!open) {
+    // Načíst denní data
+    const [_, rok, mesic] = id.split("_");
+    const firma = document.getElementById("tmFirma")?.value || "";
+    const content = document.getElementById(`${id}_content`);
+    if (!content) return;
+    let dny;
+    try { dny = await api(`/api/statistiky/mesic-detail?rok=${rok}&mesic=${mesic}&firma=${encodeURIComponent(firma)}`); }
+    catch { content.innerHTML = "Chyba"; return; }
+    if (!dny.length) { content.innerHTML = `<div style="color:var(--txt2);padding:.5rem">Žádná data</div>`; return; }
+    const _n = v => (v||0).toLocaleString("cs-CZ");
+    content.innerHTML = `<table style="width:100%;font-size:.82rem;border-collapse:collapse">
+      <thead><tr style="color:var(--txt2);font-size:.75rem">
+        <th style="text-align:left;padding:4px 8px">Datum</th>
+        <th style="text-align:left;padding:4px 8px">Den</th>
+        <th style="text-align:right;padding:4px 8px">Tržba</th>
+        <th style="text-align:right;padding:4px 8px">Tržba vč.PK</th>
+        <th style="text-align:right;padding:4px 8px">Karty</th>
+        <th style="text-align:right;padding:4px 8px">Hotovost</th>
+        <th style="text-align:right;padding:4px 8px">PK 50</th>
+        <th style="text-align:right;padding:4px 8px">PK 100</th>
+        <th style="text-align:right;padding:4px 8px">Pizza</th>
+        <th style="text-align:right;padding:4px 8px">¼</th>
+        <th style="text-align:right;padding:4px 8px">Burger</th>
+        <th style="text-align:right;padding:4px 8px">B-guláš</th>
+      </tr></thead>
+      <tbody>${dny.map(d=>`<tr style="border-top:0.5px solid var(--border)">
+        <td style="padding:4px 8px;white-space:nowrap">${czDateShort(d.datum)}</td>
+        <td style="padding:4px 8px;color:var(--txt2)">${escHtml(d.den||"")}</td>
+        <td style="text-align:right;padding:4px 8px">${_n(Math.round((d.karty||0)+(d.hotovost||0)+(d.vydaje||0)))}</td>
+        <td style="text-align:right;padding:4px 8px"><strong>${_n(d.trzba)}</strong></td>
+        <td style="text-align:right;padding:4px 8px">${_n(d.karty)}</td>
+        <td style="text-align:right;padding:4px 8px">${_n(d.hotovost)}</td>
+        <td style="text-align:right;padding:4px 8px">${d.pk50_ks||"—"}</td>
+        <td style="text-align:right;padding:4px 8px">${d.pk100_ks||"—"}</td>
+        <td style="text-align:right;padding:4px 8px">${d.pizza_cela||"—"}</td>
+        <td style="text-align:right;padding:4px 8px">${d.pizza_ctvrt||"—"}</td>
+        <td style="text-align:right;padding:4px 8px">${d.burger||"—"}</td>
+        <td style="text-align:right;padding:4px 8px">${d.burtgulas||"—"}</td>
+      </tr>`).join("")}</tbody>
+    </table>`;
+  }
 }
 
 async function loadStatistiky() {
