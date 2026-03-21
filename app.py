@@ -498,6 +498,20 @@ def migrate_db():
                 try: conn.execute(f"ALTER TABLE vyplaty ADD COLUMN {col} {typ}")
                 except Exception: pass
 
+    # Odebrat UNIQUE constraint na datum v reporty – samostatná transakce
+    if _USE_PG:
+        try:
+            with get_db() as conn2:
+                row = conn2.execute("""
+                    SELECT constraint_name FROM information_schema.table_constraints
+                    WHERE table_name='reporty' AND constraint_type='UNIQUE'
+                    AND constraint_name LIKE '%datum%'
+                """).fetchone()
+                if row:
+                    cname = row["constraint_name"] if isinstance(row, dict) else row[0]
+                    conn2.execute(f"ALTER TABLE reporty DROP CONSTRAINT {cname}")
+        except Exception: pass
+
     with get_db() as conn:
         if _USE_PG:
             cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='reporty'")
@@ -513,22 +527,7 @@ def migrate_db():
             if col not in existing:
                 try: conn.execute(f"ALTER TABLE reporty ADD COLUMN {col} {typ}")
                 except Exception: pass
-        if "duplicita_id" not in existing:
-            try: conn.execute("ALTER TABLE reporty ADD COLUMN duplicita_id INTEGER")
-            except Exception: pass
-        # Odebrat UNIQUE constraint na datum v reporty (povolit duplicity)
         if _USE_PG:
-            try:
-                # Zjistit název constraintu
-                row = conn.execute("""
-                    SELECT constraint_name FROM information_schema.table_constraints
-                    WHERE table_name='reporty' AND constraint_type='UNIQUE'
-                    AND constraint_name LIKE '%datum%'
-                """).fetchone()
-                if row:
-                    cname = row["constraint_name"] if isinstance(row, dict) else row[0]
-                    conn.execute(f"ALTER TABLE reporty DROP CONSTRAINT {cname}")
-            except Exception: pass
             cur2 = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='faktury'")
             fakt_cols = [r["column_name"] for r in cur2.fetchall()]
         else:
