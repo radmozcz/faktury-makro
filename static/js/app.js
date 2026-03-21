@@ -2985,7 +2985,8 @@ async function renderNastaveni() {
         <div style="font-size:.85rem;font-weight:600;margin-bottom:.5rem">📋 Uložené zálohy v Google Cloud</div>
         <div id="zalohySeznam"><div class="loading-center"><span class="spinner"></span></div></div>
       </div>
-        <button class="btn" style="background:#2563eb;color:#fff" onclick="stahnoutZalohu()">📦 Stáhnout zálohu DB</button>
+        <button class="btn" style="background:#2563eb;color:#fff" onclick="stahnoutZalohu()">📦 Vytvořit zálohu DB (GCS)</button>
+        <button class="btn btn-secondary btn-sm" style="margin-left:.5rem" onclick="stahnoutSqlDump()">⬇ SQL dump</button>
       </div>
 
       <hr style="margin:1.5rem 0">
@@ -2996,7 +2997,7 @@ async function renderNastaveni() {
         <p style="color:var(--txt2);font-size:.85rem;margin-bottom:1rem">
           Admin má vždy vše. Kliknutím na čtvereček povoluješ nebo zakazuješ přístup.
         </p>
-        <table style="width:100%;border-collapse:collapse">
+        <table style="max-width:500px;border-collapse:collapse">
           <thead>
             <tr style="border-bottom:2px solid var(--border)">
               <th style="padding:.5rem;text-align:left">Sekce</th>
@@ -3024,15 +3025,7 @@ async function renderNastaveni() {
         <span id="driveCheckStatus" style="margin-left:.75rem;font-size:.9rem;color:var(--txt2)"></span>
       </div>
 
-      <hr style="margin:1.5rem 0">
-      <div style="border:1px solid var(--border);border-radius:8px;padding:1rem">
-        <div style="font-weight:600;margin-bottom:.5rem">💾 Záloha databáze</div>
-        <div style="color:var(--txt2);font-size:.9rem;margin-bottom:.75rem">
-          Stáhne kompletní SQL dump celé databáze (PostgreSQL). Doporučujeme zálohovat pravidelně.
-        </div>
-        <button class="btn btn-primary" onclick="stahnoutZalohu()">⬇ Stáhnout zálohu (.sql)</button>
-        <span id="zalohaStatus" style="margin-left:.75rem;font-size:.9rem;color:var(--txt2)"></span>
-      </div>
+
 
       <hr style="margin:1.5rem 0">
       <div style="border:1px solid #e55;border-radius:8px;padding:1rem;background:#fff5f5">
@@ -3194,7 +3187,7 @@ async function zkontrolovatDriveNyni() {
   }
 }
 
-async function stahnoutZalohu() {
+async function stahnoutSqlDump() {
   const statusEl = document.getElementById("zalohaStatus");
   if (statusEl) statusEl.textContent = "⏳ Připravuji zálohu...";
   try {
