@@ -1770,6 +1770,166 @@ def api_dashboard():
         "karty_limit": 1500000,
     })
 
+@app.route("/api/nastenka-check")
+@vyzaduj_prihlaseni
+def api_nastenka_check():
+    import datetime as _dt
+    dnes = _dt.date.today().isoformat()
+    cfg = load_config()
+    terminal_limit = cfg.get("terminal_limit", 100000)
+    dph_limit = cfg.get("dph_limit", 1800000)
+    rok = str(_dt.date.today().year)
+    mesic_str = _dt.date.today().strftime("%Y-%m")
+    mesic_prvni = mesic_str + "-01"
+
+    result = {}
+
+    with get_db() as conn:
+        # 1. Přijaté faktury po splatnosti
+        r = conn.execute("""
+            SELECT COUNT(*) as pocet, COALESCE(SUM(celkem_s_dph),0) as castka
+            FROM faktury WHERE stav='po_splatnosti'
+        """).fetchone()
+        pocet_po_spl = int(_first_val(r) if not isinstance(r, dict) else r["pocet"])
+        castka_po_spl = float(r["castka"] if isinstance(r, dict) else r[1])
+        rows_po_spl = conn.execute("""
+            SELECT id, dodavatel, cislo_faktury, datum_splatnosti, celkem_s_dph, firma_zkratka
+            FROM faktury WHERE stav='po_splatnosti'
+            ORDER BY datum_splatnosti ASC LIMIT 5
+        """).fetchall()
+        result["faktury_po_splatnosti"] = {
+            "pocet": pocet_po_spl,
+            "castka": round(castka_po_spl, 2),
+            "items": [dict(r) for r in rows_po_spl],
+            "stav": "ok" if pocet_po_spl == 0 else "error",
+        }
+
+        # 2. Přijaté faktury čekající na zaplacení (stav ceka, datum splatnosti budoucí)
+        r2 = conn.execute("""
+            SELECT COUNT(*) as pocet, COALESCE(SUM(celkem_s_dph),0) as castka
+            FROM faktury WHERE stav='ceka'
+        """).fetchone()
+        pocet_ceka = int(r2["pocet"] if isinstance(r2, dict) else r2[0])
+        castka_ceka = float(r2["castka"] if isinstance(r2, dict) else r2[1])
+        rows_ceka = conn.execute("""
+            SELECT id, dodavatel, cislo_faktury, datum_splatnosti, celkem_s_dph, firma_zkratka
+            FROM faktury WHERE stav='ceka'
+            ORDER BY datum_splatnosti ASC LIMIT 5
+        """).fetchall()
+        result["faktury_cekajici"] = {
+            "pocet": pocet_ceka,
+            "castka": round(castka_ceka, 2),
+            "items": [dict(r) for r in rows_ceka],
+            "stav": "ok" if pocet_ceka == 0 else "warning",
+        }
+
+        # 3. Duplicitní faktury nevyřešené
+        r3 = conn.execute("""
+            SELECT COUNT(*) as pocet, COALESCE(SUM(celkem_s_dph),0) as castka
+            FROM faktury WHERE stav='duplikat'
+        """).fetchone()
+        pocet_dup = int(r3["pocet"] if isinstance(r3, dict) else r3[0])
+        castka_dup = float(r3["castka"] if isinstance(r3, dict) else r3[1])
+        result["duplicitni_faktury"] = {
+            "pocet": pocet_dup,
+            "castka": round(castka_dup, 2),
+            "stav": "ok" if pocet_dup == 0 else "error",
+        }
+
+        # 4. Vystavené faktury po splatnosti (Bauhaus nezaplatil)
+        r4 = conn.execute("""
+            SELECT COUNT(*) as pocet, COALESCE(SUM(castka),0) as castka
+            FROM vystavene_faktury
+            WHERE stav='nezaplaceno'
+              AND datum_splatnosti != '' AND datum_splatnosti IS NOT NULL
+              AND datum_splatnosti < ?
+        """, (dnes,)).fetchone()
+        pocet_vyst = int(r4["pocet"] if isinstance(r4, dict) else r4[0])
+        castka_vyst = float(r4["castka"] if isinstance(r4, dict) else r4[1])
+        rows_vyst = conn.execute("""
+            SELECT id, odberatel, cislo_faktury, datum_splatnosti, castka, firma_zkratka
+            FROM vystavene_faktury
+            WHERE stav='nezaplaceno'
+              AND datum_splatnosti != '' AND datum_splatnosti IS NOT NULL
+              AND datum_splatnosti < ?
+            ORDER BY datum_splatnosti ASC LIMIT 5
+        """, (dnes,)).fetchall()
+        result["vystavene_po_splatnosti"] = {
+            "pocet": pocet_vyst,
+            "castka": round(castka_vyst, 2),
+            "items": [dict(r) for r in rows_vyst],
+            "stav": "ok" if pocet_vyst == 0 else "error",
+        }
+
+        # 5. Terminál — karty aktuální měsíc
+        r5 = conn.execute("""
+            SELECT COALESCE(SUM(karty),0) as total FROM reporty
+            WHERE datum >= ?
+        """, (mesic_prvni,)).fetchone()
+        karty_mesic = float(_first_val(r5))
+        terminal_pct = round(karty_mesic / terminal_limit * 100, 1) if terminal_limit else 0
+        result["terminal_limit"] = {
+            "castka": round(karty_mesic, 2),
+            "limit": terminal_limit,
+            "procent": terminal_pct,
+            "stav": "ok" if terminal_pct < 80 else ("error" if terminal_pct >= 100 else "warning"),
+        }
+
+        # 6. DPH rok — karty od 1.1.
+        r6 = conn.execute("""
+            SELECT COALESCE(SUM(karty),0) as total FROM reporty
+            WHERE datum >= ?
+        """, (f"{rok}-01-01",)).fetchone()
+        karty_rok = float(_first_val(r6))
+        dph_pct = round(karty_rok / dph_limit * 100, 1) if dph_limit else 0
+        result["dph_limit"] = {
+            "castka": round(karty_rok, 2),
+            "limit": dph_limit,
+            "procent": dph_pct,
+            "stav": "ok" if dph_pct < 75 else ("error" if dph_pct >= 100 else "warning"),
+        }
+
+        # 7. Duplicitní reporty
+        r7 = conn.execute("""
+            SELECT COUNT(*) as pocet FROM reporty
+            WHERE duplicita_id IS NOT NULL
+        """).fetchone()
+        pocet_dup_rep = int(r7["pocet"] if isinstance(r7, dict) else r7[0])
+        result["duplicitni_reporty"] = {
+            "pocet": pocet_dup_rep,
+            "stav": "ok" if pocet_dup_rep == 0 else "warning",
+        }
+
+    # 8. Záloha starší 7 dní
+    try:
+        bucket = get_gcs_client()
+        zaloha_stav = "ok"
+        zaloha_info = ""
+        if bucket:
+            blobs = sorted(
+                [b for b in bucket.list_blobs(prefix="zalohy/") if b.name.endswith(".json") or b.name.endswith(".sql")],
+                key=lambda b: b.updated, reverse=True
+            )
+            if blobs:
+                last = blobs[0]
+                stari = (_dt.datetime.now(_dt.timezone.utc) - last.updated).days
+                zaloha_info = last.name.replace("zalohy/", "")
+                zaloha_stav = "ok" if stari <= 7 else "warning"
+                result["zaloha"] = {
+                    "stav": zaloha_stav,
+                    "soubor": zaloha_info,
+                    "dni_stari": stari,
+                }
+            else:
+                result["zaloha"] = {"stav": "warning", "soubor": "", "dni_stari": 999}
+        else:
+            result["zaloha"] = {"stav": "warning", "soubor": "", "dni_stari": -1}
+    except Exception:
+        result["zaloha"] = {"stav": "warning", "soubor": "", "dni_stari": -1}
+
+    return jsonify(result)
+
+
 @app.route("/api/faktury")
 @vyzaduj_prihlaseni
 def api_faktury():

@@ -446,56 +446,175 @@ function drawLineChart(canvasId, labels, datasets) {
 //  DASHBOARD
 // ═══════════════════════════════════════════════════════════════
 async function renderDashboard() {
-  const firma = document.getElementById("globalFirmaFilter")?.value || "";
-  const qs = firma ? `?firma=${firma}` : "";
   document.getElementById("mainContent").innerHTML = `<div class="loading-center"><span class="spinner"></span></div>`;
 
-  let data;
-  try { data = await api(`/api/dashboard${qs}`); } catch { return; }
+  let check;
+  try { check = await api("/api/nastenka-check"); } catch { return; }
 
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
       <h1 class="page-title">Nástěnka</h1>
+      <button class="btn btn-secondary btn-sm" onclick="renderDashboard()">🔄 Zkontrolovat</button>
     </div>
-    <div class="stat-grid">
-      <div class="stat-card">
-        <div class="stat-label">Výdaje tento měsíc</div>
-        <div class="stat-value">${czMoney(data.vydaje_mesic)}</div>
-        <div class="stat-sub">${data.pocet_mesic} faktur</div>
-      </div>
-      <div class="stat-card ${data.pocet_po_splatnosti > 0 ? 'danger' : ''}">
-        <div class="stat-label">Po splatnosti</div>
-        <div class="stat-value">${data.pocet_po_splatnosti}</div>
-        <div class="stat-sub">${czMoney(data.castka_po_splatnosti)}</div>
-      </div>
-    </div>
-    <div class="grid-2" style="gap:1rem; margin-bottom:1rem;">
+    <div id="nastenkaBoxiky" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;margin-bottom:1.5rem"></div>
+    <div class="grid-2" style="gap:1rem;margin-bottom:1rem;">
       <div class="card">
         <div class="card-title">Výdaje po měsících</div>
         <div class="chart-wrap"><canvas id="barChart"></canvas></div>
       </div>
       <div class="card">
         <div class="card-title">Poslední faktury</div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr><th>Dodavatel</th><th>Datum</th><th>Částka</th><th>Stav</th></tr></thead>
-            <tbody>
-              ${data.posledni_faktury.map(f => `
-                <tr data-id="${f.id}" class="faktura-row">
-                  <td>${f.dodavatel}</td>
-                  <td>${czDate(f.datum_vystaveni)}</td>
-                  <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
-                  <td>${stavBadge(f.stav)}</td>
-                </tr>`).join("") || "<tr><td colspan='4' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"}
-            </tbody>
-          </table>
-        </div>
+        <div class="table-wrap" id="posledniFA"><div class="loading-center"><span class="spinner"></span></div></div>
         <div style="margin-top:.8rem;text-align:right">
           <button class="btn btn-secondary btn-sm" onclick="navigateTo('faktury')">Všechny faktury →</button>
         </div>
       </div>
     </div>`;
 
+  _renderNastenkaBoxiky(check);
+  _loadNastenkaFA();
+}
+
+function _stavBoxiku(stav) {
+  if (stav === "error")   return { bg: "#fee2e2", border: "#ef4444", ikona: "🔴", txt: "#991b1b" };
+  if (stav === "warning") return { bg: "#fef3c7", border: "#f59e0b", ikona: "🟡", txt: "#92400e" };
+  return                         { bg: "#f0fdf4", border: "#86efac", ikona: "✅", txt: "#166534" };
+}
+
+function _nastenkaBoxik(nazev, stav, hlavni, sub, akce) {
+  const s = _stavBoxiku(stav);
+  return `
+    <div style="background:${s.bg};border:1.5px solid ${s.border};border-radius:10px;padding:.9rem 1rem;cursor:${akce?'pointer':'default'}"
+         onclick="${akce||''}">
+      <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.3rem">
+        <span style="font-size:.95rem">${s.ikona}</span>
+        <span style="font-weight:600;font-size:.85rem;color:${s.txt}">${nazev}</span>
+      </div>
+      <div style="font-size:1.1rem;font-weight:700;color:${s.txt}">${hlavni}</div>
+      ${sub ? `<div style="font-size:.78rem;color:${s.txt};opacity:.8;margin-top:.15rem">${sub}</div>` : ""}
+    </div>`;
+}
+
+function _renderNastenkaBoxiky(c) {
+  const el = document.getElementById("nastenkaBoxiky");
+  if (!el) return;
+
+  const boxiky = [];
+
+  // 1. Přijaté faktury po splatnosti
+  const fps = c.faktury_po_splatnosti;
+  boxiky.push(_nastenkaBoxik(
+    "Faktury po splatnosti",
+    fps.pocet === 0 ? "Vše OK" : `${fps.pocet} faktur`,
+    fps.pocet === 0 ? "" : czMoney(fps.castka),
+    fps.stav !== "ok" ? "navigateTo('faktury')" : null,
+    fps.stav
+  ));
+
+  // 2. Faktury čekající
+  const fc = c.faktury_cekajici;
+  boxiky.push(_nastenkaBoxik(
+    "Čekající na úhradu",
+    fc.pocet === 0 ? "Žádné" : `${fc.pocet} faktur`,
+    fc.pocet === 0 ? "" : czMoney(fc.castka),
+    fc.stav,
+    fc.pocet > 0 ? "navigateTo('faktury')" : null
+  ));
+
+  // 3. Duplicitní faktury
+  const fd = c.duplicitni_faktury;
+  boxiky.push(_nastenkaBoxik(
+    "Duplicitní faktury",
+    fd.pocet === 0 ? "Žádné" : `${fd.pocet} duplikátů`,
+    fd.pocet === 0 ? "" : czMoney(fd.castka),
+    fd.stav,
+    fd.pocet > 0 ? "navigujNaDuplicity()" : null
+  ));
+
+  // 4. Vystavené po splatnosti
+  const fv = c.vystavene_po_splatnosti;
+  boxiky.push(_nastenkaBoxik(
+    "Nezaplacené vystavené FA",
+    fv.pocet === 0 ? "Vše zaplaceno" : `${fv.pocet} faktur`,
+    fv.pocet === 0 ? "" : czMoney(fv.castka),
+    fv.stav,
+    fv.pocet > 0 ? "navigateTo('vystavene')" : null
+  ));
+
+  // 5. Terminál limit
+  const tl = c.terminal_limit;
+  boxiky.push(_nastenkaBoxik(
+    "Terminál / měsíc",
+    `${tl.procent} %`,
+    `${czMoney(tl.castka)} z ${czMoney(tl.limit)}`,
+    tl.stav,
+    "navigateTo('reporty')"
+  ));
+
+  // 6. DPH limit
+  const dl = c.dph_limit;
+  boxiky.push(_nastenkaBoxik(
+    "DPH limit / rok",
+    `${dl.procent} %`,
+    `${czMoney(dl.castka)} z ${czMoney(dl.limit)}`,
+    dl.stav,
+    "navigateTo('reporty')"
+  ));
+
+  // 7. Duplicitní reporty
+  const dr = c.duplicitni_reporty;
+  boxiky.push(_nastenkaBoxik(
+    "Duplicitní reporty",
+    dr.pocet === 0 ? "Žádné" : `${dr.pocet} duplicit`,
+    "",
+    dr.stav,
+    dr.pocet > 0 ? "navigateTo('reporty')" : null
+  ));
+
+  // 8. Záloha
+  const zl = c.zaloha;
+  const zalohaHlavni = zl.dni_stari < 0 ? "GCS nedostupné" : zl.dni_stari === 0 ? "Dnes" : `Před ${zl.dni_stari} dny`;
+  boxiky.push(_nastenkaBoxik(
+    "Poslední záloha",
+    zalohaHlavni,
+    zl.soubor || "",
+    zl.stav,
+    "navigateTo('nastaveni')"
+  ));
+
+  el.innerHTML = boxiky.join("");
+}
+
+function navigujNaDuplicity() {
+  // Přejde na faktury a nastaví filtr na duplikát
+  navigateTo("faktury");
+  setTimeout(() => {
+    const stavSel = document.getElementById("fStav");
+    if (stavSel) { stavSel.value = "duplikat"; loadFaktury(); }
+  }, 300);
+}
+
+async function _loadNastenkaFA() {
+  const firma = document.getElementById("globalFirmaFilter")?.value || "";
+  const qs = firma ? `?firma=${firma}` : "";
+  let data;
+  try { data = await api(`/api/dashboard${qs}`); } catch { return; }
+
+  const el = document.getElementById("posledniFA");
+  if (!el) return;
+  el.innerHTML = `
+    <table>
+      <thead><tr><th>Dodavatel</th><th>Datum</th><th>Částka</th><th>Stav</th></tr></thead>
+      <tbody>
+        ${data.posledni_faktury.map(f => `
+          <tr data-id="${f.id}" class="faktura-row" style="cursor:pointer">
+            <td>${escHtml(f.dodavatel)}</td>
+            <td>${czDate(f.datum_vystaveni)}</td>
+            <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
+            <td>${stavBadge(f.stav)}</td>
+          </tr>`).join("") || "<tr><td colspan='4' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"}
+      </tbody>
+    </table>`;
   document.querySelectorAll(".faktura-row").forEach(r => {
     r.addEventListener("click", () => openFakturaDetail(r.dataset.id));
   });
