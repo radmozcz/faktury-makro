@@ -130,6 +130,7 @@ function skryjNepovoleneMenu() {
     "statistiky": "statistiky",
     "nastaveni":  "nastaveni",
     "banky":      "bankovni_vypisy",
+    "kalkulace":  "kalkulace",
     "vydaje":          "vydaje_zobrazit",
     "soukrome_vydaje": "soukrome_vydaje_zobrazit",
     "vystavene":       "vystavene_zobrazit",
@@ -454,7 +455,7 @@ async function renderDashboard() {
 
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
-      <h1 class="page-title">Dashboard</h1>
+      <h1 class="page-title">Nástěnka</h1>
     </div>
     <div class="stat-grid">
       <div class="stat-card">
@@ -3013,6 +3014,8 @@ async function renderNastaveni() {
     { klic: "bankovni_vypisy",   label: "Bankovní výpisy" },
     { klic: "statistiky",        label: "Statistiky" },
     { klic: "nastaveni",         label: "Nastavení" },
+    { klic: "kalkulace",         label: "Kalkulace" },
+    { klic: "upozorneni",        label: "Upozornění (Nástěnka)" },
   ];
 
   const pravaNastaveniRows = SEKCE.map(s => {

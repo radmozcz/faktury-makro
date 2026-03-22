@@ -10,7 +10,6 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/style.css">
 <style>
-  /* ── Login overlay ── */
   #loginOverlay {
     display: flex;
     position: fixed; inset: 0; z-index: 9999;
@@ -40,8 +39,6 @@
   }
   .login-box button:hover { opacity: .9; }
   #loginError { color: #dc2626; font-size: .9rem; margin-top: .5rem; min-height: 1.2rem; }
-
-  /* ── Přihlášený uživatel v topbaru ── */
   .topbar-user {
     display: flex; align-items: center; gap: .6rem;
     font-size: .85rem; color: var(--txt2, #666);
@@ -57,7 +54,6 @@
 </head>
 <body>
 
-<!-- LOGIN OVERLAY -->
 <div id="loginOverlay">
   <div class="login-box">
     <span class="logo-icon">🧾</span>
@@ -69,10 +65,8 @@
   </div>
 </div>
 
-<!-- APLIKACE -->
 <div id="appShell" style="display:none; width:100%; height:100%; flex:1;">
 
-<!-- SIDEBAR -->
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <span class="logo-icon">🧾</span>
@@ -129,7 +123,6 @@
   </div>
 </aside>
 
-<!-- MAIN -->
 <div class="main-wrap">
   <header class="topbar">
     <button class="menu-btn" id="menuBtn">☰</button>
@@ -146,15 +139,11 @@
       </div>
     </div>
   </header>
-
-  <main class="content" id="mainContent">
-    <!-- stránky jsou renderovány dynamicky -->
-  </main>
+  <main class="content" id="mainContent"></main>
 </div>
 
-</div><!-- /#appShell -->
+</div>
 
-<!-- MODAL -->
 <div class="modal-overlay" id="modalOverlay" style="display:none">
   <div class="modal" id="modal">
     <div class="modal-header">
@@ -165,7 +154,6 @@
   </div>
 </div>
 
-<!-- TOAST -->
 <div id="toastContainer"></div>
 
 <script src="/static/js/app.js"></script>
