@@ -1837,23 +1837,25 @@ def api_nastenka_check():
         }
 
         # 4. Vystavené faktury po splatnosti (Bauhaus nezaplatil)
-        r4 = conn.execute("""
+        datum_cond = "AND datum_splatnosti::date < CURRENT_DATE" if _USE_PG else "AND datum_splatnosti < date('now')"
+        datum_not_empty = "AND datum_splatnosti IS NOT NULL AND datum_splatnosti != ''" 
+        r4 = conn.execute(f"""
             SELECT COUNT(*) as pocet, COALESCE(SUM(castka),0) as castka
             FROM vystavene_faktury
             WHERE stav='nezaplaceno'
-              AND datum_splatnosti != '' AND datum_splatnosti IS NOT NULL
-              AND datum_splatnosti < ?
-        """, (dnes,)).fetchone()
+              {datum_not_empty}
+              {datum_cond}
+        """).fetchone()
         pocet_vyst = int(r4["pocet"] if isinstance(r4, dict) else r4[0])
         castka_vyst = float(r4["castka"] if isinstance(r4, dict) else r4[1])
-        rows_vyst = conn.execute("""
+        rows_vyst = conn.execute(f"""
             SELECT id, odberatel, cislo_faktury, datum_splatnosti, castka, firma_zkratka
             FROM vystavene_faktury
             WHERE stav='nezaplaceno'
-              AND datum_splatnosti != '' AND datum_splatnosti IS NOT NULL
-              AND datum_splatnosti < ?
+              {datum_not_empty}
+              {datum_cond}
             ORDER BY datum_splatnosti ASC LIMIT 5
-        """, (dnes,)).fetchall()
+        """).fetchall()
         result["vystavene_po_splatnosti"] = {
             "pocet": pocet_vyst,
             "castka": round(castka_vyst, 2),

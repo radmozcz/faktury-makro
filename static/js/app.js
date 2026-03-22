@@ -505,19 +505,19 @@ function _renderNastenkaBoxiky(c) {
   const fps = c.faktury_po_splatnosti;
   boxiky.push(_nastenkaBoxik(
     "Faktury po splatnosti",
+    fps.stav,
     fps.pocet === 0 ? "Vše OK" : `${fps.pocet} faktur`,
     fps.pocet === 0 ? "" : czMoney(fps.castka),
-    fps.stav !== "ok" ? "navigateTo('faktury')" : null,
-    fps.stav
+    fps.pocet > 0 ? "navigateTo('faktury')" : null
   ));
 
   // 2. Faktury čekající
   const fc = c.faktury_cekajici;
   boxiky.push(_nastenkaBoxik(
     "Čekající na úhradu",
+    fc.stav,
     fc.pocet === 0 ? "Žádné" : `${fc.pocet} faktur`,
     fc.pocet === 0 ? "" : czMoney(fc.castka),
-    fc.stav,
     fc.pocet > 0 ? "navigateTo('faktury')" : null
   ));
 
@@ -525,9 +525,9 @@ function _renderNastenkaBoxiky(c) {
   const fd = c.duplicitni_faktury;
   boxiky.push(_nastenkaBoxik(
     "Duplicitní faktury",
+    fd.stav,
     fd.pocet === 0 ? "Žádné" : `${fd.pocet} duplikátů`,
     fd.pocet === 0 ? "" : czMoney(fd.castka),
-    fd.stav,
     fd.pocet > 0 ? "navigujNaDuplicity()" : null
   ));
 
@@ -535,9 +535,9 @@ function _renderNastenkaBoxiky(c) {
   const fv = c.vystavene_po_splatnosti;
   boxiky.push(_nastenkaBoxik(
     "Nezaplacené vystavené FA",
+    fv.stav,
     fv.pocet === 0 ? "Vše zaplaceno" : `${fv.pocet} faktur`,
     fv.pocet === 0 ? "" : czMoney(fv.castka),
-    fv.stav,
     fv.pocet > 0 ? "navigateTo('vystavene')" : null
   ));
 
