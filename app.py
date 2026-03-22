@@ -149,6 +149,8 @@ DEFAULT_PRAVA = {
         "nastaveni":                    False,
         "vystavene_zobrazit":           False,
         "vystavene_upravit":            False,
+        "kalkulace":                    False,
+        "upozorneni":                   False,
     },
     "ucetni": {
         "faktury_zobrazit":  True,
@@ -172,6 +174,8 @@ DEFAULT_PRAVA = {
         "nastaveni":                    False,
         "vystavene_zobrazit":           True,
         "vystavene_upravit":            False,
+        "kalkulace":                    False,
+        "upozorneni":                   False,
     },
 }
 
@@ -1649,21 +1653,21 @@ def api_karty_stats():
             rocni = float((row or {}).get("total", 0))
 
             od = terminal_od.get(firma, f"{rok}-01-01")
+            mesic_str = _dt.date.today().strftime("%Y-%m")
+            mesic_prvni = mesic_str + "-01"
             row2 = conn.execute("""
                 SELECT COALESCE(SUM(karty),0) as total
                 FROM reporty
                 WHERE firma_zkratka=? AND datum>=?
-            """, (firma, od)).fetchone()
+            """, (firma, mesic_prvni)).fetchone()
             mesicni = float((row2 or {}).get("total", 0))
 
             row3 = conn.execute("""
                 SELECT COALESCE(SUM(hotovost+karty),0) as total
                 FROM reporty
                 WHERE firma_zkratka=? AND datum>=?
-            """, (firma, od)).fetchone()
+            """, (firma, mesic_prvni)).fetchone()
             trzba_od = float((row3 or {}).get("total", 0))
-
-            mesic_str = _dt.date.today().strftime("%Y-%m")
             row4 = conn.execute("""
                 SELECT COALESCE(SUM(karty),0) as k,
                        COALESCE(SUM(hotovost),0) as h,
