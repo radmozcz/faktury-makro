@@ -501,84 +501,88 @@ function _renderNastenkaBoxiky(c) {
 
   const boxiky = [];
 
-  // 1. Přijaté faktury po splatnosti
+  // 1. Terminál limit
+  const tl = c.terminal_limit;
+  boxiky.push(_nastenkaBoxik(
+    "Terminál / měsíc",
+    tl.stav,
+    `${tl.procent} %`,
+    `${czMoney(tl.castka)} z ${czMoney(tl.limit)}`,
+    "navigateTo('reporty')"
+  ));
+
+  // 2. DPH limit
+  const dl = c.dph_limit;
+  boxiky.push(_nastenkaBoxik(
+    "DPH limit / rok",
+    dl.stav,
+    `${dl.procent} %`,
+    `${czMoney(dl.castka)} z ${czMoney(dl.limit)}`,
+    "navigateTo('reporty')"
+  ));
+
+  // 3. Přijaté faktury po splatnosti
   const fps = c.faktury_po_splatnosti;
   boxiky.push(_nastenkaBoxik(
     "Faktury po splatnosti",
     fps.stav,
     fps.pocet === 0 ? "Vše OK" : `${fps.pocet} faktur`,
-    fps.pocet === 0 ? "" : czMoney(fps.castka),
+    fps.pocet === 0 ? "Nic nezaplatit" : czMoney(fps.castka),
     fps.pocet > 0 ? "navigateTo('faktury')" : null
   ));
 
-  // 2. Faktury čekající
+  // 4. Vystavené po splatnosti (nám nezaplatili)
+  const fv = c.vystavene_po_splatnosti;
+  boxiky.push(_nastenkaBoxik(
+    "Nezaplaceno nám",
+    fv.stav,
+    fv.pocet === 0 ? "Vše zaplaceno" : `${fv.pocet} faktur`,
+    fv.pocet === 0 ? "Odběratelé platí" : `${czMoney(fv.castka)} po splatnosti`,
+    fv.pocet > 0 ? "navigateTo('vystavene')" : null
+  ));
+
+  // 5. Faktury čekající na úhradu (ještě před splatností)
   const fc = c.faktury_cekajici;
   boxiky.push(_nastenkaBoxik(
-    "Čekající na úhradu",
+    "Čeká na úhradu od nás",
     fc.stav,
     fc.pocet === 0 ? "Žádné" : `${fc.pocet} faktur`,
-    fc.pocet === 0 ? "" : czMoney(fc.castka),
+    fc.pocet === 0 ? "Vše zaplaceno" : `${czMoney(fc.castka)} — ještě nesplatné`,
     fc.pocet > 0 ? "navigateTo('faktury')" : null
   ));
 
-  // 3. Duplicitní faktury
+  // 6. Duplicitní faktury
   const fd = c.duplicitni_faktury;
   boxiky.push(_nastenkaBoxik(
     "Duplicitní faktury",
     fd.stav,
     fd.pocet === 0 ? "Žádné" : `${fd.pocet} duplikátů`,
-    fd.pocet === 0 ? "" : czMoney(fd.castka),
+    fd.pocet === 0 ? "Vše v pořádku" : czMoney(fd.castka),
     fd.pocet > 0 ? "navigujNaDuplicity()" : null
-  ));
-
-  // 4. Vystavené po splatnosti
-  const fv = c.vystavene_po_splatnosti;
-  boxiky.push(_nastenkaBoxik(
-    "Nezaplacené vystavené FA",
-    fv.stav,
-    fv.pocet === 0 ? "Vše zaplaceno" : `${fv.pocet} faktur`,
-    fv.pocet === 0 ? "" : czMoney(fv.castka),
-    fv.pocet > 0 ? "navigateTo('vystavene')" : null
-  ));
-
-  // 5. Terminál limit
-  const tl = c.terminal_limit;
-  boxiky.push(_nastenkaBoxik(
-    "Terminál / měsíc",
-    `${tl.procent} %`,
-    `${czMoney(tl.castka)} z ${czMoney(tl.limit)}`,
-    tl.stav,
-    "navigateTo('reporty')"
-  ));
-
-  // 6. DPH limit
-  const dl = c.dph_limit;
-  boxiky.push(_nastenkaBoxik(
-    "DPH limit / rok",
-    `${dl.procent} %`,
-    `${czMoney(dl.castka)} z ${czMoney(dl.limit)}`,
-    dl.stav,
-    "navigateTo('reporty')"
   ));
 
   // 7. Duplicitní reporty
   const dr = c.duplicitni_reporty;
   boxiky.push(_nastenkaBoxik(
     "Duplicitní reporty",
-    dr.pocet === 0 ? "Žádné" : `${dr.pocet} duplicit`,
-    "",
     dr.stav,
+    dr.pocet === 0 ? "Žádné" : `${dr.pocet} duplicit`,
+    dr.pocet === 0 ? "Vše v pořádku" : "Zkontroluj reporty",
     dr.pocet > 0 ? "navigateTo('reporty')" : null
   ));
 
   // 8. Záloha
   const zl = c.zaloha;
   const zalohaHlavni = zl.dni_stari < 0 ? "GCS nedostupné" : zl.dni_stari === 0 ? "Dnes" : `Před ${zl.dni_stari} dny`;
+  const zalohaDatum = zl.soubor ? zl.soubor.replace(/zaloha_(\d{4})(\d{2})(\d{2})_.*/, "$3.$2.$1") : "";
+  const zalohaSub = zalohaDatum && zalohaDatum !== zl.soubor
+    ? `${zalohaDatum} (${zl.dni_stari >= 0 ? zl.dni_stari + " dní zpět" : ""})`
+    : (zl.soubor || "Žádná záloha");
   boxiky.push(_nastenkaBoxik(
     "Poslední záloha",
-    zalohaHlavni,
-    zl.soubor || "",
     zl.stav,
+    zalohaHlavni,
+    zalohaSub,
     "navigateTo('nastaveni')"
   ));
 
