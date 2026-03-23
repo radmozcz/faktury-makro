@@ -1906,7 +1906,7 @@ def api_nastenka_check():
         """, (mesic_prvni,)).fetchone()
         karty_mesic = float(_first_val(r5))
         terminal_pct = round(karty_mesic / terminal_limit * 100, 1) if terminal_limit else 0
-        result["terminal_limit"] = {
+        result["terminal_box"] = {
             "castka": round(karty_mesic, 2),
             "limit": terminal_limit,
             "procent": terminal_pct,

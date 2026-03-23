@@ -467,7 +467,7 @@ async function renderDashboard() {
     </div>
     <div id="nastenkaBoxiky" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;margin-bottom:1.5rem"></div>
     <div style="border-top:2px solid var(--border);margin:1.2rem 0 .8rem;opacity:.4"></div>
-    <div id="nastenkaSpodek" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:1rem;margin-bottom:1rem"></div>`;
+    <div id="nastenkaSpodek" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;margin-bottom:1rem"></div>`;
 
   _renderNastenkaBoxiky(check);
   _renderNastenkaSpodek(check, karty_stats);
@@ -603,7 +603,7 @@ function _renderNastenkaBoxiky(c) {
   const boxiky = [];
 
   // 1. Terminál limit
-  const tl = c.terminal_limit;
+  const tl = c.terminal_box;
   boxiky.push(_nastenkaBoxik(
     "Terminál / měsíc",
     tl.stav,
