@@ -541,17 +541,31 @@ function _renderNastenkaBoxiky(c) {
     fv.pocet > 0 ? "navigateTo('vystavene')" : null
   ));
 
-  // 5. Faktury čekající na úhradu (ještě před splatností)
-  const fc = c.faktury_cekajici;
+  // 5. Firemní čekající na úhradu (faktury + provozní výdaje)
+  const cf = c.cekajici_firemni;
+  const cfSub = cf.pocet === 0 ? "Vše zaplaceno"
+    : [cf.pocet_faktur > 0 ? `${cf.pocet_faktur} FA (${czMoney(cf.castka_faktur)})` : "",
+       cf.pocet_vydaju > 0 ? `${cf.pocet_vydaju} výdajů (${czMoney(cf.castka_vydaju)})` : ""]
+      .filter(Boolean).join(" · ");
   boxiky.push(_nastenkaBoxik(
-    "Čeká na úhradu od nás",
-    fc.stav,
-    fc.pocet === 0 ? "Žádné" : `${fc.pocet} faktur`,
-    fc.pocet === 0 ? "Vše zaplaceno" : `${czMoney(fc.castka)} — ještě nesplatné`,
-    fc.pocet > 0 ? "navigateTo('faktury')" : null
+    "Čeká na úhradu — firemní",
+    cf.stav,
+    cf.pocet === 0 ? "Vše zaplaceno" : `${cf.pocet} položek`,
+    cfSub,
+    cf.pocet_faktur > 0 ? "navigateTo('faktury')" : (cf.pocet_vydaju > 0 ? "navigateTo('vydaje')" : null)
   ));
 
-  // 6. Duplicitní faktury
+  // 6. Soukromé čekající na úhradu
+  const cs = c.cekajici_soukrome;
+  boxiky.push(_nastenkaBoxik(
+    "Čeká na úhradu — soukromé",
+    cs.stav,
+    cs.pocet === 0 ? "Vše zaplaceno" : `${cs.pocet} výdajů`,
+    cs.pocet === 0 ? "Žádné nezaplacené" : czMoney(cs.castka),
+    cs.pocet > 0 ? "navigateTo('soukrome_vydaje')" : null
+  ));
+
+  // 7. Duplicitní faktury
   const fd = c.duplicitni_faktury;
   boxiky.push(_nastenkaBoxik(
     "Duplicitní faktury",
@@ -561,7 +575,7 @@ function _renderNastenkaBoxiky(c) {
     fd.pocet > 0 ? "navigujNaDuplicity()" : null
   ));
 
-  // 7. Duplicitní reporty
+  // 8. Duplicitní reporty
   const dr = c.duplicitni_reporty;
   boxiky.push(_nastenkaBoxik(
     "Duplicitní reporty",
@@ -571,7 +585,7 @@ function _renderNastenkaBoxiky(c) {
     dr.pocet > 0 ? "navigateTo('reporty')" : null
   ));
 
-  // 8. Záloha
+  // 9. Záloha
   const zl = c.zaloha;
   const zalohaHlavni = zl.dni_stari < 0 ? "GCS nedostupné" : zl.dni_stari === 0 ? "Dnes" : `Před ${zl.dni_stari} dny`;
   const zalohaDatum = zl.soubor ? zl.soubor.replace(/zaloha_(\d{4})(\d{2})(\d{2})_.*/, "$3.$2.$1") : "";

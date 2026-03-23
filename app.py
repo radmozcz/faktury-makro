@@ -1805,22 +1805,45 @@ def api_nastenka_check():
         }
 
         # 2. Přijaté faktury čekající na zaplacení (stav ceka, datum splatnosti budoucí)
-        r2 = conn.execute("""
+        # Firemní — přijaté faktury čekající
+        r2a = conn.execute("""
             SELECT COUNT(*) as pocet, COALESCE(SUM(celkem_s_dph),0) as castka
             FROM faktury WHERE stav='ceka'
         """).fetchone()
-        pocet_ceka = int(r2["pocet"] if isinstance(r2, dict) else r2[0])
-        castka_ceka = float(r2["castka"] if isinstance(r2, dict) else r2[1])
-        rows_ceka = conn.execute("""
-            SELECT id, dodavatel, cislo_faktury, datum_splatnosti, celkem_s_dph, firma_zkratka
-            FROM faktury WHERE stav='ceka'
-            ORDER BY datum_splatnosti ASC LIMIT 5
-        """).fetchall()
-        result["faktury_cekajici"] = {
-            "pocet": pocet_ceka,
-            "castka": round(castka_ceka, 2),
-            "items": [dict(r) for r in rows_ceka],
-            "stav": "ok" if pocet_ceka == 0 else "warning",
+        pocet_fa = int(r2a["pocet"] if isinstance(r2a, dict) else r2a[0])
+        castka_fa = float(r2a["castka"] if isinstance(r2a, dict) else r2a[1])
+
+        # Firemní — provozní výdaje nezaplacené
+        r2b = conn.execute("""
+            SELECT COUNT(*) as pocet, COALESCE(SUM(castka),0) as castka
+            FROM vydaje WHERE stav='nezaplaceno' AND COALESCE(typ,'provozni')='provozni'
+        """).fetchone()
+        pocet_vyd = int(r2b["pocet"] if isinstance(r2b, dict) else r2b[0])
+        castka_vyd = float(r2b["castka"] if isinstance(r2b, dict) else r2b[1])
+
+        pocet_firmy = pocet_fa + pocet_vyd
+        castka_firmy = castka_fa + castka_vyd
+        result["cekajici_firemni"] = {
+            "pocet": pocet_firmy,
+            "pocet_faktur": pocet_fa,
+            "pocet_vydaju": pocet_vyd,
+            "castka": round(castka_firmy, 2),
+            "castka_faktur": round(castka_fa, 2),
+            "castka_vydaju": round(castka_vyd, 2),
+            "stav": "ok" if pocet_firmy == 0 else "warning",
+        }
+
+        # Soukromé výdaje nezaplacené
+        r2c = conn.execute("""
+            SELECT COUNT(*) as pocet, COALESCE(SUM(castka),0) as castka
+            FROM vydaje WHERE stav='nezaplaceno' AND typ='soukrome'
+        """).fetchone()
+        pocet_soukr = int(r2c["pocet"] if isinstance(r2c, dict) else r2c[0])
+        castka_soukr = float(r2c["castka"] if isinstance(r2c, dict) else r2c[1])
+        result["cekajici_soukrome"] = {
+            "pocet": pocet_soukr,
+            "castka": round(castka_soukr, 2),
+            "stav": "ok" if pocet_soukr == 0 else "warning",
         }
 
         # 3. Duplicitní faktury nevyřešené
