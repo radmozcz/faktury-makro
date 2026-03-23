@@ -220,8 +220,11 @@ function setupMobileMenu() {
   });
 }
 function showDate() {
-  document.getElementById("todayDate").textContent =
-    new Date().toLocaleDateString("cs-CZ", { day:"2-digit", month:"long", year:"numeric" });
+  const d = new Date();
+  const datum = d.toLocaleDateString("cs-CZ", { day:"numeric", month:"long", year:"numeric" });
+  const den = d.toLocaleDateString("cs-CZ", { weekday:"long" });
+  const el = document.getElementById("todayDate");
+  if (el) el.innerHTML = `<span style="font-size:1.05rem;font-weight:600;color:var(--txt,#111)">${datum}</span> <span style="font-size:.8rem;color:var(--txt2,#666);margin-left:.3rem">${den}</span>`;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -585,14 +588,14 @@ function _stavBoxiku(stav) {
 function _nastenkaBoxik(nazev, stav, hlavni, sub, akce) {
   const s = _stavBoxiku(stav);
   return `
-    <div style="background:${s.bg};border:1.5px solid ${s.border};border-radius:10px;padding:.9rem 1rem;cursor:${akce?'pointer':'default'}"
+    <div style="background:#fff;border:1px solid #e5e7eb;border-left:4px solid ${s.border};border-radius:10px;padding:.9rem 1rem;cursor:${akce?'pointer':'default'}"
          onclick="${akce||''}">
       <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.3rem">
-        <span style="font-size:.95rem">${s.ikona}</span>
-        <span style="font-weight:600;font-size:.85rem;color:${s.txt}">${nazev}</span>
+        <span style="font-size:.9rem">${s.ikona}</span>
+        <span style="font-weight:600;font-size:.82rem;color:var(--txt2)">${nazev}</span>
       </div>
-      <div style="font-size:1.1rem;font-weight:700;color:${s.txt}">${hlavni}</div>
-      ${sub ? `<div style="font-size:.78rem;color:${s.txt};opacity:.8;margin-top:.15rem">${sub}</div>` : ""}
+      <div style="font-size:1.1rem;font-weight:700;color:var(--txt)">${hlavni}</div>
+      ${sub ? `<div style="font-size:.78rem;color:var(--txt2);margin-top:.15rem">${sub}</div>` : ""}
     </div>`;
 }
 
@@ -4217,7 +4220,7 @@ function _kartaSouhrn(stats) {
   const sumHotR   = firmy.reduce((s,f) => s+(stats[f].hot_rok||0), 0);
   const sumTrzbaR = firmy.reduce((s,f) => s+(stats[f].trzba_rok||0), 0);
   const r = (lbl,m,ro) => `<div style="display:flex;justify-content:space-between;font-size:.82rem;padding:.2rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--txt2)">${lbl}</span><span><strong>${czInt(m)}</strong> <span style="color:var(--txt2);font-size:.75rem">/ ${czInt(ro)}</span></span></div>`;
-  return `<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:.85rem">
+  return `<div style="background:#ffffff;border:1px solid var(--border);border-radius:10px;padding:.85rem">
     <div style="font-weight:700;font-size:.95rem;margin-bottom:.4rem">Celkem</div>
     <div style="display:flex;justify-content:flex-end;font-size:.68rem;color:var(--txt2);margin-bottom:.15rem">měsíc / rok</div>
     ${r('💳 Karty', sumKartyM, sumKartyR)}
@@ -4236,7 +4239,7 @@ function _kartaFirmaCard(firma, d, jeAktivni) {
   const bord = jeAktivni ? '2px solid #16a34a' : '1px solid var(--border)';
   const bar  = (pct,col) => `<div style="background:#e5e7eb;border-radius:3px;height:4px;margin-bottom:.3rem"><div style="background:${col};height:4px;border-radius:3px;width:${pct}%"></div></div>`;
   const r    = (lbl,m,ro) => `<div style="display:flex;justify-content:space-between;font-size:.82rem;padding:.2rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--txt2)">${lbl}</span><span><strong>${czInt(m)}</strong> <span style="color:var(--txt2);font-size:.75rem">/ ${czInt(ro)}</span></span></div>`;
-  return `<div style="background:var(--card-bg);border:${bord};border-radius:10px;padding:.85rem">
+  return `<div style="background:#ffffff;border:${bord};border-radius:10px;padding:.85rem">
     <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.2rem">
       <span style="font-weight:700;font-size:.95rem">${escHtml(firma)}</span>
       <span style="background:#dcfce7;color:#166534;font-size:.65rem;padding:.1rem .4rem;border-radius:99px;font-weight:600">● kasíruje</span>
