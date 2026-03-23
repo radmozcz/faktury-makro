@@ -2966,6 +2966,29 @@ def api_banky_import():
     except Exception as e:
         return jsonify({"error": f"Chyba parsování: {str(e)}"}), 400
 
+    # Debug: pokud 0 řádků, vrátíme info o souboru
+    if not pohyby:
+        try:
+            for enc in ["utf-8-sig", "cp1250", "utf-8"]:
+                try:
+                    preview = content.decode(enc)
+                    break
+                except Exception:
+                    preview = ""
+            lines = preview.splitlines()
+            return jsonify({
+                "ok": True, "banka": banka, "naimportovano": 0, "duplicity": 0,
+                "debug": {
+                    "radku_celkem": len(lines),
+                    "prvni_radek": lines[0][:200] if lines else "",
+                    "druhy_radek": lines[1][:200] if len(lines) > 1 else "",
+                    "banka_hint": banka_hint,
+                    "fname": fname,
+                }
+            })
+        except Exception:
+            pass
+
     naimportovano = 0
     duplicity = 0
     with get_db() as conn:
