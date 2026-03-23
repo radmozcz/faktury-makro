@@ -2996,7 +2996,13 @@ def api_banky_pohyby():
     typ    = request.args.get("typ", "")
     clauses, params = [], []
     if banka: clauses.append("banka=?"); params.append(banka)
-    if firma: clauses.append("firma_zkratka=?"); params.append(firma)
+    if firma:
+        # Pro soukromé zobraz i záznamy s prázdnou firmou (starší import)
+        if firma == "_soukrome":
+            clauses.append("(firma_zkratka=? OR firma_zkratka='' OR firma_zkratka IS NULL)")
+            params.append(firma)
+        else:
+            clauses.append("firma_zkratka=?"); params.append(firma)
     if od:    clauses.append("datum>=?"); params.append(od)
     if do_:   clauses.append("datum<=?"); params.append(do_)
     if typ == "prichozi":  clauses.append("castka>0")
