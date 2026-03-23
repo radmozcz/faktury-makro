@@ -525,7 +525,7 @@ function _renderNastenkaSpodek(c, karty_stats) {
   el.innerHTML = `
     ${renderKartaStatNastenka(karty_stats)}
 
-    <div class="card" style="background:${plBg};cursor:pointer" onclick="navigateTo('statistiky')">
+    <div class="card" style="background:#fff;cursor:pointer" onclick="navigateTo('statistiky')">
       <div class="card-title">P&L — ${rok}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-top:.5rem">
         <div>
@@ -560,7 +560,7 @@ function _renderNastenkaSpodek(c, karty_stats) {
       <div style="font-size:.75rem;color:var(--txt2);margin-top:.3rem">Statistiky →</div>
     </div>
 
-    <div class="card" style="cursor:pointer" onclick="navigateTo('faktury')">
+    <div class="card" style="background:#fff;cursor:pointer" onclick="navigateTo('faktury')">
       <div class="card-title">Náklady — ${rok}</div>
       <table style="width:100%;border-collapse:collapse">
         <thead><tr style="background:var(--bg2)">
@@ -588,7 +588,7 @@ function _stavBoxiku(stav) {
 function _nastenkaBoxik(nazev, stav, hlavni, sub, akce) {
   const s = _stavBoxiku(stav);
   return `
-    <div style="background:#fff;border:1px solid #e5e7eb;border-left:4px solid ${s.border};border-radius:10px;padding:.9rem 1rem;cursor:${akce?'pointer':'default'}"
+    <div style="background:${s.bg};border:1.5px solid ${s.border};border-radius:10px;padding:.9rem 1rem;cursor:${akce?'pointer':'default'}"
          onclick="${akce||''}">
       <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.3rem">
         <span style="font-size:.9rem">${s.ikona}</span>
@@ -4294,7 +4294,7 @@ function renderKartaStatHtml(stats) {
   const sumHotR   = firmy.reduce((s,f) => s+(stats[f].hot_rok||0), 0);
   const sumTrzbaR = firmy.reduce((s,f) => s+(stats[f].trzba_rok||0), 0);
 
-  const souhrn = `<div style="background:#ffffff;border:1px solid var(--border);border-radius:10px;padding:.85rem;flex:1;min-width:150px">
+  const souhrn = `<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:.85rem;flex:1;min-width:150px">
     <div style="font-weight:700;font-size:.95rem;margin-bottom:.4rem">Celkem</div>
     ${header()}
     ${r('💳 Karty', sumKartyM, sumKartyR)}
