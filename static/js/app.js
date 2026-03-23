@@ -2136,29 +2136,29 @@ async function loadVyplatyPrehled() {
     <div class="card" style="margin-bottom:1rem;cursor:pointer" onclick="renderVyplatyMesice()">
       <div class="card-title">Celkem — ${mesicLabel} / ${dnes.getFullYear()}</div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;margin-top:.5rem">
-        <div style="border-radius:8px;padding:.65rem 1rem;background:#f0fdf4;border:1px solid #86efac">
-          <div style="font-size:.72rem;color:#166534;font-weight:600;margin-bottom:.2rem">Měsíc bez odvodů</div>
-          <div style="font-size:1.15rem;font-weight:700;color:#166534">${czMoney(s.mesic_bez_odvodu)}</div>
+        <div style="border-radius:6px;padding:.4rem .75rem;background:#f0fdf4;border:1px solid #86efac">
+          <div style="font-size:.68rem;color:#166534;font-weight:600">Měsíc bez odvodů</div>
+          <div style="font-size:.95rem;font-weight:700;color:#166534">${czMoney(s.mesic_bez_odvodu)}</div>
         </div>
-        <div style="border-radius:8px;padding:.65rem 1rem;background:#fef3c7;border:1px solid #fcd34d">
-          <div style="font-size:.72rem;color:#92400e;font-weight:600;margin-bottom:.2rem">Měsíc s odvody</div>
-          <div style="font-size:1.15rem;font-weight:700;color:#92400e">${czMoney(s.mesic_s_odvody)}</div>
+        <div style="border-radius:6px;padding:.4rem .75rem;background:#fef3c7;border:1px solid #fcd34d">
+          <div style="font-size:.68rem;color:#92400e;font-weight:600">Měsíc s odvody</div>
+          <div style="font-size:.95rem;font-weight:700;color:#92400e">${czMoney(s.mesic_s_odvody)}</div>
         </div>
-        <div style="border-radius:8px;padding:.65rem 1rem;background:#fff7ed;border:1px solid #fdba74">
-          <div style="font-size:.72rem;color:#9a3412;font-weight:600;margin-bottom:.2rem">Odvody / měsíc</div>
-          <div style="font-size:1.15rem;font-weight:700;color:#9a3412">${czMoney(s.odvody_mesic)}</div>
+        <div style="border-radius:6px;padding:.4rem .75rem;background:#fff7ed;border:1px solid #fdba74">
+          <div style="font-size:.68rem;color:#9a3412;font-weight:600">Odvody / měsíc</div>
+          <div style="font-size:.95rem;font-weight:700;color:#9a3412">${czMoney(s.odvody_mesic)}</div>
         </div>
-        <div style="border-radius:8px;padding:.65rem 1rem;background:#f0fdf4;border:1px solid #86efac">
-          <div style="font-size:.72rem;color:#166534;font-weight:600;margin-bottom:.2rem">Rok bez odvodů</div>
-          <div style="font-size:1.15rem;font-weight:700;color:#166534">${czMoney(s.rok_bez_odvodu)}</div>
+        <div style="border-radius:6px;padding:.4rem .75rem;background:#f0fdf4;border:1px solid #86efac">
+          <div style="font-size:.68rem;color:#166534;font-weight:600">Rok bez odvodů</div>
+          <div style="font-size:.95rem;font-weight:700;color:#166534">${czMoney(s.rok_bez_odvodu)}</div>
         </div>
-        <div style="border-radius:8px;padding:.65rem 1rem;background:#fef3c7;border:1px solid #fcd34d">
-          <div style="font-size:.72rem;color:#92400e;font-weight:600;margin-bottom:.2rem">Rok s odvody</div>
-          <div style="font-size:1.15rem;font-weight:700;color:#92400e">${czMoney(s.rok_s_odvody)}</div>
+        <div style="border-radius:6px;padding:.4rem .75rem;background:#fef3c7;border:1px solid #fcd34d">
+          <div style="font-size:.68rem;color:#92400e;font-weight:600">Rok s odvody</div>
+          <div style="font-size:.95rem;font-weight:700;color:#92400e">${czMoney(s.rok_s_odvody)}</div>
         </div>
-        <div style="border-radius:8px;padding:.65rem 1rem;background:#fff7ed;border:1px solid #fdba74">
-          <div style="font-size:.72rem;color:#9a3412;font-weight:600;margin-bottom:.2rem">Odvody / rok</div>
-          <div style="font-size:1.15rem;font-weight:700;color:#9a3412">${czMoney(s.rok_s_odvody - s.rok_bez_odvodu)}</div>
+        <div style="border-radius:6px;padding:.4rem .75rem;background:#fff7ed;border:1px solid #fdba74">
+          <div style="font-size:.68rem;color:#9a3412;font-weight:600">Odvody / rok</div>
+          <div style="font-size:.95rem;font-weight:700;color:#9a3412">${czMoney(s.rok_s_odvody - s.rok_bez_odvodu)}</div>
         </div>
       </div>
       <div style="font-size:.78rem;color:var(--txt2);margin-top:.5rem">Kliknutím zobrazíš přehled po měsících →</div>
@@ -2166,24 +2166,36 @@ async function loadVyplatyPrehled() {
     <div style="display:flex;flex-direction:column;gap:.6rem">
       ${data.zamestnanci.map(z => {
         const posl = z.posledni.map(p =>
-          `${czDate(p.datum)} (${czMoney(p.castka)})`
-        ).join(" · ");
+          `<strong>${czDate(p.datum)}</strong> ${czMoney(p.castka)}`
+        ).join(" &nbsp;·&nbsp; ");
+        const odvodyBoxy = z.ma_odvody ? `
+          <div style="background:var(--color-background-secondary,#f5f5f5);border:0.5px solid var(--color-border-tertiary);border-radius:6px;padding:.3rem .6rem;text-align:center">
+            <div style="font-size:.63rem;color:var(--txt2)">Měsíc odvod</div>
+            <div style="font-size:.88rem;font-weight:500;color:#92400e">${czMoney(z.odvody_mesic)}</div>
+          </div>
+          <div style="background:var(--color-background-secondary,#f5f5f5);border:0.5px solid var(--color-border-tertiary);border-radius:6px;padding:.3rem .6rem;text-align:center">
+            <div style="font-size:.63rem;color:var(--txt2)">Rok s odvodem</div>
+            <div style="font-size:.88rem;font-weight:500">${czMoney(z.castka_rok_s_odvody)}</div>
+          </div>` : "";
         return `
-        <div class="card" style="cursor:pointer;padding:.85rem 1.1rem" onclick="renderVyplatyDetail('${escHtml(z.jmeno)}')">
-          <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
-            <div style="font-size:1.05rem;font-weight:700;min-width:90px">${escHtml(z.jmeno)}</div>
-            <div style="flex:1;font-size:.82rem;color:var(--txt2)">
-              ${posl ? `Poslední: ${posl}` : "Žádné výplaty"}
+        <div class="card" style="cursor:pointer;padding:.7rem 1rem" onclick="renderVyplatyDetail('${escHtml(z.jmeno)}')">
+          <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
+            <div style="font-size:1rem;font-weight:500;min-width:70px">${escHtml(z.jmeno)}</div>
+            <div style="flex:1;font-size:.85rem;min-width:160px">
+              ${posl ? `<span style="color:var(--txt2);font-size:.72rem">Posl.: </span>${posl}` : '<span style="color:var(--txt2);font-style:italic">Žádné výplaty</span>'}
             </div>
-            <div style="text-align:right">
-              <div style="font-size:.75rem;color:var(--txt2)">Měsíc</div>
-              <div style="font-weight:700;color:#166534">${czMoney(z.castka_mesic)}</div>
+            <div style="display:flex;gap:.4rem;align-items:center;flex-wrap:wrap">
+              <div style="background:var(--color-background-secondary,#f5f5f5);border:0.5px solid var(--color-border-tertiary);border-radius:6px;padding:.3rem .6rem;text-align:center">
+                <div style="font-size:.63rem;color:var(--txt2)">Měsíc výplata</div>
+                <div style="font-size:.88rem;font-weight:500;color:#166534">${czMoney(z.castka_mesic)}</div>
+              </div>
+              ${odvodyBoxy}
+              <div style="background:var(--color-background-secondary,#f5f5f5);border:0.5px solid var(--color-border-tertiary);border-radius:6px;padding:.3rem .6rem;text-align:center">
+                <div style="font-size:.63rem;color:var(--txt2)">Rok bez odvodu</div>
+                <div style="font-size:.88rem;font-weight:500">${czMoney(z.castka_rok)}</div>
+              </div>
+              <span style="color:var(--txt2)">→</span>
             </div>
-            <div style="text-align:right">
-              <div style="font-size:.75rem;color:var(--txt2)">Rok</div>
-              <div style="font-weight:600">${czMoney(z.castka_rok)}</div>
-            </div>
-            <span style="color:var(--txt2)">→</span>
           </div>
         </div>`;
       }).join("")}

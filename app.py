@@ -2120,6 +2120,25 @@ def api_faktura_update(fid):
     return jsonify({"ok": True})
 
 # ── API: výplaty ──────────────────────────────────────────────────────────────
+def _spocitej_pausaly_mesic_jmeno(conn, jmeno, mesic_od):
+    """Paušály pro konkrétního zaměstnance k danému měsíci."""
+    rows = conn.execute("""
+        SELECT nazev, castka, platnost_od
+        FROM pausalni_odvody
+        WHERE jmeno=? AND platnost_od <= ?
+        ORDER BY nazev, platnost_od DESC
+    """, (jmeno, mesic_od)).fetchall()
+    seen = set()
+    total = 0.0
+    for r in rows:
+        nazev = r["nazev"] if isinstance(r, dict) else r[0]
+        castka = float(r["castka"] if isinstance(r, dict) else r[1])
+        if nazev not in seen:
+            seen.add(nazev)
+            total += castka
+    return total
+
+
 def _spocitej_pausaly_mesic(conn, mesic_od):
     """Vrátí součet paušálů platných k danému měsíci (bere nejnovější platnost_od <= mesic_od pro každý jmeno+nazev)."""
     rows = conn.execute("""
@@ -2181,10 +2200,20 @@ def api_vyplaty_prehled():
                               "castka": float(r["castka"] if isinstance(r, dict) else r[1])}
                              for r in posledni]
 
+            # Paušály pro tohoto zaměstnance
+            odvody_zam_mesic = _spocitej_pausaly_mesic_jmeno(conn, jmeno, mesic_od)
+            odvody_zam_rok = sum(
+                _spocitej_pausaly_mesic_jmeno(conn, jmeno, f"{dnes.year}-{mi:02d}-01")
+                for mi in range(1, dnes.month + 1)
+            )
+
             result.append({
                 "jmeno": jmeno,
                 "castka_mesic": round(castka_mesic, 2),
                 "castka_rok": round(castka_rok, 2),
+                "odvody_mesic": round(odvody_zam_mesic, 2),
+                "castka_rok_s_odvody": round(castka_rok + odvody_zam_rok, 2),
+                "ma_odvody": odvody_zam_mesic > 0,
                 "posledni": posledni_list,
             })
 
