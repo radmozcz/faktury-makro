@@ -467,7 +467,7 @@ async function renderDashboard() {
     </div>
     <div id="nastenkaBoxiky" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;margin-bottom:1.5rem"></div>
     <div style="border-top:2px solid var(--border);margin:1.2rem 0 .8rem;opacity:.4"></div>
-    <div id="nastenkaSpodek" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;margin-bottom:1rem"></div>`;
+    <div id="nastenkaSpodek" style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1rem"></div>`;
 
   _renderNastenkaBoxiky(check);
   _renderNastenkaSpodek(check, karty_stats);
@@ -520,7 +520,7 @@ function _renderNastenkaSpodek(c, karty_stats) {
   const nmCelkem = nm.reduce((s,m) => s + m.celkem, 0);
 
   el.innerHTML = `
-    <div style="grid-column:1/-1">${renderKartaStatNastenka(karty_stats)}</div>
+    ${renderKartaStatNastenka(karty_stats)}
 
     <div class="card" style="background:${plBg};cursor:pointer" onclick="navigateTo('statistiky')">
       <div class="card-title">P&L — ${rok}</div>
@@ -4194,17 +4194,72 @@ function renderKartaStatNastenka(stats) {
   const ulozeneFirma = localStorage.getItem("aktivni_firma");
   const nekteraAktivni = firmy.some(f => stats[f].aktivni);
 
-  // Najdi aktivní firmu
   let aktivniFirma = firmy.find(f => stats[f].aktivni);
-  if (!aktivniFirma && ulozeneFirma && firmy.includes(ulozeneFirma)) {
-    aktivniFirma = ulozeneFirma;
-  }
+  if (!aktivniFirma && ulozeneFirma && firmy.includes(ulozeneFirma)) aktivniFirma = ulozeneFirma;
   if (!aktivniFirma) aktivniFirma = firmy[0];
 
-  // Zobraz jen aktivní firmu + celkem — použijeme stejný kód jako renderKartaStatHtml
+  // Vrátí dva samostatné cardy (Celkem + aktivní firma) bez flex wrapperu
   const statsFiltered = {};
   statsFiltered[aktivniFirma] = { ...stats[aktivniFirma], aktivni: true };
-  return renderKartaStatHtml(statsFiltered);
+
+  const souhrn = _kartaSouhrn(stats);
+  const aktivniCard = _kartaFirmaCard(aktivniFirma, statsFiltered[aktivniFirma], true);
+  return souhrn + aktivniCard;
+}
+
+function _kartaSouhrn(stats) {
+  const firmy = Object.keys(stats);
+  const czInt = v => Math.round(v||0).toLocaleString("cs-CZ");
+  const sumKartyM = firmy.reduce((s,f) => s+(stats[f].karty_mesic||0), 0);
+  const sumHotM   = firmy.reduce((s,f) => s+(stats[f].hot_mesic||0), 0);
+  const sumTrzbaM = firmy.reduce((s,f) => s+(stats[f].trzba_mesic||0), 0);
+  const sumKartyR = firmy.reduce((s,f) => s+(stats[f].rocni||0), 0);
+  const sumHotR   = firmy.reduce((s,f) => s+(stats[f].hot_rok||0), 0);
+  const sumTrzbaR = firmy.reduce((s,f) => s+(stats[f].trzba_rok||0), 0);
+  const r = (lbl,m,ro) => `<div style="display:flex;justify-content:space-between;font-size:.82rem;padding:.2rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--txt2)">${lbl}</span><span><strong>${czInt(m)}</strong> <span style="color:var(--txt2);font-size:.75rem">/ ${czInt(ro)}</span></span></div>`;
+  return `<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:.85rem">
+    <div style="font-weight:700;font-size:.95rem;margin-bottom:.4rem">Celkem</div>
+    <div style="display:flex;justify-content:flex-end;font-size:.68rem;color:var(--txt2);margin-bottom:.15rem">měsíc / rok</div>
+    ${r('💳 Karty', sumKartyM, sumKartyR)}
+    ${r('💵 Hotovost', sumHotM, sumHotR)}
+    ${r('📈 Tržba', sumTrzbaM, sumTrzbaR)}
+  </div>`;
+}
+
+function _kartaFirmaCard(firma, d, jeAktivni) {
+  const czInt = v => Math.round(v||0).toLocaleString("cs-CZ");
+  const mPct = Math.min(Math.round((d.mesicni||0) / (d.terminal_limit||100000) * 100), 100);
+  const rPct = Math.min(Math.round((d.rocni||0)   / (d.dph_limit||2000000)    * 100), 100);
+  const mCol = mPct >= 100 ? "#ef4444" : mPct >= 80 ? "#f59e0b" : "#9ca3af";
+  const rCol = rPct >= 100 ? "#ef4444" : rPct >= 75 ? "#f59e0b" : "#9ca3af";
+  const od   = d.terminal_od ? new Date(d.terminal_od).toLocaleDateString("cs-CZ") : "—";
+  const bord = jeAktivni ? '2px solid #16a34a' : '1px solid var(--border)';
+  const bar  = (pct,col) => `<div style="background:#e5e7eb;border-radius:3px;height:4px;margin-bottom:.3rem"><div style="background:${col};height:4px;border-radius:3px;width:${pct}%"></div></div>`;
+  const r    = (lbl,m,ro) => `<div style="display:flex;justify-content:space-between;font-size:.82rem;padding:.2rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--txt2)">${lbl}</span><span><strong>${czInt(m)}</strong> <span style="color:var(--txt2);font-size:.75rem">/ ${czInt(ro)}</span></span></div>`;
+  return `<div style="background:var(--card-bg);border:${bord};border-radius:10px;padding:.85rem">
+    <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.2rem">
+      <span style="font-weight:700;font-size:.95rem">${escHtml(firma)}</span>
+      <span style="background:#dcfce7;color:#166534;font-size:.65rem;padding:.1rem .4rem;border-radius:99px;font-weight:600">● kasíruje</span>
+    </div>
+    <div style="font-size:.7rem;color:var(--txt2);margin-bottom:.4rem">od ${od}</div>
+    <div style="display:flex;justify-content:flex-end;font-size:.68rem;color:var(--txt2);margin-bottom:.15rem">měsíc / rok</div>
+    ${r('💳 Karty', d.karty_mesic||0, d.rocni||0)}
+    ${r('💵 Hotovost', d.hot_mesic||0, d.hot_rok||0)}
+    ${r('📈 Tržba', d.trzba_mesic||0, d.trzba_rok||0)}
+    <div style="margin-top:.5rem">
+      <div style="display:flex;justify-content:space-between;font-size:.75rem;margin-bottom:.1rem">
+        <span style="color:var(--txt2)">Terminál</span>
+        <strong style="color:${mCol}">${czInt(d.mesicni||0)} / ${czInt(d.terminal_limit||100000)}</strong>
+      </div>
+      ${bar(mPct,mCol)}
+      <div style="display:flex;justify-content:space-between;font-size:.75rem;margin-bottom:.1rem">
+        <span style="color:var(--txt2)">DPH rok</span>
+        <strong style="color:${rCol}">${czInt(d.rocni||0)} / ${czInt(d.dph_limit||2000000)}</strong>
+      </div>
+      ${bar(rPct,rCol)}
+    </div>
+    ${mPct >= 100 ? '<div style="font-size:.72rem;color:#991b1b;font-weight:700">🚨 Limit překročen!</div>' : mPct >= 90 ? '<div style="font-size:.72rem;color:#b45309">⚠️ Blíží se limit</div>' : ''}
+  </div>`;
 }
 
 function renderKartaStatHtml(stats) {
