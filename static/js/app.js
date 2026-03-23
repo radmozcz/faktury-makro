@@ -274,6 +274,14 @@ document.getElementById("modalOverlay").addEventListener("click", e => {
 //  Formátování
 // ═══════════════════════════════════════════════════════════════
 function czMoney(v) {
+  return Number(v).toLocaleString("cs-CZ", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+function czMoneyFull(v) {
+  return Number(v).toLocaleString("cs-CZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " Kč";
+}
+
+function czMoneyFA(v) {
   return Number(v).toLocaleString("cs-CZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " Kč";
 }
 
@@ -628,7 +636,7 @@ async function _loadNastenkaFA() {
           <tr data-id="${f.id}" class="faktura-row" style="cursor:pointer">
             <td>${escHtml(f.dodavatel)}</td>
             <td>${czDate(f.datum_vystaveni)}</td>
-            <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
+            <td><strong>${czMoneyFull(f.celkem_s_dph)}</strong></td>
             <td>${stavBadge(f.stav)}</td>
           </tr>`).join("") || "<tr><td colspan='4' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné faktury</td></tr>"}
       </tbody>
@@ -760,7 +768,7 @@ async function loadFaktury() {
               <td>${escHtml(f.dodavatel)}</td>
               <td>${escHtml(f.cislo_faktury||"–")}${f.duplicita_id ? " <small style='color:orange'>⚠️ dup #" + f.duplicita_id + "</small>" : ""}</td>
               <td>${czDate(f.datum_vystaveni)}</td>
-              <td><strong>${czMoney(f.celkem_s_dph)}</strong></td>
+              <td><strong>${czMoneyFull(f.celkem_s_dph)}</strong></td>
               <td>${f.duplicita_id ? '<span class="badge" style="background:#0d6efd;color:#fff;cursor:pointer" onclick="event.stopPropagation();openFakturaDetail(' + f.duplicita_id + ')">🔗 Duplikát</span>' : stavBadge(f.stav)}</td>
               <td onclick="event.stopPropagation()" style="white-space:nowrap">
                 ${f.soubor_url ? `<a href="${f.soubor_url}" target="_blank" class="btn btn-secondary btn-sm" title="Zobrazit originál" style="padding:.2rem .4rem">📎</a>` : ""}
@@ -776,7 +784,7 @@ async function loadFaktury() {
       <tfoot>
         <tr class="table-footer">
           <td colspan="4">Celkem (${data.faktury.length} faktur)</td>
-          <td colspan="${maPravo('faktury_smazat') ? 3 : 2}"><strong>${czMoney(data.celkem)}</strong></td>
+          <td colspan="${maPravo('faktury_smazat') ? 3 : 2}"><strong>${czMoneyFull(data.celkem)}</strong></td>
         </tr>
       </tfoot>` : ""}
     </table>`;
@@ -1431,7 +1439,7 @@ async function hromadneNahrat(files) {
             headers: {"Content-Type":"application/json"},
             body: JSON.stringify(dupPayload)
           });
-          row.innerHTML = `⚠️ ${file.name} – <span style="color:orange">duplikát faktury #${data.duplicita.id} (${data.duplicita.firma}, ${czDate(data.duplicita.datum)}, ${czMoney(data.duplicita.celkem)}) — uloženo jako duplikát</span>`;
+          row.innerHTML = `⚠️ ${file.name} – <span style="color:orange">duplikát faktury #${data.duplicita.id} (${data.duplicita.firma}, ${czDate(data.duplicita.datum)}, ${czMoneyFull(data.duplicita.celkem)}) — uloženo jako duplikát</span>`;
           ok++;
           continue;
         }
@@ -1451,7 +1459,7 @@ async function hromadneNahrat(files) {
         polozky:       data.polozky || []
       };
       await api('/api/faktury', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-      row.innerHTML = `✅ ${file.name} – uloženo (${(data.polozky||[]).length} položek, ${czMoney(data.celkem_s_dph)})`;
+      row.innerHTML = `✅ ${file.name} – uloženo (${(data.polozky||[]).length} položek, ${czMoneyFull(data.celkem_s_dph)})`;
       ok++;
     } catch(e) {
       row.innerHTML = `❌ ${file.name} – ${e.message}`; err++;
@@ -1583,7 +1591,7 @@ async function naplnFormular(data, appendMode = false) {
     const statusDiv = document.getElementById("nahratStatus") || document.createElement("div");
     statusDiv.id = "nahratStatus";
     statusDiv.style.cssText = "background:#fee2e2;border:2px solid #ef4444;border-radius:6px;padding:.7rem 1rem;margin-top:1rem;color:#991b1b;font-size:.9rem";
-    statusDiv.innerHTML = `🚨 <strong>DUPLIKÁT uložen!</strong> Faktura č. <strong>${data.cislo_faktury}</strong> je duplikát faktury #${data.duplicita.id} (${data.duplicita.firma}, ${czDate(data.duplicita.datum)}, ${czMoney(data.duplicita.celkem)}). Uložena s označením duplikátu.`;
+    statusDiv.innerHTML = `🚨 <strong>DUPLIKÁT uložen!</strong> Faktura č. <strong>${data.cislo_faktury}</strong> je duplikát faktury #${data.duplicita.id} (${data.duplicita.firma}, ${czDate(data.duplicita.datum)}, ${czMoneyFull(data.duplicita.celkem)}). Uložena s označením duplikátu.`;
     document.querySelector(".dropzone")?.insertAdjacentElement("afterend", statusDiv);
     uploadedFilePath = null;
     return;
@@ -1618,10 +1626,10 @@ function zobrazOcrKontrolu(k) {
     const ok = rozdil < ocekavano * 0.05;
     if (ok && pocetPodezrelych === 0) {
       div.style.cssText += "background:#d1fae5;border:1px solid #6ee7b7;color:#065f46";
-      div.innerHTML = `✅ <strong>Vše sedí!</strong> Součet ${czMoney(suma)} odpovídá faktuře (bez DPH: ${czMoney(ocr_bez)})`;
+      div.innerHTML = `✅ <strong>Vše sedí!</strong> Součet ${czMoneyFull(suma)} odpovídá faktuře (bez DPH: ${czMoneyFull(ocr_bez)})`;
     } else {
       div.style.cssText += "background:#fef3c7;border:1px solid #fbbf24;color:#92400e";
-      div.innerHTML = `⚠️ <strong>Zkontroluj!</strong> Součet položek: <strong>${czMoney(suma)}</strong> &nbsp;|&nbsp; Faktura bez DPH: <strong>${czMoney(ocr_bez)}</strong>
+      div.innerHTML = `⚠️ <strong>Zkontroluj!</strong> Součet položek: <strong>${czMoneyFull(suma)}</strong> &nbsp;|&nbsp; Faktura bez DPH: <strong>${czMoneyFull(ocr_bez)}</strong>
         ${pocetPodezrelych > 0 ? `<br><small>🔴 ${pocetPodezrelych} položka/položky označeny červeně – zkontroluj je</small>` : ""}`;
     }
   } else if (pocetPodezrelych > 0) {
@@ -1674,7 +1682,7 @@ function updateTotal() {
       k.innerHTML = `✅ <strong>Částka sedí</strong> – součet ${czMoney(t)} odpovídá faktuře`;
     } else {
       k.style.background = "#fef3c7"; k.style.border = "1px solid #fbbf24"; k.style.color = "#92400e";
-      k.innerHTML = `⚠️ <strong>Zkontroluj!</strong> Součet: <strong>${czMoney(t)}</strong> &nbsp;|&nbsp; Faktura bez DPH: <strong>${czMoney(ocr_bez)}</strong>`;
+      k.innerHTML = `⚠️ <strong>Zkontroluj!</strong> Součet: <strong>${czMoneyFull(t)}</strong> &nbsp;|&nbsp; Faktura bez DPH: <strong>${czMoneyFull(ocr_bez)}</strong>`;
     }
   }
 }
@@ -2252,7 +2260,7 @@ async function loadVyplatyPrehled() {
     <div style="display:flex;flex-direction:column;gap:.6rem">
       ${data.zamestnanci.map(z => {
         const posl = z.posledni.map(p =>
-          `<strong>${czMoney(p.castka)}</strong> <span style="font-size:.75rem;color:var(--txt2)">${czDate(p.datum)}</span>`
+          `<strong>${czMoneyFull(p.castka)}</strong> <span style="font-size:.75rem;color:var(--txt2)">${czDate(p.datum)}</span>`
         ).join(" &nbsp;·&nbsp; ");
         const odvodyBoxy = z.ma_odvody ? `
           <div style="background:var(--color-background-secondary,#f5f5f5);border:0.5px solid var(--color-border-tertiary);border-radius:6px;padding:.3rem .6rem;text-align:center">
@@ -2327,7 +2335,7 @@ async function renderVyplatyDetail(jmeno) {
               <tr>
                 <td>${czDate(v.datum)}</td>
                 <td><span class="badge" style="background:var(--green-pale)">${escHtml(v.firma_zkratka||"—")}</span></td>
-                <td><strong>${czMoney(v.castka)}</strong></td>
+                <td><strong>${czMoneyFull(v.castka)}</strong></td>
                 <td style="color:var(--txt2);font-size:.88rem">${escHtml(v.poznamka||"")}</td>
                 <td>
                   <button class="btn btn-secondary btn-sm" onclick="editVyplataDetail(${v.id},'${escHtml(v.jmeno)}','${v.datum}',${v.castka},'${escHtml(v.poznamka||"")}','${escHtml(v.firma_zkratka||"")}','${escHtml(jmeno)}')">✏️</button>
@@ -2452,7 +2460,7 @@ async function loadVyplaty() {
             <td><span class="badge" style="background:var(--green-pale)">${escHtml(v.firma_zkratka||"—")}</span></td>
             <td><strong>${escHtml(v.jmeno)}</strong></td>
             <td>${czDate(v.datum)}</td>
-            <td><strong>${czMoney(v.castka)}</strong></td>
+            <td><strong>${czMoneyFull(v.castka)}</strong></td>
             <td style="color:var(--txt2);font-size:.88rem">${escHtml(v.poznamka||"")}</td>
             <td>
               <button class="btn btn-secondary btn-sm" onclick="editVyplata(${v.id},'${escHtml(v.jmeno)}','${v.datum}',${v.castka},'${escHtml(v.poznamka||"")}','${escHtml(v.firma_zkratka||"")}')">✏️</button>
@@ -2460,7 +2468,7 @@ async function loadVyplaty() {
             </td>
           </tr>`).join("") || "<tr><td colspan='6' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné výplaty</td></tr>"}
       </tbody>
-      ${data.vyplaty.length ? `<tfoot><tr class="table-footer"><td colspan="3">Celkem (${data.vyplaty.length})</td><td colspan="3"><strong>${czMoney(data.celkem)}</strong></td></tr></tfoot>` : ""}
+      ${data.vyplaty.length ? `<tfoot><tr class="table-footer"><td colspan="3">Celkem (${data.vyplaty.length})</td><td colspan="3"><strong>${czMoneyFull(data.celkem)}</strong></td></tr></tfoot>` : ""}
     </table>`;
 }
 
@@ -4912,9 +4920,9 @@ async function loadBankaAccordion(banka, firma) {
       <div style="display:flex;align-items:center;padding:.9rem 1.2rem;cursor:pointer;gap:1rem"
            onclick="toggleBankaMonth('bm_${klic}', this)">
         <span style="font-size:1.1rem;font-weight:700;flex:1">${nazevMesice}</span>
-        <span style="color:#16a34a;font-size:.9rem">↑ ${czMoney(prichozi)}</span>
-        <span style="color:#dc2626;font-size:.9rem">↓ ${czMoney(Math.abs(odchozi))}</span>
-        <span style="font-weight:600;font-size:.9rem;color:${saldo>=0?'#16a34a':'#dc2626'}">= ${czMoney(saldo)}</span>
+        <span style="color:#16a34a;font-size:.9rem">↑ ${czMoneyFull(prichozi)}</span>
+        <span style="color:#dc2626;font-size:.9rem">↓ ${czMoneyFull(Math.abs(odchozi))}</span>
+        <span style="font-weight:600;font-size:.9rem;color:${saldo>=0?'#16a34a':'#dc2626'}">= ${czMoneyFull(saldo)}</span>
         <span style="color:var(--txt2);font-size:.85rem">${pohyby.length} trans.</span>
         <div style="display:flex;gap:.4rem" onclick="event.stopPropagation()">
           <button class="btn btn-sm" style="font-size:.75rem;padding:.2rem .5rem" onclick="exportBankaMonth('${banka}','${klic}','csv')">CSV</button>
@@ -4936,7 +4944,7 @@ async function loadBankaAccordion(banka, firma) {
                 <td><strong>${escHtml(p.nazev_protiucet||"—")}</strong>${p.protiucet?`<br><small style="color:var(--txt2)">${escHtml(p.protiucet)}</small>`:""}</td>
                 <td style="font-size:.85rem;color:var(--txt2)">${escHtml(p.typ_transakce||"")}</td>
                 <td style="font-size:.85rem;color:var(--txt2);max-width:180px">${escHtml(p.zprava||"")}</td>
-                <td style="text-align:right;font-weight:600;color:${p.castka>=0?'#16a34a':'#dc2626'}">${czMoney(p.castka)}</td>
+                <td style="text-align:right;font-weight:600;color:${p.castka>=0?'#16a34a':'#dc2626'}">${czMoneyFull(p.castka)}</td>
                 <td><button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:.2rem .4rem;border-radius:4px" onclick="smazatBankovniPohyb(${p.id},'${banka}','${firma}')">🗑</button></td>
               </tr>`).join("")}
             </tbody>
@@ -5097,7 +5105,7 @@ async function loadBanky() {
       <tfoot>
         <tr class="table-footer">
           <td colspan="5">Celkem (${data.pohyby.length} transakcí)</td>
-          <td style="text-align:right"><strong style="color:${data.celkem>=0?'#16a34a':'#dc2626'}">${czMoney(data.celkem)}</strong></td>
+          <td style="text-align:right"><strong style="color:${data.celkem>=0?'#16a34a':'#dc2626'}">${czMoneyFull(data.celkem)}</strong></td>
           <td></td>
         </tr>
       </tfoot>` : ""}
@@ -5189,7 +5197,7 @@ async function loadVydajeNezaplacene() {
           <strong style="color:#92400e">⚠️ Nezaplacené výdaje (${data.vydaje.length})</strong>
           ${pocetPoSplatnosti ? `<span style="margin-left:.7rem;background:#fee2e2;color:#991b1b;border-radius:4px;padding:.1rem .5rem;font-size:.8rem;font-weight:700">${pocetPoSplatnosti} po splatnosti</span>` : ""}
         </div>
-        <span style="font-weight:700;color:#dc2626">${czMoney(data.celkem)}</span>
+        <span style="font-weight:700;color:#dc2626">${czMoneyFull(data.celkem)}</span>
       </div>
       <div class="table-wrap">
         <table>
@@ -5220,7 +5228,7 @@ async function loadVydajeNezaplacene() {
               <td><span class="badge">${escHtml(v.firma_zkratka)}</span></td>
               <td>${escHtml(v.dodavatel||"—")}</td>
               <td>${escHtml(v.popis||v.poznamka||"")}</td>
-              <td style="text-align:right;font-weight:600;color:#dc2626">${czMoney(v.castka)}</td>
+              <td style="text-align:right;font-weight:600;color:#dc2626">${czMoneyFull(v.castka)}</td>
             </tr>`;
             }).join("")}
           </tbody>
@@ -5308,13 +5316,13 @@ async function loadVydaje() {
             ${v.poznamka?`<small style="color:var(--txt2)">${escHtml(v.poznamka)}</small>`:""}
           </td>
           <td style="font-size:.82rem;color:var(--txt2)">
-            ${(v.polozky||[]).map(p=>`${escHtml(p.nazev)} ${czMoney(p.castka)}`).join("<br>")||"—"}
+            ${(v.polozky||[]).map(p=>`${escHtml(p.nazev)} ${czMoneyFull(p.castka)}`).join("<br>")||"—"}
           </td>
           <td><span class="badge" style="background:#f3f4f6">${escHtml(v.zpusob_uhrady||"")}</span></td>
           <td style="font-size:.85rem;color:var(--txt2)">
             ${v.datum_uhrady ? `${czDate(v.datum_uhrady)}${v.banka_uhrady ? `<br><small>${escHtml(v.banka_uhrady)}</small>` : ""}` : "—"}
           </td>
-          <td style="text-align:right;font-weight:600;color:${v.stav==='zaplaceno'?'var(--txt2)':'#dc2626'}">${czMoney(v.castka)}</td>
+          <td style="text-align:right;font-weight:600;color:${v.stav==='zaplaceno'?'var(--txt2)':'#dc2626'}">${czMoneyFull(v.castka)}</td>
           <td>${v.soubor_url?`<a href="${v.soubor_url}" target="_blank" onclick="event.stopPropagation()" style="font-size:.85rem">📎</a>`:""}</td>
           <td onclick="event.stopPropagation()">
             ${mozeSmazat?`<button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:.2rem .4rem;border-radius:4px" onclick="smazatVydaj(${v.id})">🗑</button>`:""}
@@ -5325,7 +5333,7 @@ async function loadVydaje() {
       ${data.vydaje.length ? `
       <tfoot><tr class="table-footer">
         <td colspan="8">Celkem (${data.vydaje.length} výdajů)</td>
-        <td style="text-align:right"><strong style="color:#dc2626">${czMoney(data.celkem)}</strong></td>
+        <td style="text-align:right"><strong style="color:#dc2626">${czMoneyFull(data.celkem)}</strong></td>
         <td colspan="2"></td>
       </tr></tfoot>` : ""}
     </table>`;
@@ -5671,9 +5679,9 @@ async function loadVystavene() {
     if (f.stav === "zaplaceno") zapl += f.castka; else nezapl += f.castka;
   });
   const p = document.getElementById("vyst-pocet");  if (p) p.textContent = data.length;
-  const c = document.getElementById("vyst-celkem"); if (c) c.textContent = czMoney(celkem) + " Kč";
-  const n = document.getElementById("vyst-nezapl"); if (n) n.textContent = czMoney(nezapl) + " Kč";
-  const z = document.getElementById("vyst-zapl");   if (z) z.textContent = czMoney(zapl) + " Kč";
+  const c = document.getElementById("vyst-celkem"); if (c) c.textContent = czMoneyFull(celkem) + " Kč";
+  const n = document.getElementById("vyst-nezapl"); if (n) n.textContent = czMoneyFull(nezapl) + " Kč";
+  const z = document.getElementById("vyst-zapl");   if (z) z.textContent = czMoneyFull(zapl) + " Kč";
 
   if (!data.length) { el.innerHTML = "<p style='padding:1rem;color:var(--text-muted)'>Žádné vystavené faktury.</p>"; return; }
 
@@ -5722,7 +5730,7 @@ async function loadVystavene() {
         <td>${odkaz}${dupBadge}</td><td>${f.datum||"—"}</td><td>${f.datum_splatnosti||"—"}</td>
         <td>${f.odberatel||"—"}</td>
         <td style="color:var(--text-muted);font-size:0.85rem">${f.popis||"—"}</td>
-        <td class="text-right fw-bold">${czMoney(f.castka)} Kč</td>
+        <td class="text-right fw-bold">${czMoneyFull(f.castka)} Kč</td>
         <td class="text-center">${stavBtn}</td>${akce}
       </tr>`;
     }).join("")}</tbody></table>`;
