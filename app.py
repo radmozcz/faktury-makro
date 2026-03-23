@@ -635,18 +635,6 @@ def migrate_db():
         if "platnost_od" not in po_cols:
             try: conn.execute("ALTER TABLE pausalni_odvody ADD COLUMN platnost_od TEXT DEFAULT '2020-01-01'")
             except Exception: pass
-        # Odebrat UNIQUE constraint (jmeno, nazev) — nyní může být více záznamů
-        if _USE_PG:
-            try:
-                with get_db() as conn2:
-                    row = conn2.execute("""
-                        SELECT constraint_name FROM information_schema.table_constraints
-                        WHERE table_name='pausalni_odvody' AND constraint_type='UNIQUE'
-                    """).fetchone()
-                    if row:
-                        cname = row["constraint_name"] if isinstance(row, dict) else row[0]
-                        conn2.execute(f"ALTER TABLE pausalni_odvody DROP CONSTRAINT IF EXISTS {cname}")
-            except Exception: pass
 
     # paska_url ve vyplaty
     with get_db() as conn:
