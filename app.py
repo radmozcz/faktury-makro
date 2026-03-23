@@ -145,6 +145,7 @@ DEFAULT_PRAVA = {
         "soukrome_vydaje_smazat":       False,
         "naklady_zobrazit":             False,
         "bankovni_vypisy":              False,
+        "banky_soukrome":               False,
         "statistiky":                   False,
         "nastaveni":                    False,
         "vystavene_zobrazit":           False,
@@ -170,6 +171,7 @@ DEFAULT_PRAVA = {
         "soukrome_vydaje_smazat":       False,
         "naklady_zobrazit":             True,
         "bankovni_vypisy":              True,
+        "banky_soukrome":               False,
         "statistiky":                   False,
         "nastaveni":                    False,
         "vystavene_zobrazit":           True,
@@ -2824,6 +2826,50 @@ def parse_csv_airbank(content_bytes):
         })
     return pohyby
 
+def parse_csv_kb(content_bytes):
+    """Parser pro Komerční banku - základní CSV formát."""
+    import csv, io
+    # KB exportuje UTF-8 s BOM nebo win-1250
+    for enc in ["utf-8-sig", "cp1250", "utf-8"]:
+        try:
+            text = content_bytes.decode(enc)
+            break
+        except Exception:
+            continue
+    reader = csv.DictReader(io.StringIO(text), delimiter=";")
+    pohyby = []
+    for row in reader:
+        # KB má různé formáty - zkusíme nejběžnější sloupce
+        datum_raw = (row.get("Datum splatnosti") or row.get("Datum") or row.get("datum") or "").strip().strip('"')
+        castka_raw = (row.get("Částka") or row.get("castka") or row.get("Zaúčtovaná částka") or "").strip().strip('"').replace(",", ".").replace(" ", "")
+        id_transakce = (row.get("Identifikace transakce") or row.get("ID") or "").strip().strip('"')
+        if not datum_raw or not castka_raw:
+            continue
+        try:
+            # Různé formáty data
+            for fmt in ["%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y"]:
+                try:
+                    from datetime import datetime as _dtt
+                    datum = _dtt.strptime(datum_raw, fmt).strftime("%Y-%m-%d")
+                    break
+                except Exception:
+                    datum = datum_raw
+            castka = float(castka_raw)
+        except Exception:
+            continue
+        pohyby.append({
+            "banka":           "KB",
+            "datum":           datum,
+            "castka":          castka,
+            "protiucet":       (row.get("Číslo protiúčtu") or row.get("Protiúčet") or "").strip().strip('"'),
+            "nazev_protiucet": (row.get("Název protiúčtu") or row.get("Příjemce/Plátce") or row.get("Popis") or "").strip().strip('"'),
+            "typ_transakce":   (row.get("Typ transakce") or row.get("Typ pohybu") or "").strip().strip('"'),
+            "zprava":          (row.get("Poznámka") or row.get("Zpráva pro příjemce") or row.get("Popis platby") or "").strip().strip('"'),
+            "id_transakce":    f"KB_{id_transakce}" if id_transakce else None,
+        })
+    return pohyby
+
+
 def parse_csv_rb(content_bytes):
     import csv, io
     text = content_bytes.decode("utf-8-sig")
@@ -2865,7 +2911,10 @@ def api_banky_import():
     fname = (f.filename or "").lower()
 
     try:
-        if banka_hint == "AirBank" or "airbank" in fname or "air_bank" in fname:
+        if banka_hint == "KB":
+            pohyby = parse_csv_kb(content)
+            banka = "KB"
+        elif banka_hint == "AirBank" or "airbank" in fname or "air_bank" in fname:
             pohyby = parse_csv_airbank(content)
             banka = "AirBank"
         elif banka_hint == "RB" or "pohyby_" in fname:

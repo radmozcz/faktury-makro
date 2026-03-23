@@ -3149,6 +3149,7 @@ async function renderNastaveni() {
     { klic: "soukrome_vydaje_smazat",   label: "Soukromé výdaje — mazat" },
     { klic: "naklady_zobrazit",  label: "Náklady — zobrazit" },
     { klic: "bankovni_vypisy",   label: "Bankovní výpisy" },
+    { klic: "banky_soukrome",    label: "Banky — Radek osobní" },
     { klic: "statistiky",        label: "Statistiky" },
     { klic: "nastaveni",         label: "Nastavení" },
     { klic: "kalkulace",         label: "Kalkulace" },
@@ -4485,6 +4486,15 @@ function exportReporty(fmt) {
 
 // Hlavní stránka – výběr firmy
 function renderBanky() {
+  const soukromeCard = maPravo("banky_soukrome") ? `
+    <div class="card" style="flex:1;min-width:200px;max-width:280px;cursor:pointer;text-align:center;padding:2rem;transition:box-shadow .2s;border:2px solid #e0d8cc"
+         onclick="renderBankySoukrome()"
+         onmouseover="this.style.boxShadow='0 4px 24px rgba(0,0,0,.13)'"
+         onmouseout="this.style.boxShadow=''">
+      <div style="font-size:3rem">👤</div>
+      <div style="font-size:1.2rem;font-weight:700;margin-top:.5rem">Radek — osobní</div>
+      <div style="color:var(--txt2);font-size:.9rem;margin-top:.3rem">Osobní banky →</div>
+    </div>` : "";
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header"><h1 class="page-title">Bankovní výpisy</h1></div>
     <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:1rem">
@@ -4497,6 +4507,44 @@ function renderBanky() {
         <div style="font-size:1.2rem;font-weight:700;margin-top:.5rem">${f}</div>
         <div style="color:var(--txt2);font-size:.9rem;margin-top:.3rem">Vybrat banku →</div>
       </div>`).join("")}
+      ${soukromeCard}
+    </div>`;
+}
+
+// Výběr osobní banky Radek
+function renderBankySoukrome() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">
+        <span style="cursor:pointer;color:var(--txt2);font-weight:400" onclick="renderBanky()">Banky</span>
+        <span style="margin:0 .4rem">›</span>Radek — osobní
+      </h1>
+    </div>
+    <div style="display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:1rem">
+      <div class="card" style="flex:1;min-width:200px;max-width:280px;cursor:pointer;text-align:center;padding:2rem;transition:box-shadow .2s"
+           onclick="renderBankaDetail('AirBank','_soukrome')"
+           onmouseover="this.style.boxShadow='0 4px 24px rgba(0,0,0,.13)'"
+           onmouseout="this.style.boxShadow=''">
+        <div style="font-size:3rem">🏦</div>
+        <div style="font-size:1.2rem;font-weight:700;margin-top:.5rem">Air Bank</div>
+        <div style="color:var(--txt2);font-size:.9rem;margin-top:.3rem">Osobní účet →</div>
+      </div>
+      <div class="card" style="flex:1;min-width:200px;max-width:280px;cursor:pointer;text-align:center;padding:2rem;transition:box-shadow .2s"
+           onclick="renderBankaDetail('RB','_soukrome')"
+           onmouseover="this.style.boxShadow='0 4px 24px rgba(0,0,0,.13)'"
+           onmouseout="this.style.boxShadow=''">
+        <div style="font-size:3rem">🏛</div>
+        <div style="font-size:1.2rem;font-weight:700;margin-top:.5rem">Raiffeisenbank</div>
+        <div style="color:var(--txt2);font-size:.9rem;margin-top:.3rem">Osobní účet →</div>
+      </div>
+      <div class="card" style="flex:1;min-width:200px;max-width:280px;cursor:pointer;text-align:center;padding:2rem;transition:box-shadow .2s"
+           onclick="renderBankaDetail('KB','_soukrome')"
+           onmouseover="this.style.boxShadow='0 4px 24px rgba(0,0,0,.13)'"
+           onmouseout="this.style.boxShadow=''">
+        <div style="font-size:3rem">🏦</div>
+        <div style="font-size:1.2rem;font-weight:700;margin-top:.5rem">Komerční banka</div>
+        <div style="color:var(--txt2);font-size:.9rem;margin-top:.3rem">Hypotéka, energie →</div>
+      </div>
     </div>`;
 }
 
@@ -4531,13 +4579,17 @@ function renderBankyFirma(firma) {
 
 // Detail banky – accordion po měsících
 async function renderBankaDetail(banka, firma) {
-  const nazevBanky = banka === "AirBank" ? "Air Bank" : "Raiffeisenbank";
+  const nazevBanky = banka === "AirBank" ? "Air Bank" : banka === "RB" ? "Raiffeisenbank" : "Komerční banka";
+  const jeSoukrome = firma === "_soukrome";
+  const breadcrumbBack = jeSoukrome
+    ? `<span style="cursor:pointer;color:var(--txt2);font-weight:400" onclick="renderBankySoukrome()">Radek — osobní</span>`
+    : `<span style="cursor:pointer;color:var(--txt2);font-weight:400" onclick="renderBankyFirma('${firma}')">${firma}</span>`;
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
       <h1 class="page-title">
         <span style="cursor:pointer;color:var(--txt2);font-weight:400" onclick="renderBanky()">Banky</span>
         <span style="margin:0 .4rem">›</span>
-        <span style="cursor:pointer;color:var(--txt2);font-weight:400" onclick="renderBankyFirma('${firma}')">${firma}</span>
+        ${breadcrumbBack}
         <span style="margin:0 .4rem">›</span>${nazevBanky}
       </h1>
       <button class="btn btn-primary btn-sm" onclick="openImportBanky('${banka}','${firma}')">📥 Importovat výpis</button>
@@ -4629,7 +4681,7 @@ function exportBankaMonth(banka, mesic, fmt) {
 }
 
 function openImportBanky(banka, firma) {
-  const nazev = banka === "AirBank" ? "Air Bank" : "Raiffeisenbank";
+  const nazev = banka === "AirBank" ? "Air Bank" : banka === "RB" ? "Raiffeisenbank" : "Komerční banka";
   openModal(`Importovat výpis – ${nazev} / ${firma||""}`, `
     <p style="color:var(--txt2);font-size:.85rem;margin-bottom:1rem">
       Nahraj CSV výpis z <strong>${nazev}</strong>.
