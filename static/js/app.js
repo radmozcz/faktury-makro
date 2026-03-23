@@ -465,22 +465,117 @@ async function renderDashboard() {
       <button class="btn btn-secondary btn-sm" onclick="renderDashboard()">🔄 Zkontrolovat</button>
     </div>
     <div id="nastenkaBoxiky" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;margin-bottom:1.5rem"></div>
-    <div class="grid-2" style="gap:1rem;margin-bottom:1rem;">
-      <div class="card">
-        <div class="card-title">Výdaje po měsících</div>
-        <div class="chart-wrap"><canvas id="barChart"></canvas></div>
-      </div>
-      <div class="card">
-        <div class="card-title">Poslední faktury</div>
-        <div class="table-wrap" id="posledniFA"><div class="loading-center"><span class="spinner"></span></div></div>
-        <div style="margin-top:.8rem;text-align:right">
-          <button class="btn btn-secondary btn-sm" onclick="navigateTo('faktury')">Všechny faktury →</button>
-        </div>
-      </div>
-    </div>`;
+    <div id="nastenkaSpodek" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:1rem;margin-bottom:1rem"></div>`;
 
   _renderNastenkaBoxiky(check);
-  _loadNastenkaFA();
+  _renderNastenkaSpodek(check);
+}
+
+function _renderNastenkaSpodek(c) {
+  const el = document.getElementById("nastenkaSpodek");
+  if (!el) return;
+  const rok = new Date().getFullYear();
+
+  // BOX 1: Terminál / karty per firma
+  const tf = c.terminal_firmy || {};
+  const limit = c.terminal_limit || 100000;
+  const firmy = Object.keys(tf);
+  const terminalRows = firmy.map(f => {
+    const d = tf[f];
+    const barW = Math.min(d.procent, 100);
+    const barColor = d.stav === "error" ? "#ef4444" : d.stav === "warning" ? "#f59e0b" : "#22c55e";
+    return `
+      <div style="margin-bottom:.6rem">
+        <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:.2rem">
+          <span style="font-weight:600">${f}</span>
+          <span style="color:var(--txt2)">${czMoney(d.castka)} / ${czMoney(limit)}</span>
+        </div>
+        <div style="background:#e5e7eb;border-radius:4px;height:6px">
+          <div style="background:${barColor};width:${barW}%;height:6px;border-radius:4px;transition:width .3s"></div>
+        </div>
+        <div style="font-size:.75rem;color:var(--txt2);margin-top:.15rem">${d.procent} %${d.aktivni ? ' · <strong>aktivní</strong>' : ''}</div>
+      </div>`;
+  }).join("");
+
+  // BOX 2: P&L
+  const pl = c.pl || {};
+  const plColor = (pl.pl_rok || 0) >= 0 ? "#166534" : "#991b1b";
+  const plBg = (pl.pl_rok || 0) >= 0 ? "#f0fdf4" : "#fee2e2";
+
+  // BOX 3: Náklady po měsících
+  const nm = c.naklady_mesice || [];
+  const mesNames = ["","Led","Úno","Bře","Dub","Kvě","Čvn","Čvc","Srp","Zář","Říj","Lis","Pro"];
+  const nmRows = nm.map(m => {
+    const mi = parseInt(m.mesic.split("-")[1]);
+    return `
+      <tr style="border-top:0.5px solid var(--border)">
+        <td style="padding:3px 6px;font-size:.8rem">${mesNames[mi] || m.mesic}</td>
+        <td style="padding:3px 6px;font-size:.8rem;text-align:right">${czMoney(m.faktury)}</td>
+        <td style="padding:3px 6px;font-size:.8rem;text-align:right">${czMoney(m.vydaje)}</td>
+        <td style="padding:3px 6px;font-size:.8rem;text-align:right;font-weight:600">${czMoney(m.celkem)}</td>
+      </tr>`;
+  }).join("");
+  const nmCelkem = nm.reduce((s,m) => s + m.celkem, 0);
+
+  el.innerHTML = `
+    <div class="card" style="cursor:pointer" onclick="navigateTo('reporty')">
+      <div class="card-title">Terminál / karty — ${mesNames[new Date().getMonth()+1]} ${rok}</div>
+      ${terminalRows || "<div style='color:var(--txt2);font-size:.85rem'>Žádná data</div>"}
+      <div style="font-size:.75rem;color:var(--txt2);margin-top:.5rem">Limit: ${czMoney(limit)} / měsíc →</div>
+    </div>
+
+    <div class="card" style="background:${plBg};cursor:pointer" onclick="navigateTo('statistiky')">
+      <div class="card-title">P&L — ${rok}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin-top:.5rem">
+        <div>
+          <div style="font-size:.72rem;color:var(--txt2)">Tržba vč. PK</div>
+          <div style="font-size:1rem;font-weight:600;color:#166534">${czMoney(pl.trzba_rok)}</div>
+        </div>
+        <div>
+          <div style="font-size:.72rem;color:var(--txt2)">Náklady celkem</div>
+          <div style="font-size:1rem;font-weight:600;color:#991b1b">${czMoney(pl.naklady_celkem)}</div>
+        </div>
+        <div>
+          <div style="font-size:.72rem;color:var(--txt2)">Faktury</div>
+          <div style="font-size:.88rem">${czMoney(pl.naklady_faktury)}</div>
+        </div>
+        <div>
+          <div style="font-size:.72rem;color:var(--txt2)">Výdaje</div>
+          <div style="font-size:.88rem">${czMoney(pl.naklady_vydaje)}</div>
+        </div>
+        <div>
+          <div style="font-size:.72rem;color:var(--txt2)">Výplaty</div>
+          <div style="font-size:.88rem">${czMoney(pl.naklady_vyplaty)}</div>
+        </div>
+        <div>
+          <div style="font-size:.72rem;color:var(--txt2)">Odvody</div>
+          <div style="font-size:.88rem">${czMoney(pl.naklady_odvody)}</div>
+        </div>
+      </div>
+      <div style="border-top:1.5px solid ${plColor};margin-top:.75rem;padding-top:.5rem;display:flex;justify-content:space-between;align-items:center">
+        <span style="font-weight:600;font-size:.85rem;color:${plColor}">Výsledek</span>
+        <span style="font-size:1.2rem;font-weight:700;color:${plColor}">${czMoney(pl.pl_rok)}</span>
+      </div>
+      <div style="font-size:.75rem;color:var(--txt2);margin-top:.3rem">Statistiky →</div>
+    </div>
+
+    <div class="card" style="cursor:pointer" onclick="navigateTo('faktury')">
+      <div class="card-title">Náklady — ${rok}</div>
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="background:var(--bg2)">
+          <th style="padding:3px 6px;font-size:.78rem;text-align:left">Měsíc</th>
+          <th style="padding:3px 6px;font-size:.78rem;text-align:right">Faktury</th>
+          <th style="padding:3px 6px;font-size:.78rem;text-align:right">Výdaje</th>
+          <th style="padding:3px 6px;font-size:.78rem;text-align:right">Celkem</th>
+        </tr></thead>
+        <tbody>${nmRows || "<tr><td colspan='4' style='padding:.5rem;color:var(--txt2);font-size:.85rem'>Žádná data</td></tr>"}</tbody>
+        <tfoot><tr style="background:var(--bg2)">
+          <td colspan="3" style="padding:3px 6px;font-size:.82rem;font-weight:600">Celkem ${rok}</td>
+          <td style="padding:3px 6px;font-size:.88rem;font-weight:700;text-align:right">${czMoney(nmCelkem)}</td>
+        </tr></tfoot>
+      </table>
+      <div style="font-size:.75rem;color:var(--txt2);margin-top:.3rem">Faktury →</div>
+    </div>`;
 }
 
 function _stavBoxiku(stav) {
@@ -784,7 +879,7 @@ async function loadFaktury() {
       <tfoot>
         <tr class="table-footer">
           <td colspan="4">Celkem (${data.faktury.length} faktur)</td>
-          <td colspan="${maPravo('faktury_smazat') ? 3 : 2}"><strong>${czMoneyFull(data.celkem)}</strong></td>
+          <td colspan="${maPravo('faktury_smazat') ? 3 : 2}"><strong>${czMoney(data.celkem)}</strong></td>
         </tr>
       </tfoot>` : ""}
     </table>`;
@@ -2335,7 +2430,7 @@ async function renderVyplatyDetail(jmeno) {
               <tr>
                 <td>${czDate(v.datum)}</td>
                 <td><span class="badge" style="background:var(--green-pale)">${escHtml(v.firma_zkratka||"—")}</span></td>
-                <td><strong>${czMoneyFull(v.castka)}</strong></td>
+                <td><strong>${czMoney(v.castka)}</strong></td>
                 <td style="color:var(--txt2);font-size:.88rem">${escHtml(v.poznamka||"")}</td>
                 <td>
                   <button class="btn btn-secondary btn-sm" onclick="editVyplataDetail(${v.id},'${escHtml(v.jmeno)}','${v.datum}',${v.castka},'${escHtml(v.poznamka||"")}','${escHtml(v.firma_zkratka||"")}','${escHtml(jmeno)}')">✏️</button>
@@ -2460,7 +2555,7 @@ async function loadVyplaty() {
             <td><span class="badge" style="background:var(--green-pale)">${escHtml(v.firma_zkratka||"—")}</span></td>
             <td><strong>${escHtml(v.jmeno)}</strong></td>
             <td>${czDate(v.datum)}</td>
-            <td><strong>${czMoneyFull(v.castka)}</strong></td>
+            <td><strong>${czMoney(v.castka)}</strong></td>
             <td style="color:var(--txt2);font-size:.88rem">${escHtml(v.poznamka||"")}</td>
             <td>
               <button class="btn btn-secondary btn-sm" onclick="editVyplata(${v.id},'${escHtml(v.jmeno)}','${v.datum}',${v.castka},'${escHtml(v.poznamka||"")}','${escHtml(v.firma_zkratka||"")}')">✏️</button>
@@ -2468,7 +2563,7 @@ async function loadVyplaty() {
             </td>
           </tr>`).join("") || "<tr><td colspan='6' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné výplaty</td></tr>"}
       </tbody>
-      ${data.vyplaty.length ? `<tfoot><tr class="table-footer"><td colspan="3">Celkem (${data.vyplaty.length})</td><td colspan="3"><strong>${czMoneyFull(data.celkem)}</strong></td></tr></tfoot>` : ""}
+      ${data.vyplaty.length ? `<tfoot><tr class="table-footer"><td colspan="3">Celkem (${data.vyplaty.length})</td><td colspan="3"><strong>${czMoney(data.celkem)}</strong></td></tr></tfoot>` : ""}
     </table>`;
 }
 

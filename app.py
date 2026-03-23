@@ -1965,6 +1965,116 @@ def api_nastenka_check():
     except Exception:
         result["zaloha"] = {"stav": "warning", "soubor": "", "dni_stari": -1}
 
+    # 9. Terminál — duplikát z Reportů
+    cfg = load_config()
+    terminal_limit = cfg.get("terminal_limit", 100000)
+    firmy = cfg.get("firmy", [])
+    terminal_od = cfg.get("terminal_od", {})
+    with get_db() as conn:
+        terminal_firmy = {}
+        for firma in firmy:
+            r_t = conn.execute("""
+                SELECT COALESCE(SUM(karty),0) as total FROM reporty
+                WHERE firma_zkratka=? AND datum>=?
+            """, (firma, mesic_prvni)).fetchone()
+            karty_f = float(_first_val(r_t))
+            pct_f = round(karty_f / terminal_limit * 100, 1) if terminal_limit else 0
+            aktivni = cfg.get("terminal_aktivni", {}).get(firma, False)
+            terminal_firmy[firma] = {
+                "castka": round(karty_f, 2),
+                "procent": pct_f,
+                "aktivni": aktivni,
+                "stav": "ok" if pct_f < 80 else ("error" if pct_f >= 100 else "warning"),
+            }
+        result["terminal_firmy"] = terminal_firmy
+        result["terminal_limit"] = terminal_limit
+
+        # 10. P&L — aktuální rok
+        rok_od = f"{rok}-01-01"
+        rok_do = f"{rok}-12-31"
+        r_trzba = conn.execute("""
+            SELECT COALESCE(SUM(trzba_vcpk),0) as total FROM reporty
+            WHERE datum>=? AND datum<=?
+        """, (rok_od, rok_do)).fetchone()
+        trzba_rok = float(_first_val(r_trzba))
+
+        r_fakt = conn.execute("""
+            SELECT COALESCE(SUM(celkem_s_dph),0) as total FROM faktury
+            WHERE datum_vystaveni>=? AND datum_vystaveni<=?
+        """, (rok_od, rok_do)).fetchone()
+        naklady_faktury = float(_first_val(r_fakt))
+
+        r_vyd = conn.execute("""
+            SELECT COALESCE(SUM(castka),0) as total FROM vydaje
+            WHERE datum>=? AND datum<=? AND COALESCE(typ,'provozni')='provozni'
+        """, (rok_od, rok_do)).fetchone()
+        naklady_vydaje = float(_first_val(r_vyd))
+
+        r_vypl = conn.execute("""
+            SELECT COALESCE(SUM(castka),0) as total FROM vyplaty
+            WHERE datum>=? AND datum<=?
+        """, (rok_od, rok_do)).fetchone()
+        naklady_vyplaty = float(_first_val(r_vypl))
+
+        # Odvody za rok
+        odvody_rok = sum(
+            _spocitej_pausaly_mesic(conn, f"{rok}-{mi:02d}-01")
+            for mi in range(1, _dt.date.today().month + 1)
+        )
+
+        naklady_celkem = naklady_faktury + naklady_vydaje + naklady_vyplaty + odvody_rok
+        pl_rok = trzba_rok - naklady_celkem
+
+        result["pl"] = {
+            "trzba_rok": round(trzba_rok, 0),
+            "naklady_faktury": round(naklady_faktury, 0),
+            "naklady_vydaje": round(naklady_vydaje, 0),
+            "naklady_vyplaty": round(naklady_vyplaty, 0),
+            "naklady_odvody": round(odvody_rok, 0),
+            "naklady_celkem": round(naklady_celkem, 0),
+            "pl_rok": round(pl_rok, 0),
+            "stav": "ok" if pl_rok >= 0 else "error",
+        }
+
+        # 11. Náklady — faktury + výdaje po měsících (aktuální rok)
+        if _USE_PG:
+            mesic_sql = "TO_CHAR(NULLIF(datum_vystaveni,'')::date,'YYYY-MM')"
+            mesic_sql_vyd = "TO_CHAR(NULLIF(datum,'')::date,'YYYY-MM')"
+        else:
+            mesic_sql = "strftime('%Y-%m', datum_vystaveni)"
+            mesic_sql_vyd = "strftime('%Y-%m', datum)"
+
+        r_fakt_m = conn.execute(f"""
+            SELECT {mesic_sql} as m, COALESCE(SUM(celkem_s_dph),0) as castka
+            FROM faktury WHERE datum_vystaveni>=? AND datum_vystaveni<=?
+            GROUP BY m ORDER BY m
+        """, (rok_od, rok_do)).fetchall()
+
+        r_vyd_m = conn.execute(f"""
+            SELECT {mesic_sql_vyd} as m, COALESCE(SUM(castka),0) as castka
+            FROM vydaje WHERE datum>=? AND datum<=? AND COALESCE(typ,'provozni')='provozni'
+            GROUP BY m ORDER BY m
+        """, (rok_od, rok_do)).fetchall()
+
+        naklady_mesice = {}
+        for r in r_fakt_m:
+            m = r["m"] if isinstance(r, dict) else r[0]
+            v = float(r["castka"] if isinstance(r, dict) else r[1])
+            if m: naklady_mesice[m] = naklady_mesice.get(m, {"faktury": 0, "vydaje": 0})
+            if m: naklady_mesice[m]["faktury"] = round(v, 0)
+        for r in r_vyd_m:
+            m = r["m"] if isinstance(r, dict) else r[0]
+            v = float(r["castka"] if isinstance(r, dict) else r[1])
+            if m:
+                if m not in naklady_mesice: naklady_mesice[m] = {"faktury": 0, "vydaje": 0}
+                naklady_mesice[m]["vydaje"] = round(v, 0)
+
+        result["naklady_mesice"] = [
+            {"mesic": m, "faktury": d["faktury"], "vydaje": d["vydaje"],
+             "celkem": round(d["faktury"] + d["vydaje"], 0)}
+            for m, d in sorted(naklady_mesice.items())
+        ]
+
     return jsonify(result)
 
 
