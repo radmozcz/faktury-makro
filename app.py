@@ -424,12 +424,12 @@ def init_db():
             UNIQUE(role, sekce)
         )"""),
         ("pausalni_odvody", """CREATE TABLE IF NOT EXISTS pausalni_odvody (
-            id      SERIAL PRIMARY KEY,
-            jmeno   TEXT NOT NULL,
-            nazev   TEXT NOT NULL,
-            castka  REAL NOT NULL DEFAULT 0,
-            poradi  INTEGER DEFAULT 0,
-            UNIQUE(jmeno, nazev)
+            id          SERIAL PRIMARY KEY,
+            jmeno       TEXT NOT NULL,
+            nazev       TEXT NOT NULL,
+            castka      REAL NOT NULL DEFAULT 0,
+            poradi      INTEGER DEFAULT 0,
+            platnost_od TEXT DEFAULT '2020-01-01'
         )"""),
         ("bankovni_pohyby", """CREATE TABLE IF NOT EXISTS bankovni_pohyby (
             id              SERIAL PRIMARY KEY,
@@ -625,6 +625,29 @@ def migrate_db():
             typ     TEXT NOT NULL DEFAULT 'trzba_vcpk_prumer',
             UNIQUE(rok, mesic, typ)
         )""")
+    # Migrace pausalni_odvody — platnost_od
+    with get_db() as conn:
+        if _USE_PG:
+            cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='pausalni_odvody'")
+            po_cols = [r["column_name"] for r in cur.fetchall()]
+        else:
+            po_cols = [row[1] for row in conn.execute("PRAGMA table_info(pausalni_odvody)").fetchall()]
+        if "platnost_od" not in po_cols:
+            try: conn.execute("ALTER TABLE pausalni_odvody ADD COLUMN platnost_od TEXT DEFAULT '2020-01-01'")
+            except Exception: pass
+        # Odebrat UNIQUE constraint (jmeno, nazev) — nyní může být více záznamů
+        if _USE_PG:
+            try:
+                with get_db() as conn2:
+                    row = conn2.execute("""
+                        SELECT constraint_name FROM information_schema.table_constraints
+                        WHERE table_name='pausalni_odvody' AND constraint_type='UNIQUE'
+                    """).fetchone()
+                    if row:
+                        cname = row["constraint_name"] if isinstance(row, dict) else row[0]
+                        conn2.execute(f"ALTER TABLE pausalni_odvody DROP CONSTRAINT IF EXISTS {cname}")
+            except Exception: pass
+
     # paska_url ve vyplaty
     with get_db() as conn:
         if _USE_PG:
@@ -2109,6 +2132,133 @@ def api_faktura_update(fid):
     return jsonify({"ok": True})
 
 # ── API: výplaty ──────────────────────────────────────────────────────────────
+def _spocitej_pausaly_mesic(conn, mesic_od):
+    """Vrátí součet paušálů platných k danému měsíci (bere nejnovější platnost_od <= mesic_od pro každý jmeno+nazev)."""
+    rows = conn.execute("""
+        SELECT jmeno, nazev, castka, platnost_od
+        FROM pausalni_odvody
+        WHERE platnost_od <= ?
+        ORDER BY jmeno, nazev, platnost_od DESC
+    """, (mesic_od,)).fetchall()
+    # Pro každý (jmeno, nazev) vezmi jen nejnovější
+    seen = set()
+    total = 0.0
+    for r in rows:
+        jmeno = r["jmeno"] if isinstance(r, dict) else r[0]
+        nazev = r["nazev"] if isinstance(r, dict) else r[1]
+        castka = float(r["castka"] if isinstance(r, dict) else r[2])
+        key = (jmeno, nazev)
+        if key not in seen:
+            seen.add(key)
+            total += castka
+    return total
+
+
+@app.route("/api/vyplaty/prehled")
+@vyzaduj_prihlaseni
+def api_vyplaty_prehled():
+    """Přehled zaměstnanců — souhrn za měsíc a rok + poslední 2 výplaty."""
+    import datetime as _dt
+    dnes = _dt.date.today()
+    mesic_od = f"{dnes.year}-{dnes.month:02d}-01"
+    rok_od   = f"{dnes.year}-01-01"
+    rok_do   = f"{dnes.year}-12-31"
+    with get_db() as conn:
+        # Seznam zaměstnanců
+        jmena = [r["jmeno"] if isinstance(r, dict) else r[0]
+                 for r in conn.execute("SELECT DISTINCT jmeno FROM vyplaty ORDER BY jmeno").fetchall()]
+
+        result = []
+        for jmeno in jmena:
+            # Částka za aktuální měsíc
+            r_mes = conn.execute(
+                "SELECT COALESCE(SUM(castka),0) as total FROM vyplaty WHERE jmeno=? AND datum>=?",
+                (jmeno, mesic_od)
+            ).fetchone()
+            castka_mesic = float(_first_val(r_mes))
+
+            # Částka za rok
+            r_rok = conn.execute(
+                "SELECT COALESCE(SUM(castka),0) as total FROM vyplaty WHERE jmeno=? AND datum>=? AND datum<=?",
+                (jmeno, rok_od, rok_do)
+            ).fetchone()
+            castka_rok = float(_first_val(r_rok))
+
+            # Poslední 2 výplaty
+            posledni = conn.execute(
+                "SELECT datum, castka FROM vyplaty WHERE jmeno=? ORDER BY datum DESC, id DESC LIMIT 2",
+                (jmeno,)
+            ).fetchall()
+            posledni_list = [{"datum": r["datum"] if isinstance(r, dict) else r[0],
+                              "castka": float(r["castka"] if isinstance(r, dict) else r[1])}
+                             for r in posledni]
+
+            result.append({
+                "jmeno": jmeno,
+                "castka_mesic": round(castka_mesic, 2),
+                "castka_rok": round(castka_rok, 2),
+                "posledni": posledni_list,
+            })
+
+        # Celkem za měsíc a rok (všichni zaměstnanci)
+        r_total_mes = conn.execute(
+            "SELECT COALESCE(SUM(castka),0) as total FROM vyplaty WHERE datum>=?", (mesic_od,)
+        ).fetchone()
+        r_total_rok = conn.execute(
+            "SELECT COALESCE(SUM(castka),0) as total FROM vyplaty WHERE datum>=? AND datum<=?", (rok_od, rok_do)
+        ).fetchone()
+        total_mesic = float(_first_val(r_total_mes))
+        total_rok   = float(_first_val(r_total_rok))
+
+        # Paušály pro aktuální měsíc — vezmi platnou částku k 1. dni měsíce
+        odvody_mesic = _spocitej_pausaly_mesic(conn, mesic_od)
+
+        # Paušály za rok — pro každý měsíc zvlášť
+        odvody_rok = 0.0
+        for mi in range(1, dnes.month + 1):
+            m_od = f"{dnes.year}-{mi:02d}-01"
+            odvody_rok += _spocitej_pausaly_mesic(conn, m_od)
+
+    return jsonify({
+        "zamestnanci": result,
+        "souhrn": {
+            "mesic_bez_odvodu": round(total_mesic, 2),
+            "mesic_s_odvody":   round(total_mesic + odvody_mesic, 2),
+            "rok_bez_odvodu":   round(total_rok, 2),
+            "rok_s_odvody":     round(total_rok + odvody_rok, 2),
+            "odvody_mesic":     round(odvody_mesic, 2),
+        }
+    })
+
+@app.route("/api/vyplaty/mesice/<jmeno>")
+@vyzaduj_prihlaseni
+def api_vyplaty_mesice(jmeno):
+    """Výplaty zaměstnance seskupené po měsících."""
+    with get_db() as conn:
+        if _USE_PG:
+            rows = conn.execute("""
+                SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY-MM') as mesic,
+                       COALESCE(SUM(castka),0) as castka,
+                       COUNT(*) as pocet
+                FROM vyplaty WHERE jmeno=?
+                GROUP BY mesic ORDER BY mesic DESC
+            """, (jmeno,)).fetchall()
+        else:
+            rows = conn.execute("""
+                SELECT strftime('%Y-%m', datum) as mesic,
+                       COALESCE(SUM(castka),0) as castka,
+                       COUNT(*) as pocet
+                FROM vyplaty WHERE jmeno=?
+                GROUP BY mesic ORDER BY mesic DESC
+            """, (jmeno,)).fetchall()
+        detail = conn.execute(
+            "SELECT * FROM vyplaty WHERE jmeno=? ORDER BY datum DESC, id DESC", (jmeno,)
+        ).fetchall()
+    return jsonify({
+        "mesice": [dict(r) for r in rows],
+        "vyplaty": [dict(r) for r in detail],
+    })
+
 @app.route("/api/vyplaty/zamestnanci", methods=["GET"])
 @vyzaduj_prihlaseni
 def api_vyplaty_zamestnanci():
@@ -2239,10 +2389,14 @@ def api_nastaveni_odvody_post():
     nazev  = str(data.get("nazev","")).strip()
     castka = float(data.get("castka", 0) or 0)
     jmeno  = str(data.get("jmeno","admin")).strip() or "admin"
+    platnost_od = data.get("platnost_od", "") or date.today().strftime("%Y-%m") + "-01"
     if not nazev:
         return jsonify({"error": "Chybí název"}), 400
     with get_db() as conn:
-        conn.execute("INSERT INTO pausalni_odvody (jmeno, nazev, castka, poradi) VALUES (?,?,?,0)", (jmeno, nazev, castka))
+        conn.execute(
+            "INSERT INTO pausalni_odvody (jmeno, nazev, castka, poradi, platnost_od) VALUES (?,?,?,0,?)",
+            (jmeno, nazev, castka, platnost_od)
+        )
     return jsonify({"ok": True})
 
 @app.route("/api/nastaveni/odvody/<int:oid>", methods=["DELETE"])
