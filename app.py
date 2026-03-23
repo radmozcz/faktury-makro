@@ -4904,7 +4904,7 @@ def api_zaloha_db():
 def api_zaloha_export():
     import datetime as _dt, json as _json
     tabulky = [
-        "faktury", "polozky_faktury", "reporty", "vydaje", "vyplaty",
+        "faktury", "polozky", "reporty", "vydaje", "vyplaty",
         "zbozi", "kalkulace", "kalkulace_polozky", "stat_rucni_data",
         "pausalni_odvody", "bankovni_pohyby"
     ]
