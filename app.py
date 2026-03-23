@@ -2799,20 +2799,35 @@ def api_vystavene_nahrat():
 # ── API: BANKOVNÍ VÝPISY ──────────────────────────────────────────────────────
 def parse_csv_airbank(content_bytes):
     import csv, io
-    text = content_bytes.decode("cp1250")
-    reader = csv.DictReader(io.StringIO(text), delimiter=";")
+    # Detekce kódování
+    for enc in ["utf-8-sig", "cp1250", "utf-8"]:
+        try:
+            text = content_bytes.decode(enc)
+            break
+        except Exception:
+            continue
+
+    # Detekce oddělovače — tabulátor (osobní) nebo středník (firemní)
+    first_line = text.split("\n")[0]
+    delimiter = "\t" if "\t" in first_line else ";"
+
+    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
     pohyby = []
     for row in reader:
         datum_raw = row.get("Datum provedení", "").strip().strip('"')
-        castka_raw = row.get("Částka v měně účtu", "").strip().strip('"').replace(",", ".")
+        castka_raw = row.get("Částka v měně účtu", "").strip().strip('"').replace("\xa0", "").replace(" ", "").replace(",", ".")
         id_transakce = row.get("Referenční číslo", "").strip().strip('"')
         if not datum_raw or not castka_raw:
             continue
         try:
-            d, m, y = datum_raw.split("/")
-            datum = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+            # Podpora DD.MM.YYYY i DD/MM/YYYY
+            if "." in datum_raw:
+                d, m, y = datum_raw.split(".")
+            else:
+                d, m, y = datum_raw.split("/")
+            datum = f"{y.strip()[:4]}-{m.zfill(2)}-{d.zfill(2)}"
             castka = float(castka_raw)
-        except:
+        except Exception:
             continue
         pohyby.append({
             "banka":           "AirBank",
@@ -2821,39 +2836,47 @@ def parse_csv_airbank(content_bytes):
             "protiucet":       row.get("Číslo účtu protistrany", "").strip().strip('"'),
             "nazev_protiucet": row.get("Název protistrany", "").strip().strip('"'),
             "typ_transakce":   row.get("Typ úhrady", "").strip().strip('"'),
-            "zprava":          row.get("Obchodní místo", "").strip().strip('"') or row.get("Zpráva pro příjemce", "").strip().strip('"'),
+            "zprava":          row.get("Obchodní místo", "").strip().strip('"') or row.get("Zpráva pro příjemce", "").strip().strip('"') or row.get("Poznámka pro mne", "").strip().strip('"'),
             "id_transakce":    f"AIR_{id_transakce}" if id_transakce else None,
         })
     return pohyby
 
 def parse_csv_kb(content_bytes):
-    """Parser pro Komerční banku - základní CSV formát."""
+    """Parser pro Komerční banku KB+ CSV formát."""
     import csv, io
-    # KB exportuje UTF-8 s BOM nebo win-1250
     for enc in ["utf-8-sig", "cp1250", "utf-8"]:
         try:
             text = content_bytes.decode(enc)
             break
         except Exception:
             continue
-    reader = csv.DictReader(io.StringIO(text), delimiter=";")
+
+    # KB má metadata nahoře - najdeme řádek s hlavičkou dat
+    lines = text.splitlines()
+    header_idx = None
+    for i, line in enumerate(lines):
+        if "Datum zauctovani" in line or "Datum zaúčtování" in line:
+            header_idx = i
+            break
+
+    if header_idx is None:
+        return []
+
+    # Sestavíme CSV jen od hlavičky dál
+    csv_text = "\n".join(lines[header_idx:])
+    delimiter = "\t" if "\t" in lines[header_idx] else ";"
+    reader = csv.DictReader(io.StringIO(csv_text), delimiter=delimiter)
+
     pohyby = []
     for row in reader:
-        # KB má různé formáty - zkusíme nejběžnější sloupce
-        datum_raw = (row.get("Datum splatnosti") or row.get("Datum") or row.get("datum") or "").strip().strip('"')
-        castka_raw = (row.get("Částka") or row.get("castka") or row.get("Zaúčtovaná částka") or "").strip().strip('"').replace(",", ".").replace(" ", "")
-        id_transakce = (row.get("Identifikace transakce") or row.get("ID") or "").strip().strip('"')
+        datum_raw = (row.get("Datum zauctovani") or row.get("Datum zaúčtování") or "").strip()
+        castka_raw = (row.get("Castka") or row.get("Částka") or "").strip().replace("\xa0", "").replace(" ", "").replace(",", ".")
+        id_transakce = (row.get("Identifikace transakce") or "").strip()
         if not datum_raw or not castka_raw:
             continue
         try:
-            # Různé formáty data
-            for fmt in ["%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y"]:
-                try:
-                    from datetime import datetime as _dtt
-                    datum = _dtt.strptime(datum_raw, fmt).strftime("%Y-%m-%d")
-                    break
-                except Exception:
-                    datum = datum_raw
+            d, m, y = datum_raw.split(".")
+            datum = f"{y.strip()[:4]}-{m.zfill(2)}-{d.zfill(2)}"
             castka = float(castka_raw)
         except Exception:
             continue
@@ -2861,10 +2884,10 @@ def parse_csv_kb(content_bytes):
             "banka":           "KB",
             "datum":           datum,
             "castka":          castka,
-            "protiucet":       (row.get("Číslo protiúčtu") or row.get("Protiúčet") or "").strip().strip('"'),
-            "nazev_protiucet": (row.get("Název protiúčtu") or row.get("Příjemce/Plátce") or row.get("Popis") or "").strip().strip('"'),
-            "typ_transakce":   (row.get("Typ transakce") or row.get("Typ pohybu") or "").strip().strip('"'),
-            "zprava":          (row.get("Poznámka") or row.get("Zpráva pro příjemce") or row.get("Popis platby") or "").strip().strip('"'),
+            "protiucet":       (row.get("Protistrana") or "").strip(),
+            "nazev_protiucet": (row.get("Nazev protiuctu") or row.get("Název protiúčtu") or "").strip(),
+            "typ_transakce":   (row.get("Typ transakce") or "").strip(),
+            "zprava":          (row.get("Zprava pro prijemce") or row.get("Zpráva pro příjemce") or row.get("Popis pro me") or "").strip(),
             "id_transakce":    f"KB_{id_transakce}" if id_transakce else None,
         })
     return pohyby
@@ -2872,20 +2895,33 @@ def parse_csv_kb(content_bytes):
 
 def parse_csv_rb(content_bytes):
     import csv, io
-    text = content_bytes.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text), delimiter=";")
+    for enc in ["utf-8-sig", "cp1250", "utf-8"]:
+        try:
+            text = content_bytes.decode(enc)
+            break
+        except Exception:
+            continue
+
+    # Detekce oddělovače
+    first_line = text.split("\n")[0]
+    delimiter = "\t" if "\t" in first_line else ";"
+
+    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
     pohyby = []
     for row in reader:
         datum_raw = row.get("Datum provedení", "").strip().strip('"')
-        castka_raw = row.get("Zaúčtovaná částka", "").strip().strip('"').replace(",", ".")
-        id_transakce = row.get("Id transakce", "").strip().strip('"')
+        castka_raw = row.get("Zaúčtovaná částka", "").strip().strip('"').replace("\xa0", "").replace(" ", "").replace(",", ".")
+        id_transakce = (row.get("Id transakce") or row.get("ID transakce") or "").strip().strip('"')
         if not datum_raw or not castka_raw:
             continue
         try:
-            d, m, y = datum_raw.split(".")
-            datum = f"{y}-{m.zfill(2)}-{d.zfill(2)}"
+            if "." in datum_raw:
+                d, m, y = datum_raw.split(".")
+            else:
+                d, m, y = datum_raw.split("/")
+            datum = f"{y.strip()[:4]}-{m.zfill(2)}-{d.zfill(2)}"
             castka = float(castka_raw)
-        except:
+        except Exception:
             continue
         pohyby.append({
             "banka":           "RB",
