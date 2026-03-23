@@ -148,9 +148,9 @@ a { color: var(--green); text-decoration: none; }
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  font-size: .9rem;
-  color: var(--txt2);
-  font-weight: 500;
+  font-size: 1.1rem;
+  color: var(--txt);
+  font-weight: 700;
   pointer-events: none;
   white-space: nowrap;
 }
