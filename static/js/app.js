@@ -2114,29 +2114,203 @@ async function renderVyplaty() {
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
       <h1 class="page-title">Výplaty</h1>
-      <div class="btn-group">
-        <button class="btn btn-primary btn-sm" onclick="openNovVyplata()">+ Nová výplata</button>
+      <button class="btn btn-primary btn-sm" onclick="openNovVyplata()">+ Nová výplata</button>
+    </div>
+    <div id="vyplatyPrehled"><div class="loading-center"><span class="spinner"></span></div></div>`;
+  loadVyplatyPrehled();
+}
+
+async function loadVyplatyPrehled() {
+  const el = document.getElementById("vyplatyPrehled");
+  if (!el) return;
+  let data;
+  try { data = await api("/api/vyplaty/prehled"); } catch { return; }
+
+  const s = data.souhrn;
+  const mesicNames = ["","Leden","Únor","Březen","Duben","Květen","Červen",
+    "Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
+  const dnes = new Date();
+  const mesicLabel = mesicNames[dnes.getMonth()+1] + " " + dnes.getFullYear();
+
+  el.innerHTML = `
+    <div class="card" style="margin-bottom:1rem;cursor:pointer" onclick="renderVyplatyMesice()">
+      <div class="card-title">Celkem — ${mesicLabel} / ${dnes.getFullYear()}</div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:.75rem;margin-top:.5rem">
+        <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:.75rem">
+          <div style="font-size:.75rem;color:#166534;font-weight:600">Měsíc bez odvodů</div>
+          <div style="font-size:1.3rem;font-weight:700;color:#166534">${czMoney(s.mesic_bez_odvodu)}</div>
+        </div>
+        <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:.75rem">
+          <div style="font-size:.75rem;color:#92400e;font-weight:600">Měsíc s odvody</div>
+          <div style="font-size:1.3rem;font-weight:700;color:#92400e">${czMoney(s.mesic_s_odvody)}</div>
+        </div>
+        <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:.75rem">
+          <div style="font-size:.75rem;color:#166534;font-weight:600">Rok bez odvodů</div>
+          <div style="font-size:1.3rem;font-weight:700;color:#166534">${czMoney(s.rok_bez_odvodu)}</div>
+        </div>
+        <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:.75rem">
+          <div style="font-size:.75rem;color:#92400e;font-weight:600">Rok s odvody</div>
+          <div style="font-size:1.3rem;font-weight:700;color:#92400e">${czMoney(s.rok_s_odvody)}</div>
+        </div>
+      </div>
+      <div style="font-size:.78rem;color:var(--txt2);margin-top:.5rem">Kliknutím zobrazíš přehled po měsících →</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:.6rem">
+      ${data.zamestnanci.map(z => {
+        const posl = z.posledni.map(p =>
+          `${czDate(p.datum)} (${czMoney(p.castka)})`
+        ).join(" · ");
+        return `
+        <div class="card" style="cursor:pointer;padding:.85rem 1.1rem" onclick="renderVyplatyDetail('${escHtml(z.jmeno)}')">
+          <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+            <div style="font-size:1.05rem;font-weight:700;min-width:90px">${escHtml(z.jmeno)}</div>
+            <div style="flex:1;font-size:.82rem;color:var(--txt2)">
+              ${posl ? `Poslední: ${posl}` : "Žádné výplaty"}
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:.75rem;color:var(--txt2)">Měsíc</div>
+              <div style="font-weight:700;color:#166534">${czMoney(z.castka_mesic)}</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:.75rem;color:var(--txt2)">Rok</div>
+              <div style="font-weight:600">${czMoney(z.castka_rok)}</div>
+            </div>
+            <span style="color:var(--txt2)">→</span>
+          </div>
+        </div>`;
+      }).join("")}
+    </div>`;
+}
+
+async function renderVyplatyDetail(jmeno) {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">
+        <span style="cursor:pointer;color:var(--txt2);font-weight:400" onclick="renderVyplaty()">Výplaty</span>
+        <span style="margin:0 .4rem">›</span>${escHtml(jmeno)}
+      </h1>
+      <button class="btn btn-primary btn-sm" onclick="openNovVyplataJmeno('${escHtml(jmeno)}')">+ Nová výplata</button>
+    </div>
+    <div id="vyplatyDetailObs"><div class="loading-center"><span class="spinner"></span></div></div>`;
+  let data;
+  try { data = await api(`/api/vyplaty/mesice/${encodeURIComponent(jmeno)}`); } catch { return; }
+  const dnes = new Date();
+  const mesicStr = `${dnes.getFullYear()}-${String(dnes.getMonth()+1).padStart(2,"0")}`;
+  const rokStr = String(dnes.getFullYear());
+  const castka_mesic = data.vyplaty.filter(v => v.datum && v.datum.startsWith(mesicStr)).reduce((s,v) => s + v.castka, 0);
+  const castka_rok   = data.vyplaty.filter(v => v.datum && v.datum.startsWith(rokStr)).reduce((s,v) => s + v.castka, 0);
+  const el = document.getElementById("vyplatyDetailObs");
+  if (!el) return;
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.75rem;margin-bottom:1rem">
+      <div class="card" style="padding:.75rem;background:#f0fdf4;border:1px solid #86efac">
+        <div style="font-size:.78rem;color:#166534;font-weight:600">Aktuální měsíc</div>
+        <div style="font-size:1.4rem;font-weight:700;color:#166534">${czMoney(castka_mesic)}</div>
+      </div>
+      <div class="card" style="padding:.75rem">
+        <div style="font-size:.78rem;color:var(--txt2);font-weight:600">Rok ${rokStr}</div>
+        <div style="font-size:1.4rem;font-weight:700">${czMoney(castka_rok)}</div>
       </div>
     </div>
-    <div class="filters">
-      <label>Firma:</label>
-      <select id="vFirma" class="firma-select">
-        <option value="">Všechny</option>
-        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
-      </select>
-      <label>Zaměstnanec:</label>
-      <select id="vJmeno"><option value="">Všichni</option></select>
-      <label>Od:</label><input type="date" id="vOd">
-      <label>Do:</label><input type="date" id="vDo">
-    </div>
     <div class="card">
-      <div class="table-wrap" id="vyplatyList"><div class="loading-center"><span class="spinner"></span></div></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Datum</th><th>Firma</th><th>Částka</th><th>Poznámka</th><th></th></tr></thead>
+          <tbody>
+            ${data.vyplaty.map(v => `
+              <tr>
+                <td>${czDate(v.datum)}</td>
+                <td><span class="badge" style="background:var(--green-pale)">${escHtml(v.firma_zkratka||"—")}</span></td>
+                <td><strong>${czMoney(v.castka)}</strong></td>
+                <td style="color:var(--txt2);font-size:.88rem">${escHtml(v.poznamka||"")}</td>
+                <td>
+                  <button class="btn btn-secondary btn-sm" onclick="editVyplataDetail(${v.id},'${escHtml(v.jmeno)}','${v.datum}',${v.castka},'${escHtml(v.poznamka||"")}','${escHtml(v.firma_zkratka||"")}','${escHtml(jmeno)}')">✏️</button>
+                  <button class="btn btn-danger btn-sm" onclick="deleteVyplataDetail(${v.id},'${escHtml(jmeno)}')">🗑</button>
+                </td>
+              </tr>`).join("") || "<tr><td colspan='5' style='text-align:center;padding:2rem;color:var(--txt2)'>Žádné výplaty</td></tr>"}
+          </tbody>
+        </table>
+      </div>
     </div>`;
-  await nacistZamestnance();
-  loadVyplaty();
-  ["vFirma","vJmeno","vOd","vDo"].forEach(id => {
-    document.getElementById(id)?.addEventListener("change", loadVyplaty);
-  });
+}
+
+async function renderVyplatyMesice() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">
+        <span style="cursor:pointer;color:var(--txt2);font-weight:400" onclick="renderVyplaty()">Výplaty</span>
+        <span style="margin:0 .4rem">›</span>Přehled po měsících
+      </h1>
+    </div>
+    <div id="vyplatyMesiceObs"><div class="loading-center"><span class="spinner"></span></div></div>`;
+  let data;
+  try { data = await api("/api/vyplaty?od=2020-01-01"); } catch { return; }
+  // Seskup po měsících
+  const mesice = {};
+  for (const v of data.vyplaty) {
+    const m = (v.datum || "").substring(0, 7);
+    if (!m) continue;
+    if (!mesice[m]) mesice[m] = { castka: 0, pocet: 0 };
+    mesice[m].castka += v.castka;
+    mesice[m].pocet++;
+  }
+  const klice = Object.keys(mesice).sort().reverse();
+  const el = document.getElementById("vyplatyMesiceObs");
+  if (!el) return;
+  el.innerHTML = `
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Měsíc</th><th>Počet výplat</th><th>Celkem</th></tr></thead>
+          <tbody>
+            ${klice.map(m => `
+              <tr>
+                <td><strong>${m}</strong></td>
+                <td>${mesice[m].pocet}</td>
+                <td><strong>${czMoney(mesice[m].castka)}</strong></td>
+              </tr>`).join("") || "<tr><td colspan='3' style='text-align:center;padding:2rem;color:var(--txt2)'>Žádné výplaty</td></tr>"}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function openNovVyplataJmeno(jmeno) {
+  openModal("Nová výplata", vyplataFormHtml({jmeno}) + `
+    <div class="btn-group" style="margin-top:1rem">
+      <button class="btn btn-primary" onclick="App._vyplataOnSave&&App._vyplataOnSave()">💾 Uložit</button>
+    </div>`);
+  App._vyplataOnSave = async () => {
+    const jmeno2  = document.getElementById("vJmenoF").value.trim();
+    const datum   = document.getElementById("vDatumF").value;
+    const castka  = parseFloat(document.getElementById("vCastkaF").value);
+    if (!jmeno2 || !datum || isNaN(castka)) { toast("Vyplňte jméno, datum a částku"); return; }
+    await api("/api/vyplaty", {method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({jmeno:jmeno2,datum,castka,poznamka:document.getElementById("vPoznamkaF").value,firma_zkratka:document.getElementById("vFirmaF").value})});
+    toast("Výplata uložena ✓"); closeModal(); renderVyplatyDetail(jmeno);
+  };
+}
+
+function editVyplataDetail(id, jmeno, datum, castka, poznamka, firma_zkratka, zpetJmeno) {
+  openModal("Upravit výplatu", vyplataFormHtml({jmeno,datum,castka,poznamka,firma_zkratka}) + `
+    <div class="btn-group" style="margin-top:1rem">
+      <button class="btn btn-primary" onclick="App._vyplataOnSave&&App._vyplataOnSave()">💾 Uložit změny</button>
+    </div>`);
+  App._vyplataOnSave = async () => {
+    const jmeno2  = document.getElementById("vJmenoF").value.trim();
+    const datum2  = document.getElementById("vDatumF").value;
+    const castka2 = parseFloat(document.getElementById("vCastkaF").value);
+    if (!jmeno2 || !datum2 || isNaN(castka2)) { toast("Vyplňte jméno, datum a částku"); return; }
+    await api(`/api/vyplaty/${id}`, {method:"PUT",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({jmeno:jmeno2,datum:datum2,castka:castka2,poznamka:document.getElementById("vPoznamkaF").value,firma_zkratka:document.getElementById("vFirmaF").value})});
+    toast("Výplata upravena ✓"); closeModal(); renderVyplatyDetail(zpetJmeno);
+  };
+}
+
+async function deleteVyplataDetail(id, jmeno) {
+  if (!confirm("Opravdu smazat tuto výplatu?")) return;
+  await api(`/api/vyplaty/${id}`, {method:"DELETE"});
+  toast("Výplata smazána ✓"); renderVyplatyDetail(jmeno);
 }
 
 async function nacistZamestnance() {
