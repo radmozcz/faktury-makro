@@ -456,8 +456,9 @@ function drawLineChart(canvasId, labels, datasets) {
 async function renderDashboard() {
   document.getElementById("mainContent").innerHTML = `<div class="loading-center"><span class="spinner"></span></div>`;
 
-  let check;
+  let check, karty_stats = {};
   try { check = await api("/api/nastenka-check"); } catch { return; }
+  try { karty_stats = await api("/api/reporty/karty-stats"); } catch {}
 
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
@@ -465,13 +466,14 @@ async function renderDashboard() {
       <button class="btn btn-secondary btn-sm" onclick="renderDashboard()">🔄 Zkontrolovat</button>
     </div>
     <div id="nastenkaBoxiky" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;margin-bottom:1.5rem"></div>
+    <div style="border-top:2px solid var(--border);margin:1.2rem 0 .8rem;opacity:.4"></div>
     <div id="nastenkaSpodek" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:1rem;margin-bottom:1rem"></div>`;
 
   _renderNastenkaBoxiky(check);
-  _renderNastenkaSpodek(check);
+  _renderNastenkaSpodek(check, karty_stats);
 }
 
-function _renderNastenkaSpodek(c) {
+function _renderNastenkaSpodek(c, karty_stats) {
   const el = document.getElementById("nastenkaSpodek");
   if (!el) return;
   const rok = new Date().getFullYear();
@@ -518,11 +520,7 @@ function _renderNastenkaSpodek(c) {
   const nmCelkem = nm.reduce((s,m) => s + m.celkem, 0);
 
   el.innerHTML = `
-    <div class="card" style="cursor:pointer" onclick="navigateTo('reporty')">
-      <div class="card-title">Terminál / karty — ${mesNames[new Date().getMonth()+1]} ${rok}</div>
-      ${terminalRows || "<div style='color:var(--txt2);font-size:.85rem'>Žádná data</div>"}
-      <div style="font-size:.75rem;color:var(--txt2);margin-top:.5rem">Limit: ${czMoney(limit)} / měsíc →</div>
-    </div>
+    <div style="grid-column:1/-1">${renderKartaStatHtml(karty_stats)}</div>
 
     <div class="card" style="background:${plBg};cursor:pointer" onclick="navigateTo('statistiky')">
       <div class="card-title">P&L — ${rok}</div>
@@ -2355,7 +2353,7 @@ async function loadVyplatyPrehled() {
     <div style="display:flex;flex-direction:column;gap:.6rem">
       ${data.zamestnanci.map(z => {
         const posl = z.posledni.map(p =>
-          `<strong>${czMoneyFull(p.castka)}</strong> <span style="font-size:.75rem;color:var(--txt2)">${czDate(p.datum)}</span>`
+          `<strong>${czMoney(p.castka)}</strong> <span style="font-size:.75rem;color:var(--txt2)">${czDate(p.datum)}</span>`
         ).join(" &nbsp;·&nbsp; ");
         const odvodyBoxy = z.ma_odvody ? `
           <div style="background:var(--color-background-secondary,#f5f5f5);border:0.5px solid var(--color-border-tertiary);border-radius:6px;padding:.3rem .6rem;text-align:center">
