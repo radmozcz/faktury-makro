@@ -2115,8 +2115,94 @@ async function renderVyplaty() {
     <div class="page-header">
       <h1 class="page-title">Výplaty</h1>
       <button class="btn btn-primary btn-sm" onclick="openNovVyplata()">+ Nová výplata</button>
+      <button class="btn btn-secondary btn-sm" onclick="openOdvodyModal()">⚙️ Odvody</button>
     </div>
     <div id="vyplatyPrehled"><div class="loading-center"><span class="spinner"></span></div></div>`;
+  loadVyplatyPrehled();
+}
+
+async function openOdvodyModal() {
+  const zam = await api("/api/vyplaty/zamestnanci");
+  const jmena = zam || [];
+  openModal("Paušální odvody", `
+    <div class="form-group">
+      <label class="form-label">Zaměstnanec</label>
+      <select id="odvJmeno" class="form-control" onchange="loadOdvodyZam()">
+        <option value="">— vyberte —</option>
+        ${jmena.map(j => `<option value="${escHtml(j)}">${escHtml(j)}</option>`).join("")}
+      </select>
+    </div>
+    <div id="odvodyList" style="margin-top:1rem"></div>
+    <div id="odvodyPridatWrap" style="display:none;margin-top:1rem;border-top:1px solid var(--border);padding-top:1rem">
+      <div style="font-size:.85rem;font-weight:600;margin-bottom:.5rem">Přidat odvod</div>
+      <div class="grid-2" style="gap:.75rem">
+        <div class="form-group">
+          <label class="form-label">Název</label>
+          <input id="odvNazev" class="form-control" placeholder="např. Soc. pojištění">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Částka (Kč/měsíc)</label>
+          <input type="number" id="odvCastka" class="form-control" placeholder="0">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Platí od</label>
+          <input type="month" id="odvPlatnostOd" class="form-control" value="${new Date().toISOString().slice(0,7)}">
+        </div>
+      </div>
+      <button class="btn btn-primary btn-sm" style="margin-top:.5rem" onclick="pridatOdvod()">+ Přidat</button>
+    </div>
+  `);
+}
+
+async function loadOdvodyZam() {
+  const jmeno = document.getElementById("odvJmeno")?.value;
+  const listEl = document.getElementById("odvodyList");
+  const pridatWrap = document.getElementById("odvodyPridatWrap");
+  if (!listEl) return;
+  if (!jmeno) { listEl.innerHTML = ""; if (pridatWrap) pridatWrap.style.display = "none"; return; }
+  if (pridatWrap) pridatWrap.style.display = "block";
+  let data;
+  try { data = await api(`/api/pausalni-odvody/${encodeURIComponent(jmeno)}`); } catch { return; }
+  if (!data.length) {
+    listEl.innerHTML = `<div style="color:var(--txt2);font-size:.85rem;padding:.5rem 0">Žádné odvody — přidej první níže.</div>`;
+    return;
+  }
+  listEl.innerHTML = `
+    <table style="width:100%;font-size:.88rem">
+      <thead><tr><th>Název</th><th>Částka</th><th>Platí od</th><th></th></tr></thead>
+      <tbody>
+        ${data.map(o => `
+          <tr>
+            <td>${escHtml(o.nazev)}</td>
+            <td><strong>${czMoney(o.castka)}</strong></td>
+            <td style="color:var(--txt2)">${o.platnost_od ? o.platnost_od.slice(0,7) : "—"}</td>
+            <td><button class="btn btn-danger btn-sm" onclick="smazatOdvod(${o.id})">🗑</button></td>
+          </tr>`).join("")}
+      </tbody>
+    </table>`;
+}
+
+async function pridatOdvod() {
+  const jmeno = document.getElementById("odvJmeno")?.value;
+  const nazev = document.getElementById("odvNazev")?.value.trim();
+  const castka = parseFloat(document.getElementById("odvCastka")?.value);
+  const mesic = document.getElementById("odvPlatnostOd")?.value;
+  if (!jmeno || !nazev || isNaN(castka) || castka <= 0) { toast("Vyplňte všechna pole"); return; }
+  const platnost_od = mesic ? mesic + "-01" : new Date().toISOString().slice(0,8) + "01";
+  await api("/api/nastaveni/odvody", {method:"POST", headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({jmeno, nazev, castka, platnost_od})});
+  toast("Odvod přidán ✓");
+  document.getElementById("odvNazev").value = "";
+  document.getElementById("odvCastka").value = "";
+  loadOdvodyZam();
+  loadVyplatyPrehled();
+}
+
+async function smazatOdvod(id) {
+  if (!confirm("Opravdu smazat tento odvod?")) return;
+  await api(`/api/nastaveni/odvody/${id}`, {method:"DELETE"});
+  toast("Odvod smazán ✓");
+  loadOdvodyZam();
   loadVyplatyPrehled();
 }
 
@@ -2166,7 +2252,7 @@ async function loadVyplatyPrehled() {
     <div style="display:flex;flex-direction:column;gap:.6rem">
       ${data.zamestnanci.map(z => {
         const posl = z.posledni.map(p =>
-          `<strong>${czDate(p.datum)}</strong> ${czMoney(p.castka)}`
+          `<strong>${czMoney(p.castka)}</strong> <span style="font-size:.75rem;color:var(--txt2)">${czDate(p.datum)}</span>`
         ).join(" &nbsp;·&nbsp; ");
         const odvodyBoxy = z.ma_odvody ? `
           <div style="background:var(--color-background-secondary,#f5f5f5);border:0.5px solid var(--color-border-tertiary);border-radius:6px;padding:.3rem .6rem;text-align:center">
@@ -2178,7 +2264,7 @@ async function loadVyplatyPrehled() {
             <div style="font-size:.88rem;font-weight:500">${czMoney(z.castka_rok_s_odvody)}</div>
           </div>` : "";
         return `
-        <div class="card" style="cursor:pointer;padding:.7rem 1rem" onclick="renderVyplatyDetail('${escHtml(z.jmeno)}')">
+        <div class="card" style="cursor:pointer;padding:.7rem 1rem;max-width:640px" onclick="renderVyplatyDetail('${escHtml(z.jmeno)}')">
           <div style="display:flex;align-items:center;gap:.75rem;flex-wrap:wrap">
             <div style="font-size:1rem;font-weight:500;min-width:70px">${escHtml(z.jmeno)}</div>
             <div style="flex:1;font-size:.85rem;min-width:160px">
