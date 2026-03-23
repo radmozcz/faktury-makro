@@ -3143,6 +3143,24 @@ def api_banky_export():
         resp.headers["Content-Disposition"] = f'attachment; filename="{banka}_{mesic}.pdf"'
         return resp
 
+@app.route("/api/banky/oprav-soukrome", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_banky_oprav_soukrome():
+    """Přepíše firma_zkratka na _soukrome pro záznamy dané banky."""
+    if session.get("role") != "admin":
+        return jsonify({"error": "Pouze admin"}), 403
+    d = request.json or {}
+    banka = d.get("banka", "")
+    if not banka:
+        return jsonify({"error": "Chybí banka"}), 400
+    with get_db() as conn:
+        cur = conn.execute(
+            "UPDATE bankovni_pohyby SET firma_zkratka='_soukrome' WHERE banka=? AND firma_zkratka != '_soukrome'",
+            (banka,)
+        )
+        opraveno = cur.rowcount
+    return jsonify({"ok": True, "opraveno": opraveno})
+
 @app.route("/api/banky/pohyby/<int:pid>", methods=["DELETE"])
 @vyzaduj_prihlaseni
 def api_banky_pohyb_delete(pid):
