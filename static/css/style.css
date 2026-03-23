@@ -134,6 +134,7 @@ a { color: var(--green); text-decoration: none; }
   top: 0;
   z-index: 50;
   box-shadow: var(--shadow);
+  overflow: visible;
 }
 .menu-btn {
   display: none;
@@ -148,7 +149,7 @@ a { color: var(--green); text-decoration: none; }
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  font-size: 1.1rem;
+  font-size: 1.2rem;
   color: var(--txt);
   font-weight: 700;
   pointer-events: none;
