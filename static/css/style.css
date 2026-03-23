@@ -143,8 +143,19 @@ a { color: var(--green); text-decoration: none; }
   cursor: pointer;
   color: var(--txt);
 }
+.topbar-left { display: flex; align-items: center; gap: .8rem; }
+.topbar-center {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: .9rem;
+  color: var(--txt2);
+  font-weight: 500;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.topbar-right { color: var(--txt2); font-size: .88rem; margin-left: auto; }
 .topbar-filters { display: flex; gap: .8rem; flex: 1; }
-.topbar-right { color: var(--txt2); font-size: .88rem; }
 .content { padding: 1.5rem; flex: 1; }
 
 /* ── Karty ─────────────────────────────────────────────────── */

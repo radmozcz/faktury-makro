@@ -44,6 +44,17 @@
     font-size: .85rem; color: var(--txt2, #666);
   }
   .topbar-user strong { color: var(--txt, #111); }
+  .topbar-left { display: flex; align-items: center; }
+  .topbar-center {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    font-size: .9rem; color: var(--txt2, #666); font-weight: 500;
+    pointer-events: none;
+  }
+  #nastenkaBoxiky, #nastenkaSpodek {
+    background: var(--bg2, #ece9e0);
+    border-radius: 14px;
+    padding: .75rem;
+  }
   .btn-odhlasit {
     padding: .3rem .7rem; border-radius: 6px; font-size: .8rem;
     background: transparent; border: 1.5px solid var(--border, #ddd);
@@ -126,13 +137,15 @@
 <div class="main-wrap">
   <header class="topbar">
     <button class="menu-btn" id="menuBtn">☰</button>
-    <div class="topbar-filters">
+    <div class="topbar-left">
       <select id="globalFirmaFilter">
         <option value="">Všechny firmy</option>
       </select>
     </div>
-    <div class="topbar-right">
+    <div class="topbar-center">
       <span id="todayDate"></span>
+    </div>
+    <div class="topbar-right">
       <div class="topbar-user">
         <strong id="prihlasenyUzivatel"></strong>
         <button class="btn-odhlasit" onclick="odhlasit()">Odhlásit</button>
