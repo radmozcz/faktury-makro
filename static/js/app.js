@@ -4294,7 +4294,7 @@ function renderKartaStatHtml(stats) {
   const sumHotR   = firmy.reduce((s,f) => s+(stats[f].hot_rok||0), 0);
   const sumTrzbaR = firmy.reduce((s,f) => s+(stats[f].trzba_rok||0), 0);
 
-  const souhrn = `<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:10px;padding:.85rem;flex:1;min-width:150px">
+  const souhrn = `<div style="background:#ffffff;border:1px solid var(--border);border-radius:10px;padding:.85rem;flex:1;min-width:150px">
     <div style="font-weight:700;font-size:.95rem;margin-bottom:.4rem">Celkem</div>
     ${header()}
     ${r('💳 Karty', sumKartyM, sumKartyR)}
