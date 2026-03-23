@@ -4824,58 +4824,9 @@ async function loadBanky() {
     </table>`;
 }
 
-function openImportBanky() {
-  openModal("Importovat bankovní výpis", `
-    <p style="color:var(--txt2);font-size:.85rem;margin-bottom:1rem">
-      Nahraj CSV výpis z <strong>Air Bank</strong> nebo <strong>Raiffeisenbank</strong>.
-      Duplicitní transakce budou automaticky přeskočeny.
-    </p>
-    <div class="form-group">
-      <label class="form-label">Firma</label>
-      <select id="bImportFirma" class="form-control">
-        <option value="">— nevybráno —</option>
-        ${App.config.firmy.map(f=>`<option>${f}</option>`).join("")}
-      </select>
-    </div>
-    <div class="dropzone" id="bankyDropzone" style="padding:1.5rem;margin-top:.5rem">
-      <div class="dropzone-icon">🏦</div>
-      <div class="dropzone-text"><strong>Přetáhněte CSV soubor</strong> nebo klikněte</div>
-      <input type="file" id="bankyFileInput" accept=".csv">
-    </div>
-    <div id="bankyImportStatus" style="margin-top:1rem;font-size:.9rem"></div>
-  `);
-  const dz  = document.getElementById("bankyDropzone");
-  const inp = document.getElementById("bankyFileInput");
-  inp.style.display = "none";
-  dz.addEventListener("click", () => inp.click());
-  inp.addEventListener("change", () => { if (inp.files[0]) doImportBanky(inp.files[0]); });
-  dz.addEventListener("dragover", e => { e.preventDefault(); dz.classList.add("drag-over"); });
-  dz.addEventListener("dragleave", () => dz.classList.remove("drag-over"));
-  dz.addEventListener("drop", e => {
-    e.preventDefault(); dz.classList.remove("drag-over");
-    if (e.dataTransfer.files[0]) doImportBanky(e.dataTransfer.files[0]);
-  });
-}
 
-async function doImportBanky(file) {
-  const statusEl = document.getElementById("bankyImportStatus");
-  statusEl.innerHTML = `<span class="spinner"></span> Importuji...`;
-  const fd = new FormData();
-  fd.append("soubor", file);
-  fd.append("firma_zkratka", document.getElementById("bImportFirma")?.value || "");
-  try {
-    const data = await api("/api/banky/import", { method: "POST", body: fd });
-    statusEl.innerHTML = `
-      <div style="background:#d1fae5;border:1px solid #6ee7b7;border-radius:6px;padding:.7rem 1rem;color:#065f46">
-        ✅ Import dokončen! Banka: <strong>${data.banka}</strong><br>
-        Naimportováno: <strong>${data.naimportovano}</strong> transakcí
-        ${data.duplicity ? `, přeskočeno duplicit: <strong>${data.duplicity}</strong>` : ""}
-      </div>`;
-    setTimeout(() => { closeModal(); loadBanky(); }, 2000);
-  } catch(e) {
-    statusEl.innerHTML = `❌ Chyba: ${e.message}`;
-  }
-}
+
+
 
 async function smazatBankovniPohyb(id) {
   if (!confirm("Opravdu smazat tento pohyb?")) return;
