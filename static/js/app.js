@@ -520,7 +520,7 @@ function _renderNastenkaSpodek(c, karty_stats) {
   const nmCelkem = nm.reduce((s,m) => s + m.celkem, 0);
 
   el.innerHTML = `
-    <div style="grid-column:1/-1">${renderKartaStatHtml(karty_stats)}</div>
+    <div style="grid-column:1/-1">${renderKartaStatNastenka(karty_stats)}</div>
 
     <div class="card" style="background:${plBg};cursor:pointer" onclick="navigateTo('statistiky')">
       <div class="card-title">P&L — ${rok}</div>
@@ -2224,7 +2224,7 @@ async function renderVyplaty() {
 
 async function openOdvodyModal() {
   const zam = await api("/api/vyplaty/zamestnanci");
-  const jmena = zam || [];
+  const jmena = (zam && zam.jmena) ? zam.jmena : (Array.isArray(zam) ? zam : []);
   openModal("Paušální odvody", `
     <div class="form-group">
       <label class="form-label">Zaměstnanec</label>
@@ -4187,6 +4187,25 @@ function escHtml(s) {
 // ═══════════════════════════════════════════════════════════════
 
 const KARTY_LIMIT = 1500000;
+
+function renderKartaStatNastenka(stats) {
+  const firmy = Object.keys(stats);
+  if (!firmy.length) return "";
+  const ulozeneFirma = localStorage.getItem("aktivni_firma");
+  const nekteraAktivni = firmy.some(f => stats[f].aktivni);
+
+  // Najdi aktivní firmu
+  let aktivniFirma = firmy.find(f => stats[f].aktivni);
+  if (!aktivniFirma && ulozeneFirma && firmy.includes(ulozeneFirma)) {
+    aktivniFirma = ulozeneFirma;
+  }
+  if (!aktivniFirma) aktivniFirma = firmy[0];
+
+  // Zobraz jen aktivní firmu + celkem — použijeme stejný kód jako renderKartaStatHtml
+  const statsFiltered = {};
+  statsFiltered[aktivniFirma] = { ...stats[aktivniFirma], aktivni: true };
+  return renderKartaStatHtml(statsFiltered);
+}
 
 function renderKartaStatHtml(stats) {
   const firmy = Object.keys(stats);
