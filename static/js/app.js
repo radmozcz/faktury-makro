@@ -6107,7 +6107,7 @@ async function saveVystavena(editId = null) {
   closeModal(); loadVystavene();
 }
 
-async function toggleVystStav(id, stavNyni) {
+async function toggleVystStav(id,  stavNyni) {
   const novy = stavNyni === "zaplaceno" ? "nezaplaceno" : "zaplaceno";
   await api(`/api/vystavene-faktury/${id}/stav`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({stav: novy})});
   loadVystavene();
@@ -6116,6 +6116,6 @@ async function toggleVystStav(id, stavNyni) {
 async function smazatVystavenu(id) {
   if (!confirm("Opravdu smazat tuto fakturu?")) return;
   await api(`/api/vystavene-faktury/${id}`, {method:"DELETE"});
-  toast("Faktura smazána ✓"); loadVystavene();
+  toast("Faktura smazána ✓"); loadVystavene(); 
 }
 
