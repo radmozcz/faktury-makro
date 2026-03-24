@@ -6138,27 +6138,48 @@ async function smazatVystavenu(id) {
 
 
 
+
 // ═══════════════════════════════════════════════════════════════
 //  PENĚŽENKA — hotovostní kasa
 // ═══════════════════════════════════════════════════════════════
 
+const PW_NOMINALY = [5000,2000,1000,500,200,100,50,20,10,5,2,1];
+
 const PW_BANKY = [
-  { key: "rb_fp",     label: "RB — FP" },
-  { key: "rb_mr",     label: "RB — MR" },
-  { key: "rb_cff",    label: "RB — CFF" },
-  { key: "rb_radek",  label: "RB — Radek" },
-  { key: "air_fp",    label: "Air — FP" },
-  { key: "air_mr",    label: "Air — MR" },
-  { key: "air_cff",   label: "Air — CFF" },
-  { key: "air_radek", label: "Air — Radek" },
-  { key: "kb_radek",  label: "KB — Radek" },
+  { key:"rb_fp",    label:"RB — FP" },
+  { key:"rb_mr",    label:"RB — MR" },
+  { key:"rb_cff",   label:"RB — CFF" },
+  { key:"rb_radek", label:"RB — Radek" },
+  { key:"air_fp",   label:"Air — FP" },
+  { key:"air_mr",   label:"Air — MR" },
+  { key:"air_cff",  label:"Air — CFF" },
+  { key:"air_radek",label:"Air — Radek" },
+  { key:"kb_radek", label:"KB — Radek" },
 ];
+
+const PW_BROKERI = [
+  { key:"xtb_czk", label:"XTB — CZK" },
+  { key:"xtb_eur", label:"XTB — EUR", eur:true },
+  { key:"t212",    label:"Trading 212" },
+  { key:"etoro",   label:"eToro" },
+];
+
+let _pwEurKurz = null;
+
+async function _pwNacistKurz() {
+  if (_pwEurKurz) return _pwEurKurz;
+  try {
+    const r = await fetch("https://api.frankfurter.app/latest?from=EUR&to=CZK");
+    const d = await r.json();
+    _pwEurKurz = d.rates.CZK;
+  } catch { _pwEurKurz = 25; }
+  return _pwEurKurz;
+}
 
 async function renderPenezenka() {
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
       <h1 class="page-title">💵 Peněženka</h1>
-      <button class="btn btn-primary btn-sm" onclick="openNovyZaznamPenezenka()">+ Nový záznam</button>
     </div>
     <div id="penezenkaObs"><div class="loading-center"><span class="spinner"></span></div></div>`;
   loadPenezenka();
@@ -6175,154 +6196,342 @@ async function loadPenezenka() {
   const z0 = zaznamy[0] || null;
   const z1 = zaznamy[1] || null;
 
-  // Hodnoty z posledního záznamu
-  const hotovost  = z0 ? (z0.hotovost || 0) : null;
-  const banky     = z0 ? PW_BANKY.reduce((s, b) => s + (z0[b.key] || 0), 0) : null;
-  const akcie     = z0 ? (z0.akcie || 0) : null;
-  const sporeni   = z0 ? (z0.sporeni || 0) : null;
-  const aktiva    = akcie !== null ? akcie + sporeni : null;
-  const celkem    = hotovost !== null ? hotovost + banky + aktiva : null;
-  const rozdil    = celkem !== null ? celkem - teoreticky : null;
+  const hotovost = z0 ? (z0.hotovost||0) : null;
+  const banky    = z0 ? PW_BANKY.reduce((s,b)=>s+(z0[b.key]||0),0) : null;
+  const akcie    = z0 ? PW_BROKERI.reduce((s,b)=>s+(z0[b.key]||0),0) : null;
+  const sporeni  = z0 ? (z0.sporeni||0) : null;
+  const extras   = z0 ? (() => { try { return JSON.parse(z0.extras||"[]"); } catch { return []; } })() : [];
+  const extrasSum = extras.reduce((s,e)=>s+(e.castka||0),0);
+  const celkem   = hotovost !== null ? hotovost + banky + akcie + sporeni + extrasSum : null;
+  const rozdil   = celkem !== null ? celkem - teoreticky : null;
 
-  // Změny oproti předchozímu záznamu
-  const zm = (key) => {
+  const zm = (klic) => {
     if (!z0 || !z1) return null;
-    if (key === "banky") return PW_BANKY.reduce((s,b) => s + (z0[b.key]||0) - (z1[b.key]||0), 0);
-    if (key === "aktiva") return (z0.akcie + z0.sporeni) - (z1.akcie + z1.sporeni);
-    if (key === "celkem") return (z0.hotovost + PW_BANKY.reduce((s,b)=>s+(z0[b.key]||0),0) + z0.akcie + z0.sporeni)
-                               - (z1.hotovost + PW_BANKY.reduce((s,b)=>s+(z1[b.key]||0),0) + z1.akcie + z1.sporeni);
-    return (z0[key] || 0) - (z1[key] || 0);
+    const ex0 = (() => { try { return JSON.parse(z0.extras||"[]"); } catch { return []; } })().reduce((s,e)=>s+(e.castka||0),0);
+    const ex1 = (() => { try { return JSON.parse(z1.extras||"[]"); } catch { return []; } })().reduce((s,e)=>s+(e.castka||0),0);
+    if (klic==="banky")  return PW_BANKY.reduce((s,b)=>s+(z0[b.key]||0)-(z1[b.key]||0),0);
+    if (klic==="akcie")  return PW_BROKERI.reduce((s,b)=>s+(z0[b.key]||0)-(z1[b.key]||0),0);
+    if (klic==="celkem") return ((z0.hotovost||0)+PW_BANKY.reduce((s,b)=>s+(z0[b.key]||0),0)+PW_BROKERI.reduce((s,b)=>s+(z0[b.key]||0),0)+(z0.sporeni||0)+ex0)
+                               -((z1.hotovost||0)+PW_BANKY.reduce((s,b)=>s+(z1[b.key]||0),0)+PW_BROKERI.reduce((s,b)=>s+(z1[b.key]||0),0)+(z1.sporeni||0)+ex1);
+    return (z0[klic]||0)-(z1[klic]||0);
   };
 
-  const zmenaHtml = (val) => {
-    if (val === null) return `<div style="font-size:.72rem;color:var(--txt2);margin-top:.25rem">—</div>`;
-    const c = val >= 0 ? "#16a34a" : "#dc2626";
-    return `<div style="font-size:.78rem;font-weight:600;color:${c};margin-top:.25rem">${val >= 0 ? "+" : ""}${czInt(val)} Kč</div>`;
+  const zmHtml = (v) => {
+    if (v===null) return "";
+    const c = v>=0?"#16a34a":"#dc2626";
+    return `<div style="font-size:.75rem;font-weight:600;color:${c};margin-top:.2rem">${v>=0?"+":""}${czInt(v)} Kč</div>`;
   };
 
-  const boxik = (ikona, nazev, hodnota, zmena, bg, border, tc, sub) => `
-    <div style="background:${bg};border:1.5px solid ${border};border-radius:10px;padding:1rem 1.1rem">
-      <div style="font-size:.75rem;color:${tc};font-weight:600;opacity:.75;margin-bottom:.2rem">${ikona} ${nazev}</div>
-      <div style="font-size:1.5rem;font-weight:700;color:${tc}">${hodnota !== null ? czInt(hodnota) + " Kč" : "—"}</div>
-      ${sub ? `<div style="font-size:.7rem;color:${tc};opacity:.65;margin-top:.1rem">${sub}</div>` : ""}
-      ${zmenaHtml(zmena)}
+  const boxik = (ikona,nazev,hodnota,zmena,bg,border,tc,sub) => `
+    <div style="background:${bg};border:1.5px solid ${border};border-radius:10px;padding:.9rem 1rem">
+      <div style="font-size:.73rem;color:${tc};font-weight:600;opacity:.7;margin-bottom:.15rem">${ikona} ${nazev}</div>
+      <div style="font-size:1.45rem;font-weight:700;color:${tc}">${hodnota!==null?czInt(hodnota)+" Kč":"—"}</div>
+      ${sub?`<div style="font-size:.68rem;color:${tc};opacity:.6;margin-top:.1rem">${sub}</div>`:""}
+      ${zmHtml(zmena)}
     </div>`;
 
-  const datumZaznamu = z0 ? czDate(z0.datum) : "žádný záznam";
+  const datD = z0?czDate(z0.datum):"žádný záznam";
 
+  // Levá strana — boxíky, pravá strana — zadávací panel
   el.innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:.85rem;margin-bottom:1.5rem">
-      ${boxik("💵","Hotovost", hotovost, zm("hotovost"), "#fefce8","#fcd34d","#92400e", datumZaznamu)}
-      ${boxik("🏦","Banky celkem", banky, zm("banky"), "#eff6ff","#93c5fd","#1e40af", z0 ? PW_BANKY.filter(b=>z0[b.key]>0).map(b=>b.label+": "+czInt(z0[b.key])).join(" · ") : "")}
-      ${boxik("📈","Aktiva", aktiva, zm("aktiva"), "#f0fdf4","#86efac","#166534", z0 ? "Akcie: "+czInt(z0.akcie||0)+" · Spoření: "+czInt(z0.sporeni||0) : "")}
-      ${boxik("💰","Celkem", celkem, zm("celkem"), "#faf5ff","#c084fc","#7e22ce", "")}
-      ${boxik("🧮","Teoretický stav", teoreticky, null, "#f9fafb","var(--border)","var(--txt)", "hotovost z Reportů od "+data.od_data)}
-      ${boxik("⚖️","Rozdíl", rozdil, null, rozdil === null ? "#f9fafb" : rozdil >= 0 ? "#f0fdf4" : "#fee2e2", rozdil === null ? "var(--border)" : rozdil >= 0 ? "#86efac" : "#fca5a5", rozdil === null ? "var(--txt)" : rozdil >= 0 ? "#166534" : "#991b1b", "celkem − teoretický")}
-    </div>
+    <div style="display:grid;grid-template-columns:1fr 360px;gap:1.25rem;align-items:start">
 
-    <div class="card">
-      <div class="card-title">Historie záznamů</div>
-      ${zaznamy.length ? `
-      <div style="overflow-x:auto">
-        <table style="min-width:900px">
-          <thead><tr style="font-size:.78rem;color:var(--txt2)">
-            <th>Datum</th>
-            <th style="text-align:right">💵 Hotovost</th>
-            ${PW_BANKY.map(b=>`<th style="text-align:right">${b.label}</th>`).join("")}
-            <th style="text-align:right">🏦 Banky</th>
-            <th style="text-align:right">📈 Akcie</th>
-            <th style="text-align:right">💰 Spoření</th>
-            <th style="text-align:right;font-weight:600">Celkem</th>
-            <th></th>
-          </tr></thead>
-          <tbody>
-            ${zaznamy.map((z, idx) => {
-              const prev = zaznamy[idx + 1] || null;
-              const zBanky = PW_BANKY.reduce((s,b) => s + (z[b.key]||0), 0);
-              const zCelkem = (z.hotovost||0) + zBanky + (z.akcie||0) + (z.sporeni||0);
-              const prevCelkem = prev ? (prev.hotovost||0) + PW_BANKY.reduce((s,b)=>s+(prev[b.key]||0),0) + (prev.akcie||0) + (prev.sporeni||0) : null;
-              const diff = prevCelkem !== null ? zCelkem - prevCelkem : null;
-              const dc = diff === null ? "" : diff >= 0 ? "#16a34a" : "#dc2626";
-              return `<tr>
-                <td style="white-space:nowrap"><strong>${czDate(z.datum)}</strong>${diff !== null ? `<br><small style="color:${dc}">${diff>=0?"+":""}${czInt(diff)}</small>` : ""}</td>
-                <td style="text-align:right">${czInt(z.hotovost||0)}</td>
-                ${PW_BANKY.map(b=>`<td style="text-align:right;color:var(--txt2);font-size:.82rem">${z[b.key] > 0 ? czInt(z[b.key]) : "—"}</td>`).join("")}
-                <td style="text-align:right;font-weight:600">${czInt(zBanky)}</td>
-                <td style="text-align:right">${czInt(z.akcie||0)}</td>
-                <td style="text-align:right">${czInt(z.sporeni||0)}</td>
-                <td style="text-align:right;font-weight:700">${czInt(zCelkem)}</td>
-                <td><button class="btn btn-danger btn-sm" onclick="smazatZaznamPenezenka(${z.id})">🗑</button></td>
-              </tr>`;
-            }).join("")}
-          </tbody>
-        </table>
-      </div>` : `<div style="color:var(--txt2);padding:1rem;text-align:center">Žádné záznamy — klikni na "+ Nový záznam"</div>`}
+      <!-- LEVÁ: boxíky + tabulka -->
+      <div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1.25rem">
+          ${boxik("💵","Hotovost",hotovost,zm("hotovost"),"#fefce8","#fcd34d","#92400e",datD)}
+          ${boxik("🏦","Banky celkem",banky,zm("banky"),"#eff6ff","#93c5fd","#1e40af",z0?PW_BANKY.filter(b=>z0[b.key]>0).map(b=>b.label+": "+czInt(z0[b.key])).join(" · "):"")}
+          ${boxik("📈","Akcie celkem",akcie,zm("akcie"),"#f0fdf4","#86efac","#166534",z0?PW_BROKERI.filter(b=>z0[b.key]>0).map(b=>b.label+": "+czInt(z0[b.key])).join(" · "):"")}
+          ${boxik("💰","Celkem",celkem,zm("celkem"),"#faf5ff","#c084fc","#7e22ce","")}
+          ${boxik("🧮","Teoretický stav",teoreticky,null,"#f9fafb","var(--border)","var(--txt)","z Reportů od "+data.od_data)}
+          ${boxik("⚖️","Rozdíl",rozdil,null,rozdil===null?"#f9fafb":rozdil>=0?"#f0fdf4":"#fee2e2",rozdil===null?"var(--border)":rozdil>=0?"#86efac":"#fca5a5",rozdil===null?"var(--txt)":rozdil>=0?"#166534":"#991b1b","celkem − teoretický")}
+        </div>
+
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+            <div class="card-title" style="margin:0">Historie záznamů</div>
+          </div>
+          ${zaznamy.length ? `<div style="overflow-x:auto"><table style="min-width:700px;font-size:.83rem">
+            <thead><tr style="font-size:.75rem;color:var(--txt2)">
+              <th>Datum</th>
+              <th style="text-align:right">💵 Hotovost</th>
+              <th style="text-align:right">🏦 Banky</th>
+              <th style="text-align:right">📈 Akcie</th>
+              <th style="text-align:right">Spoření</th>
+              <th style="text-align:right">Ostatní</th>
+              <th style="text-align:right;font-weight:700">Celkem</th>
+              <th></th>
+            </tr></thead>
+            <tbody>
+              ${zaznamy.map((z,idx)=>{
+                const prev = zaznamy[idx+1]||null;
+                const ex = (()=>{try{return JSON.parse(z.extras||"[]");}catch{return [];}})().reduce((s,e)=>s+(e.castka||0),0);
+                const zB = PW_BANKY.reduce((s,b)=>s+(z[b.key]||0),0);
+                const zA = PW_BROKERI.reduce((s,b)=>s+(z[b.key]||0),0);
+                const zC = (z.hotovost||0)+zB+zA+(z.sporeni||0)+ex;
+                const prevEx = prev?(()=>{try{return JSON.parse(prev.extras||"[]");}catch{return [];}})().reduce((s,e)=>s+(e.castka||0),0):0;
+                const prevC = prev?(prev.hotovost||0)+PW_BANKY.reduce((s,b)=>s+(prev[b.key]||0),0)+PW_BROKERI.reduce((s,b)=>s+(prev[b.key]||0),0)+(prev.sporeni||0)+prevEx:null;
+                const diff = prevC!==null?zC-prevC:null;
+                const dc = diff===null?"":`color:${diff>=0?"#16a34a":"#dc2626"}`;
+                return `<tr>
+                  <td style="white-space:nowrap"><strong>${czDate(z.datum)}</strong>${diff!==null?`<br><small style="${dc}">${diff>=0?"+":""}${czInt(diff)}</small>`:""}
+                  </td>
+                  <td style="text-align:right">${czInt(z.hotovost||0)}</td>
+                  <td style="text-align:right">${czInt(zB)}</td>
+                  <td style="text-align:right">${czInt(zA)}</td>
+                  <td style="text-align:right">${czInt(z.sporeni||0)}</td>
+                  <td style="text-align:right;color:var(--txt2)">${ex>0?czInt(ex):"—"}</td>
+                  <td style="text-align:right;font-weight:700">${czInt(zC)}</td>
+                  <td><button class="btn btn-danger btn-sm" onclick="smazatZaznamPenezenka(${z.id})">🗑</button></td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table></div>`
+          : `<div style="color:var(--txt2);padding:1rem;text-align:center">Žádné záznamy</div>`}
+        </div>
+      </div>
+
+      <!-- PRAVÁ: zadávací panel -->
+      <div id="pwPanel" style="display:flex;flex-direction:column;gap:.65rem"></div>
+    </div>`;
+
+  // Sestavit pravý panel
+  _pwRenderPanel();
+}
+
+function _pwSekce(id, ikona, nazev, obsah, otevrena=false) {
+  return `
+    <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:.7rem 1rem;cursor:pointer;background:var(--bg2)"
+           onclick="_pwToggle('${id}')">
+        <span style="font-weight:600;font-size:.9rem">${ikona} ${nazev}</span>
+        <span id="pwArr_${id}" style="transition:transform .2s;display:inline-block;font-size:.8rem">${otevrena?"▼":"▶"}</span>
+      </div>
+      <div id="pwSek_${id}" style="display:${otevrena?"block":"none"};padding:.75rem 1rem;background:var(--card-bg,#fff)">
+        ${obsah}
+      </div>
     </div>`;
 }
 
-function openNovyZaznamPenezenka() {
+function _pwToggle(id) {
+  const el = document.getElementById("pwSek_"+id);
+  const arr = document.getElementById("pwArr_"+id);
+  const open = el.style.display!=="none";
+  el.style.display = open?"none":"block";
+  arr.textContent = open?"▶":"▼";
+}
+
+function _pwRenderPanel() {
+  const el = document.getElementById("pwPanel");
+  if (!el) return;
+
   const dnes = new Date().toISOString().split("T")[0];
-  openModal("Nový záznam peněženky", `
-    <div class="grid-2" style="gap:.75rem">
-      <div class="form-group" style="grid-column:1/-1">
-        <label class="form-label">Datum</label>
-        <input type="date" id="pwDatum" class="form-control" value="${dnes}" style="max-width:200px">
+
+  // Sekce 1: Hotovost — kalkulačka
+  const kalkulacka = PW_NOMINALY.map(n=>`
+    <div style="display:grid;grid-template-columns:70px 1fr 80px;gap:.4rem;align-items:center;margin-bottom:.3rem">
+      <div style="font-size:.85rem;font-weight:600;text-align:right">${czInt(n)} Kč</div>
+      <input type="number" min="0" id="pw_nom_${n}" class="form-control" placeholder="0" style="font-size:.85rem"
+        oninput="_pwKalcUpdate()">
+      <div id="pw_nom_val_${n}" style="font-size:.82rem;color:var(--txt2);text-align:right">= 0</div>
+    </div>`).join("")+`
+    <div style="border-top:2px solid var(--border);margin-top:.5rem;padding-top:.5rem;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-weight:600">Celkem hotovost:</span>
+      <span id="pwKalcCelkem" style="font-size:1.1rem;font-weight:700;color:#92400e">0 Kč</span>
+    </div>`;
+
+  // Sekce 2: Banky
+  const bankyForm = PW_BANKY.map(b=>`
+    <div class="form-group" style="margin-bottom:.4rem">
+      <label style="font-size:.78rem;color:var(--txt2)">${b.label}</label>
+      <input type="number" id="pw_${b.key}" class="form-control" placeholder="0" style="font-size:.85rem" oninput="_pwSouctUpdate()">
+    </div>`).join("")+`
+    <div style="border-top:2px solid var(--border);margin-top:.5rem;padding-top:.5rem;display:flex;justify-content:space-between">
+      <span style="font-weight:600">Celkem banky:</span>
+      <span id="pwBankyCelkem" style="font-weight:700;color:#1e40af">0 Kč</span>
+    </div>`;
+
+  // Sekce 3: Akcie — brokeři + EUR kurz
+  const akcieFrm = `
+    <div id="pwEurKurzInfo" style="font-size:.75rem;color:var(--txt2);margin-bottom:.5rem">⏳ Načítám kurz EUR/CZK...</div>
+    ${PW_BROKERI.map(b=>`
+    <div class="form-group" style="margin-bottom:.4rem">
+      <label style="font-size:.78rem;color:var(--txt2)">${b.label}${b.eur?' <span style="color:#2563eb">(EUR)</span>':''}</label>
+      <div style="display:flex;gap:.4rem;align-items:center">
+        <input type="number" id="pw_${b.key}" class="form-control" placeholder="0" style="font-size:.85rem" oninput="_pwSouctUpdate()">
+        ${b.eur?`<span id="pw_eur_czk" style="font-size:.75rem;color:var(--txt2);white-space:nowrap">= 0 Kč</span>`:""}
       </div>
-      <div class="form-group">
-        <label class="form-label">💵 Hotovost v kase (Kč)</label>
-        <input type="number" id="pwHotovost" class="form-control" placeholder="0">
+    </div>`).join("")}
+    <div style="border-top:2px solid var(--border);margin-top:.5rem;padding-top:.5rem;display:flex;justify-content:space-between">
+      <span style="font-weight:600">Celkem akcie:</span>
+      <span id="pwAkcieCelkem" style="font-weight:700;color:#166534">0 Kč</span>
+    </div>`;
+
+  // Sekce 4: Shrnutí + uložit
+  const shrnuti = `
+    <div style="margin-bottom:.5rem">
+      <label style="font-size:.78rem;color:var(--txt2)">📅 Datum</label>
+      <input type="date" id="pwDatum" class="form-control" value="${dnes}" style="font-size:.85rem;max-width:180px">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem;margin-bottom:.5rem">
+      <div>
+        <div style="font-size:.75rem;color:var(--txt2)">💵 Hotovost</div>
+        <div id="pwSumHotovost" style="font-weight:600">0 Kč</div>
       </div>
-      <div></div>
-    </div>
-    <hr style="margin:.75rem 0;border-color:var(--border)">
-    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:.5rem">🏦 Bankovní účty (Kč)</div>
-    <div class="grid-2" style="gap:.5rem">
-      ${PW_BANKY.map(b => `
-        <div class="form-group">
-          <label class="form-label" style="font-size:.8rem">${b.label}</label>
-          <input type="number" id="pw_${b.key}" class="form-control" placeholder="0">
-        </div>`).join("")}
-    </div>
-    <hr style="margin:.75rem 0;border-color:var(--border)">
-    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:.5rem">📈 Aktiva</div>
-    <div class="grid-2" style="gap:.5rem">
-      <div class="form-group">
-        <label class="form-label" style="font-size:.8rem">Akcie (Kč)</label>
-        <input type="number" id="pwAkcie" class="form-control" placeholder="0">
+      <div>
+        <div style="font-size:.75rem;color:var(--txt2)">🏦 Banky</div>
+        <div id="pwSumBanky" style="font-weight:600">0 Kč</div>
       </div>
-      <div class="form-group">
-        <label class="form-label" style="font-size:.8rem">Spoření (Kč)</label>
-        <input type="number" id="pwSporeni" class="form-control" placeholder="0">
+      <div>
+        <div style="font-size:.75rem;color:var(--txt2)">📈 Akcie</div>
+        <div id="pwSumAkcie" style="font-weight:600">0 Kč</div>
+      </div>
+      <div>
+        <div style="font-size:.75rem;color:var(--txt2)">💰 Spoření</div>
+        <input type="number" id="pwSporeni" class="form-control" placeholder="0" style="font-size:.85rem" oninput="_pwSouctUpdate()">
       </div>
     </div>
-    <div class="form-group" style="margin-top:.5rem">
-      <label class="form-label">Poznámka (volitelné)</label>
-      <input id="pwPoznamka" class="form-control" placeholder="Volitelná poznámka">
+    <div id="pwExtrasWrap" style="margin-bottom:.5rem"></div>
+    <button class="btn btn-secondary btn-sm" onclick="_pwPridatExtra()" style="margin-bottom:.75rem;width:100%">+ Přidat položku</button>
+    <div style="border-top:2px solid var(--border);padding-top:.6rem;display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+      <span style="font-weight:700">Celkem vše:</span>
+      <span id="pwSumCelkem" style="font-size:1.2rem;font-weight:700;color:#7e22ce">0 Kč</span>
     </div>
-    <div style="text-align:right;margin-top:1rem">
-      <button class="btn btn-primary" onclick="ulozitZaznamPenezenka()">💾 Uložit</button>
-    </div>`);
-  setTimeout(() => document.getElementById("pwHotovost")?.focus(), 100);
+    <div class="form-group">
+      <label style="font-size:.78rem;color:var(--txt2)">Poznámka</label>
+      <input id="pwPoznamka" class="form-control" placeholder="Volitelná poznámka" style="font-size:.85rem">
+    </div>
+    <button class="btn btn-primary" style="width:100%;margin-top:.75rem" onclick="ulozitZaznamPenezenka()">💾 Uložit záznam</button>`;
+
+  el.innerHTML =
+    _pwSekce("hotovost","💵","Hotovost — kalkulačka", kalkulacka) +
+    _pwSekce("banky","🏦","Bankovní účty", bankyForm) +
+    _pwSekce("akcie","📈","Akcie & brokeři", akcieFrm) +
+    _pwSekce("shrnuti","💰","Shrnutí & Uložit", shrnuti, true);
+
+  // Načíst EUR kurz
+  _pwNacistKurz().then(kurz => {
+    const el2 = document.getElementById("pwEurKurzInfo");
+    if (el2) el2.textContent = `Kurz EUR/CZK: ${kurz.toFixed(2)} Kč`;
+    _pwSouctUpdate();
+  });
+}
+
+function _pwKalcUpdate() {
+  let celkem = 0;
+  PW_NOMINALY.forEach(n => {
+    const ks = parseInt(document.getElementById(`pw_nom_${n}`)?.value || 0) || 0;
+    const val = ks * n;
+    celkem += val;
+    const el = document.getElementById(`pw_nom_val_${n}`);
+    if (el) el.textContent = val > 0 ? `= ${czInt(val)}` : "= 0";
+  });
+  const el = document.getElementById("pwKalcCelkem");
+  if (el) el.textContent = czInt(celkem) + " Kč";
+  // Propsat do shrnutí
+  const sh = document.getElementById("pwSumHotovost");
+  if (sh) sh.textContent = czInt(celkem) + " Kč";
+  _pwSouctUpdate();
+}
+
+function _pwSouctUpdate() {
+  // Hotovost z kalkulačky
+  let hotovost = 0;
+  PW_NOMINALY.forEach(n => {
+    hotovost += (parseInt(document.getElementById(`pw_nom_${n}`)?.value||0)||0) * n;
+  });
+
+  // Banky
+  let banky = 0;
+  PW_BANKY.forEach(b => { banky += parseFloat(document.getElementById(`pw_${b.key}`)?.value||0)||0; });
+
+  // Akcie (EUR přepočet)
+  let akcie = 0;
+  const kurz = _pwEurKurz || 25;
+  PW_BROKERI.forEach(b => {
+    const val = parseFloat(document.getElementById(`pw_${b.key}`)?.value||0)||0;
+    const czk = b.eur ? Math.round(val * kurz) : val;
+    akcie += czk;
+    if (b.eur) {
+      const eurEl = document.getElementById("pw_eur_czk");
+      if (eurEl) eurEl.textContent = `= ${czInt(czk)} Kč`;
+    }
+  });
+
+  // Spoření
+  const sporeni = parseFloat(document.getElementById("pwSporeni")?.value||0)||0;
+
+  // Extras
+  let extras = 0;
+  document.querySelectorAll(".pw-extra-castka").forEach(inp => { extras += parseFloat(inp.value||0)||0; });
+
+  const celkem = hotovost + banky + akcie + sporeni + extras;
+
+  const _s = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=czInt(v)+" Kč"; };
+  _s("pwSumHotovost", hotovost);
+  _s("pwSumBanky", banky);
+  _s("pwSumAkcie", akcie);
+  _s("pwSumCelkem", celkem);
+  _s("pwBankyCelkem", banky);
+  _s("pwAkcieCelkem", akcie);
+  _s("pwKalcCelkem", hotovost);
+}
+
+let _pwExtraIdx = 0;
+function _pwPridatExtra() {
+  const wrap = document.getElementById("pwExtrasWrap");
+  if (!wrap) return;
+  const idx = ++_pwExtraIdx;
+  const div = document.createElement("div");
+  div.style.cssText = "display:grid;grid-template-columns:1fr 100px auto;gap:.4rem;align-items:center;margin-bottom:.4rem";
+  div.innerHTML = `
+    <input class="form-control pw-extra-nazev" placeholder="Popis položky" style="font-size:.85rem">
+    <input type="number" class="form-control pw-extra-castka" placeholder="Kč" style="font-size:.85rem" oninput="_pwSouctUpdate()">
+    <button onclick="this.closest('div').remove();_pwSouctUpdate()" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:1rem">✕</button>`;
+  wrap.appendChild(div);
 }
 
 async function ulozitZaznamPenezenka() {
   const datum = document.getElementById("pwDatum")?.value;
   if (!datum) { toast("Vyplň datum", true); return; }
-  const payload = { datum, poznamka: document.getElementById("pwPoznamka")?.value || "" };
-  payload.hotovost = parseFloat(document.getElementById("pwHotovost")?.value || 0) || 0;
-  PW_BANKY.forEach(b => { payload[b.key] = parseFloat(document.getElementById(`pw_${b.key}`)?.value || 0) || 0; });
-  payload.akcie   = parseFloat(document.getElementById("pwAkcie")?.value || 0) || 0;
-  payload.sporeni = parseFloat(document.getElementById("pwSporeni")?.value || 0) || 0;
+
+  const kurz = _pwEurKurz || 25;
+  const payload = { datum, poznamka: document.getElementById("pwPoznamka")?.value||"" };
+
+  // Hotovost z kalkulačky
+  let hotovost = 0;
+  PW_NOMINALY.forEach(n => { hotovost += (parseInt(document.getElementById(`pw_nom_${n}`)?.value||0)||0)*n; });
+  payload.hotovost = hotovost;
+
+  // Banky
+  PW_BANKY.forEach(b => { payload[b.key] = parseFloat(document.getElementById(`pw_${b.key}`)?.value||0)||0; });
+
+  // Akcie (XTB EUR → přepočteno na CZK)
+  PW_BROKERI.forEach(b => {
+    const val = parseFloat(document.getElementById(`pw_${b.key}`)?.value||0)||0;
+    payload[b.key] = b.eur ? Math.round(val * kurz) : val;
+  });
+
+  // Spoření
+  payload.sporeni = parseFloat(document.getElementById("pwSporeni")?.value||0)||0;
+
+  // Extras
+  const extras = [];
+  document.querySelectorAll("#pwExtrasWrap > div").forEach(div => {
+    const nazev = div.querySelector(".pw-extra-nazev")?.value?.trim();
+    const castka = parseFloat(div.querySelector(".pw-extra-castka")?.value||0)||0;
+    if (nazev && castka > 0) extras.push({nazev, castka});
+  });
+  payload.extras = extras;
+
   await api("/api/penezenka", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
   toast("Záznam uložen ✓");
-  closeModal();
   loadPenezenka();
 }
 
 async function smazatZaznamPenezenka(id) {
   if (!confirm("Opravdu smazat tento záznam?")) return;
-  await api(`/api/penezenka/${id}`, { method: "DELETE" });
+  await api(`/api/penezenka/${id}`, { method:"DELETE" });
   toast("Smazáno ✓");
   loadPenezenka();
 }
-
