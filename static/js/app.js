@@ -4764,6 +4764,9 @@ function setupReportDropzone() {
   document.addEventListener("paste", function reportPasteHandler(e) {
     const modal = document.getElementById("modalOverlay");
     if (!modal || modal.style.display === "none") return;
+    // Pokud uživatel upravuje ruční záložku, NENAHRAZUJ data novým OCR
+    const rucniPanel = document.getElementById("rtabPanelRucni");
+    if (rucniPanel && rucniPanel.style.display !== "none") return;
     const fotaPanel = document.getElementById("rtabPanelFoto");
     if (!fotaPanel || fotaPanel.style.display === "none") return;
     const items = (e.clipboardData || e.originalEvent.clipboardData).items;
