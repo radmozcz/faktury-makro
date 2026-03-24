@@ -5572,35 +5572,52 @@ def api_penezenka_ulozit():
     if not datum:
         return jsonify({"error": "Chybí datum"}), 400
     import json as _json
-    with get_db() as conn:
-        cur = conn.execute("""
-            INSERT INTO penezenka
-                (datum, hotovost, rb_fp, rb_mr, rb_cff, rb_radek,
-                 air_fp, air_mr, air_cff, air_radek, kb_radek,
-                 xtb_czk, xtb_eur, t212, etoro,
-                 sporeni, extras, poznamka)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        """, (
-            datum,
-            float(data.get("hotovost", 0) or 0),
-            float(data.get("rb_fp", 0) or 0),
-            float(data.get("rb_mr", 0) or 0),
-            float(data.get("rb_cff", 0) or 0),
-            float(data.get("rb_radek", 0) or 0),
-            float(data.get("air_fp", 0) or 0),
-            float(data.get("air_mr", 0) or 0),
-            float(data.get("air_cff", 0) or 0),
-            float(data.get("air_radek", 0) or 0),
-            float(data.get("kb_radek", 0) or 0),
-            float(data.get("xtb_czk", 0) or 0),
-            float(data.get("xtb_eur", 0) or 0),
-            float(data.get("t212", 0) or 0),
-            float(data.get("etoro", 0) or 0),
-            float(data.get("sporeni", 0) or 0),
-            _json.dumps(data.get("extras", []), ensure_ascii=False),
-            data.get("poznamka", ""),
-        ))
-    return jsonify({"ok": True, "id": cur.lastrowid})
+    import traceback as _tb
+    try:
+        # Zjistit aktuální sloupce v tabulce
+        with get_db() as conn:
+            if _USE_PG:
+                cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='penezenka'")
+                pen_cols = [r["column_name"] for r in cur.fetchall()]
+            else:
+                pen_cols = [row[1] for row in conn.execute("PRAGMA table_info(penezenka)").fetchall()]
+
+            # Přidat chybějící sloupce za běhu
+            for col in ["hotovost","rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek","xtb_czk","xtb_eur","t212","etoro","sporeni"]:
+                if col not in pen_cols:
+                    try:
+                        conn.execute(f"ALTER TABLE penezenka ADD COLUMN {col} REAL DEFAULT 0")
+                        pen_cols.append(col)
+                    except Exception: pass
+            if "extras" not in pen_cols:
+                try:
+                    conn.execute("ALTER TABLE penezenka ADD COLUMN extras TEXT DEFAULT '[]'")
+                    pen_cols.append("extras")
+                except Exception: pass
+
+            # INSERT pouze se sloupci které existují
+            cols = ["datum"]
+            vals = [datum]
+            for col in ["hotovost","rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek","xtb_czk","xtb_eur","t212","etoro","sporeni"]:
+                if col in pen_cols:
+                    cols.append(col)
+                    vals.append(float(data.get(col, 0) or 0))
+            if "extras" in pen_cols:
+                cols.append("extras")
+                vals.append(_json.dumps(data.get("extras", []), ensure_ascii=False))
+            if "poznamka" in pen_cols:
+                cols.append("poznamka")
+                vals.append(data.get("poznamka", ""))
+
+            placeholders = ",".join(["?"] * len(cols))
+            cur = conn.execute(
+                f"INSERT INTO penezenka ({','.join(cols)}) VALUES ({placeholders})",
+                vals
+            )
+        return jsonify({"ok": True, "id": cur.lastrowid})
+    except Exception as e:
+        app.logger.error(f"Penezenka save error: {_tb.format_exc()}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/penezenka/<int:pid>", methods=["DELETE"])
 @vyzaduj_prihlaseni
