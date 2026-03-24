@@ -6284,7 +6284,10 @@ async function loadPenezenka() {
                   <td style="text-align:right">${czInt(z.sporeni||0)}</td>
                   <td style="text-align:right;color:var(--txt2)">${ex>0?czInt(ex):"—"}</td>
                   <td style="text-align:right;font-weight:700">${czInt(zC)}</td>
-                  <td><button class="btn btn-danger btn-sm" onclick="smazatZaznamPenezenka(${z.id})">🗑</button></td>
+                  <td style="white-space:nowrap">
+                    <button class="btn btn-secondary btn-sm" onclick="editZaznamPenezenka(${z.id})">✏️</button>
+                    <button class="btn btn-danger btn-sm" onclick="smazatZaznamPenezenka(${z.id})">🗑</button>
+                  </td>
                 </tr>`;
               }).join("")}
             </tbody>
@@ -6532,7 +6535,95 @@ async function ulozitZaznamPenezenka() {
   loadPenezenka();
 }
 
-async function smazatZaznamPenezenka(id) {
+async function editZaznamPenezenka(id) {
+  // Načíst data záznamu
+  let data;
+  try { data = await api("/api/penezenka"); } catch { return; }
+  const z = data.zaznamy.find(x => x.id === id);
+  if (!z) { toast("Záznam nenalezen", true); return; }
+
+  // Předvyplnit formulář
+  const extras = (() => { try { return JSON.parse(z.extras||"[]"); } catch { return []; } })();
+
+  // Otevřít modal s formulářem
+  openModal(`Upravit záznam — ${czDate(z.datum)}`, `
+    <div style="margin-bottom:.5rem">
+      <label class="form-label">Datum</label>
+      <input type="date" id="pwEditDatum" class="form-control" value="${z.datum}" style="max-width:200px">
+    </div>
+    <hr style="margin:.5rem 0;border-color:var(--border)">
+    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:.4rem">💵 Hotovost</div>
+    <input type="number" id="pwEditHotovost" class="form-control" value="${z.hotovost||0}" style="margin-bottom:.75rem">
+    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:.4rem">🏦 Bankovní účty</div>
+    <div class="grid-2" style="gap:.4rem;margin-bottom:.75rem">
+      ${PW_BANKY.map(b=>`<div>
+        <label style="font-size:.75rem;color:var(--txt2)">${b.label}</label>
+        <input type="number" id="pwEdit_${b.key}" class="form-control" value="${z[b.key]||0}" style="font-size:.85rem">
+      </div>`).join("")}
+    </div>
+    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:.4rem">📈 Akcie & brokeři</div>
+    <div class="grid-2" style="gap:.4rem;margin-bottom:.75rem">
+      ${PW_BROKERI.map(b=>`<div>
+        <label style="font-size:.75rem;color:var(--txt2)">${b.label}</label>
+        <input type="number" id="pwEdit_${b.key}" class="form-control" value="${z[b.key]||0}" style="font-size:.85rem">
+      </div>`).join("")}
+    </div>
+    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:.4rem">💰 Spoření</div>
+    <input type="number" id="pwEditSporeni" class="form-control" value="${z.sporeni||0}" style="margin-bottom:.75rem">
+    ${extras.length ? `
+    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:.4rem">Ostatní položky</div>
+    <div id="pwEditExtras">
+      ${extras.map(e=>`<div style="display:grid;grid-template-columns:1fr 100px auto;gap:.4rem;margin-bottom:.3rem">
+        <input class="form-control pw-edit-extra-nazev" value="${escHtml(e.nazev)}" style="font-size:.85rem">
+        <input type="number" class="form-control pw-edit-extra-castka" value="${e.castka}" style="font-size:.85rem">
+        <button onclick="this.closest('div').remove()" style="background:none;border:none;cursor:pointer;color:#dc2626">✕</button>
+      </div>`).join("")}
+    </div>` : '<div id="pwEditExtras"></div>'}
+    <button class="btn btn-secondary btn-sm" onclick="_pwEditPridatExtra()" style="margin-bottom:.75rem">+ Přidat položku</button>
+    <div class="form-group">
+      <label class="form-label">Poznámka</label>
+      <input id="pwEditPoznamka" class="form-control" value="${escHtml(z.poznamka||'')}">
+    </div>
+    <div style="text-align:right;margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitEditPenezenka(${id})">💾 Uložit změny</button>
+    </div>`);
+}
+
+function _pwEditPridatExtra() {
+  const wrap = document.getElementById("pwEditExtras");
+  if (!wrap) return;
+  const div = document.createElement("div");
+  div.style.cssText = "display:grid;grid-template-columns:1fr 100px auto;gap:.4rem;margin-bottom:.3rem";
+  div.innerHTML = `
+    <input class="form-control pw-edit-extra-nazev" placeholder="Popis" style="font-size:.85rem">
+    <input type="number" class="form-control pw-edit-extra-castka" placeholder="Kč" style="font-size:.85rem">
+    <button onclick="this.closest('div').remove()" style="background:none;border:none;cursor:pointer;color:#dc2626">✕</button>`;
+  wrap.appendChild(div);
+}
+
+async function ulozitEditPenezenka(id) {
+  const datum = document.getElementById("pwEditDatum")?.value;
+  if (!datum) { toast("Vyplň datum", true); return; }
+  const payload = {
+    datum,
+    hotovost: parseFloat(document.getElementById("pwEditHotovost")?.value||0)||0,
+    sporeni:  parseFloat(document.getElementById("pwEditSporeni")?.value||0)||0,
+    poznamka: document.getElementById("pwEditPoznamka")?.value||"",
+  };
+  PW_BANKY.forEach(b => { payload[b.key] = parseFloat(document.getElementById(`pwEdit_${b.key}`)?.value||0)||0; });
+  PW_BROKERI.forEach(b => { payload[b.key] = parseFloat(document.getElementById(`pwEdit_${b.key}`)?.value||0)||0; });
+  const extras = [];
+  document.querySelectorAll("#pwEditExtras > div").forEach(div => {
+    const nazev = div.querySelector(".pw-edit-extra-nazev")?.value?.trim();
+    const castka = parseFloat(div.querySelector(".pw-edit-extra-castka")?.value||0)||0;
+    if (nazev && castka > 0) extras.push({nazev, castka});
+  });
+  payload.extras = extras;
+  await api(`/api/penezenka/${id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+  toast("Záznam upraven ✓");
+  closeModal();
+  loadPenezenka();
+}
   if (!confirm("Opravdu smazat tento záznam?")) return;
   await api(`/api/penezenka/${id}`, { method:"DELETE" });
   toast("Smazáno ✓");
