@@ -6168,11 +6168,24 @@ let _pwEurKurz = null;
 
 async function _pwNacistKurz() {
   if (_pwEurKurz) return _pwEurKurz;
+  // Zkusit CNB API (česká národní banka)
   try {
-    const r = await fetch("https://api.frankfurter.app/latest?from=EUR&to=CZK");
-    const d = await r.json();
-    _pwEurKurz = d.rates.CZK;
-  } catch { _pwEurKurz = 25; }
+    const r = await fetch("https://api.cnb.cz/cnbapi/exrates/daily?lang=EN", {signal: AbortSignal.timeout(5000)});
+    if (r.ok) {
+      const d = await r.json();
+      const eur = d.rates?.find(x => x.currencyCode === "EUR");
+      if (eur) { _pwEurKurz = eur.rate / eur.amount; return _pwEurKurz; }
+    }
+  } catch {}
+  // Fallback: frankfurter.app
+  try {
+    const r = await fetch("https://api.frankfurter.app/latest?from=EUR&to=CZK", {signal: AbortSignal.timeout(4000)});
+    if (r.ok) {
+      const d = await r.json();
+      if (d.rates?.CZK) { _pwEurKurz = d.rates.CZK; return _pwEurKurz; }
+    }
+  } catch {}
+  _pwEurKurz = 25; // pevný fallback
   return _pwEurKurz;
 }
 
