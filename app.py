@@ -5619,6 +5619,38 @@ def api_penezenka_ulozit():
         app.logger.error(f"Penezenka save error: {_tb.format_exc()}")
         return jsonify({"error": str(e)}), 500
 
+@app.route("/api/penezenka/<int:pid>", methods=["PUT"])
+@vyzaduj_prihlaseni
+def api_penezenka_edit(pid):
+    import json as _json, traceback as _tb
+    data = request.json or {}
+    try:
+        with get_db() as conn:
+            if _USE_PG:
+                cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='penezenka'")
+                pen_cols = [r["column_name"] for r in cur.fetchall()]
+            else:
+                pen_cols = [row[1] for row in conn.execute("PRAGMA table_info(penezenka)").fetchall()]
+            cols = ["datum"]
+            vals = [data.get("datum","")]
+            for col in ["hotovost","rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek","xtb_czk","xtb_eur","t212","etoro","sporeni"]:
+                if col in pen_cols:
+                    cols.append(col)
+                    vals.append(float(data.get(col,0) or 0))
+            if "extras" in pen_cols:
+                cols.append("extras")
+                vals.append(_json.dumps(data.get("extras",[]), ensure_ascii=False))
+            if "poznamka" in pen_cols:
+                cols.append("poznamka")
+                vals.append(data.get("poznamka",""))
+            set_clause = ", ".join(f"{c}=?" for c in cols)
+            vals.append(pid)
+            conn.execute(f"UPDATE penezenka SET {set_clause} WHERE id=?", vals)
+        return jsonify({"ok": True})
+    except Exception as e:
+        app.logger.error(f"Penezenka edit error: {_tb.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/penezenka/<int:pid>", methods=["DELETE"])
 @vyzaduj_prihlaseni
 def api_penezenka_delete(pid):
