@@ -1332,20 +1332,22 @@ Formát odpovědi:
 - Pole "den" NEVYPLŇUJ — vrať vždy null, den spočítáme sami z data
 
 === ČÍSLA — ZÁMĚNY ČÍSLIC ===
-- Tečka nebo čárka uvnitř čísla = oddělovač tisíců: 9.582 = 9582, 4.900 = 4900
+- Tečka nebo čárka uvnitř čísla = oddělovač tisíců: 9.582 = 9582, 4.900 = 4900, 8.527 = 8527
 - Pomlčka nebo lomítko za číslem (9.582,-) = ignoruj
 - Výsledek rovnice: "14.521 + 5 = 14.636" → ber číslo ZA "=" = 14636
-- KRITICKÉ — při ručním psaní jsou si podobné: 3↔5, 1↔7, 0↔6, 4↔9
-- KOV je vždy malé číslo (desítky): pokud vidíš "59" zkontroluj zda není "39" nebo "39"
-- Číslo čti vždy v kontextu — KOV 39 je realističtější než KOV 59
+- KRITICKÉ — při ručním psaní jsou si podobné: 3↔5, 1↔7, 0↔6, 4↔9, 1↔4
+- Číslo vždy ověř pomocí kontrolního součtu: KARTY + KOV + PAPÍR + VÝDAJE = TRŽBA CELKEM
+- Pokud součet nesedí, zkus alternativní čtení záměnných číslic (3↔5, 1↔4) dokud součet nesedí
 
 === KARTY, KOV, PAPÍR, VÝDAJE ===
-- KARTY = platby kartou (větší číslo, typicky tisíce)
-- KOV = drobné mince (malé číslo, typicky desítky — pod 100 Kč)
-- PAPÍR = papírové bankovky (stovky až tisíce)
-- VÝDAJE = hotovost vydaná na nákupy — typicky prázdné nebo malé číslo
-- TRŽBA = karty + kov + papír — NEpatří do vydaje!
-- Pokud vidíš rovnici u TRŽBA → dej výsledek (číslo za "=") do tržby, NE do vydaje
+- KARTY = platby kartou (větší číslo, typicky 4000–15000 Kč)
+- KOV = drobné mince (malé číslo, typicky 20–200 Kč, NIKDY tisíce)
+- PAPÍR = papírové bankovky (stovky až tisíce Kč)
+- VÝDAJE = hotovost vydaná ven z kasy — typicky 0–500 Kč, NIKDY tisíce
+- TRŽBA CELKEM (bez PK) = KARTY + KOV + PAPÍR + VÝDAJE — použij tento součet pro ověření!
+- TRŽBA CELKEM vč. výdajů na lístku = KARTY + KOV + PAPÍR + VÝDAJE (to je správná kontrola)
+- KRITICKÉ pro VÝDAJE: jsou to typicky malé částky (100, 200 Kč). Pokud vidíš 400 ale součet nesedí, zkus 100 — záměna 4↔1 je velmi častá!
+- KRITICKÉ pro KARTY: číslo okolo 8000 Kč. Pokud vidíš 8327 ale součet nesedí, zkus 8527 — záměna 3↔5 je velmi častá!
 
 === POUKAZKY (PK) — VELMI DŮLEŽITÉ ===
 - Hledej na lístku "PK" nebo "POUKAZ" nebo "POUKAZKA"
