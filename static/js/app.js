@@ -6204,8 +6204,9 @@ async function loadPenezenka() {
   const sporeni  = z0 ? (z0.sporeni||0) : null;
   const extras   = z0 ? (() => { try { return JSON.parse(z0.extras||"[]"); } catch { return []; } })() : [];
   const extrasSum = extras.reduce((s,e)=>s+(e.castka||0),0);
-  const celkem   = hotovost !== null ? hotovost + banky + akcie + sporeni + extrasSum : null;
-  const rozdil   = celkem !== null ? celkem - teoreticky : null;
+  const celkem   = hotovost !== null ? hotovost + banky : null;  // jen hotovost + banky
+  const celkemVse = hotovost !== null ? hotovost + banky + akcie + sporeni + extrasSum : null;
+  const rozdil   = celkemVse !== null ? celkemVse - teoreticky : null;
 
   const zm = (klic) => {
     if (!z0 || !z1) return null;
@@ -6213,8 +6214,10 @@ async function loadPenezenka() {
     const ex1 = (() => { try { return JSON.parse(z1.extras||"[]"); } catch { return []; } })().reduce((s,e)=>s+(e.castka||0),0);
     if (klic==="banky")  return PW_BANKY.reduce((s,b)=>s+(z0[b.key]||0)-(z1[b.key]||0),0);
     if (klic==="akcie")  return PW_BROKERI.reduce((s,b)=>s+(z0[b.key]||0)-(z1[b.key]||0),0);
-    if (klic==="celkem") return ((z0.hotovost||0)+PW_BANKY.reduce((s,b)=>s+(z0[b.key]||0),0)+PW_BROKERI.reduce((s,b)=>s+(z0[b.key]||0),0)+(z0.sporeni||0)+ex0)
-                               -((z1.hotovost||0)+PW_BANKY.reduce((s,b)=>s+(z1[b.key]||0),0)+PW_BROKERI.reduce((s,b)=>s+(z1[b.key]||0),0)+(z1.sporeni||0)+ex1);
+    if (klic==="akcie_sporeni") return (PW_BROKERI.reduce((s,b)=>s+(z0[b.key]||0),0)+(z0.sporeni||0))
+                                      -(PW_BROKERI.reduce((s,b)=>s+(z1[b.key]||0),0)+(z1.sporeni||0));
+    if (klic==="celkem") return ((z0.hotovost||0)+PW_BANKY.reduce((s,b)=>s+(z0[b.key]||0),0))
+                               -((z1.hotovost||0)+PW_BANKY.reduce((s,b)=>s+(z1[b.key]||0),0));
     return (z0[klic]||0)-(z1[klic]||0);
   };
 
@@ -6232,6 +6235,28 @@ async function loadPenezenka() {
       ${zmHtml(zmena)}
     </div>`;
 
+  // Speciální boxík Akcie / Spoření
+  const boxikAkcieSporeni = () => {
+    const tc = "#166534";
+    const akcieSporeniCelkem = akcie !== null ? akcie + sporeni : null;
+    return `<div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:.9rem 1rem">
+      <div style="font-size:.73rem;color:${tc};font-weight:600;opacity:.7;margin-bottom:.4rem">📈 Akcie / Spoření</div>
+      <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:.2rem">
+        <span style="color:${tc};opacity:.8">Akcie</span>
+        <span style="font-weight:600;color:${tc}">${akcie!==null?czInt(akcie)+" Kč":"—"}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:.4rem;padding-bottom:.4rem;border-bottom:1px solid #86efac">
+        <span style="color:${tc};opacity:.8">Spoření</span>
+        <span style="font-weight:600;color:${tc}">${sporeni!==null?czInt(sporeni)+" Kč":"—"}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:.75rem;color:${tc};opacity:.7">Celkem</span>
+        <span style="font-size:1.2rem;font-weight:700;color:${tc}">${akcieSporeniCelkem!==null?czInt(akcieSporeniCelkem)+" Kč":"—"}</span>
+      </div>
+      ${zmHtml(zm("akcie_sporeni"))}
+    </div>`;
+  };
+
   const datD = z0?czDate(z0.datum):"žádný záznam";
 
   // Levá strana — boxíky, pravá strana — zadávací panel
@@ -6243,10 +6268,10 @@ async function loadPenezenka() {
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1.25rem">
           ${boxik("💵","Hotovost",hotovost,zm("hotovost"),"#fefce8","#fcd34d","#92400e",datD)}
           ${boxik("🏦","Banky celkem",banky,zm("banky"),"#eff6ff","#93c5fd","#1e40af",z0?PW_BANKY.filter(b=>z0[b.key]>0).map(b=>b.label+": "+czInt(z0[b.key])).join(" · "):"")}
-          ${boxik("📈","Akcie celkem",akcie,zm("akcie"),"#f0fdf4","#86efac","#166534",z0?PW_BROKERI.filter(b=>z0[b.key]>0).map(b=>b.label+": "+czInt(z0[b.key])).join(" · "):"")}
-          ${boxik("💰","Celkem",celkem,zm("celkem"),"#faf5ff","#c084fc","#7e22ce","")}
+          ${boxikAkcieSporeni()}
+          ${boxik("💰","Celkem (hotovost + banky)",celkem,zm("celkem"),"#faf5ff","#c084fc","#7e22ce","")}
           ${boxik("🧮","Teoretický stav",teoreticky,null,"#f9fafb","var(--border)","var(--txt)","z Reportů od "+data.od_data)}
-          ${boxik("⚖️","Rozdíl",rozdil,null,rozdil===null?"#f9fafb":rozdil>=0?"#f0fdf4":"#fee2e2",rozdil===null?"var(--border)":rozdil>=0?"#86efac":"#fca5a5",rozdil===null?"var(--txt)":rozdil>=0?"#166534":"#991b1b","celkem − teoretický")}
+          ${boxik("⚖️","Rozdíl",rozdil,null,rozdil===null?"#f9fafb":rozdil>=0?"#f0fdf4":"#fee2e2",rozdil===null?"var(--border)":rozdil>=0?"#86efac":"#fca5a5",rozdil===null?"var(--txt)":rozdil>=0?"#166534":"#991b1b","celkem vše − teoretický")}
         </div>
 
         <div class="card">
