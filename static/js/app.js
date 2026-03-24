@@ -127,6 +127,7 @@ function skryjNepovoleneMenu() {
     "polozky":    "faktury_zobrazit",
     "vyplaty":    "vyplaty_zobrazit",
     "reporty":    "reporty_zobrazit",
+    "penezenka":  "reporty_zobrazit",
     "statistiky": "statistiky",
     "nastaveni":  "nastaveni",
     "banky":      "bankovni_vypisy",
@@ -183,6 +184,7 @@ function navigateTo(page) {
     polozky:    renderPolozky,
     vyplaty:    renderVyplaty,
     reporty:    renderReporty,
+    penezenka:  renderPenezenka,
     statistiky: renderStatistiky,
     kalkulace:  renderKalkulace,
     "ai-asistent": renderAiAsistent,
@@ -6127,3 +6129,131 @@ async function smazatVystavenu(id) {
   toast("Faktura smazána ✓"); loadVystavene(); 
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+//  PENĚŽENKA — hotovostní kasa
+// ═══════════════════════════════════════════════════════════════
+
+async function renderPenezenka() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">💵 Hotovostní peněženka</h1>
+      <button class="btn btn-primary btn-sm" onclick="openNovyZaznamPenezenka()">+ Zaznamenat stav</button>
+    </div>
+    <div id="penezenkaObs"><div class="loading-center"><span class="spinner"></span></div></div>`;
+  loadPenezenka();
+}
+
+async function loadPenezenka() {
+  const el = document.getElementById("penezenkaObs");
+  if (!el) return;
+  let data;
+  try { data = await api("/api/penezenka"); } catch { return; }
+
+  const teoreticky = data.teoreticky_stav || 0;
+  const hotovost   = data.hotovost_celkem || 0;
+  const vydaje     = data.vydaje_celkem || 0;
+  const zaznamy    = data.zaznamy || [];
+
+  // Poslední skutečný stav
+  const posledni = zaznamy[0];
+  const skutecny = posledni ? posledni.stav_skutecny : null;
+  const rozdil   = skutecny !== null ? skutecny - teoreticky : null;
+  const rozdilColor = rozdil === null ? "var(--txt2)" : rozdil >= 0 ? "#16a34a" : "#dc2626";
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:1.5rem">
+      <div class="card" style="padding:.9rem 1rem;background:#f0fdf4;border:1.5px solid #86efac">
+        <div style="font-size:.75rem;color:#166534;font-weight:600;margin-bottom:.25rem">Teoretický stav kasy</div>
+        <div style="font-size:1.4rem;font-weight:700;color:#166534">${czInt(teoreticky)} Kč</div>
+        <div style="font-size:.72rem;color:#166534;margin-top:.2rem">příjmy ${czInt(hotovost)} − výdaje ${czInt(vydaje)}</div>
+        <div style="font-size:.7rem;color:var(--txt2);margin-top:.15rem">od ${data.od_data}</div>
+      </div>
+      <div class="card" style="padding:.9rem 1rem;background:${skutecny !== null ? '#fefce8' : '#f9fafb'};border:1.5px solid ${skutecny !== null ? '#fcd34d' : 'var(--border)'}">
+        <div style="font-size:.75rem;color:#92400e;font-weight:600;margin-bottom:.25rem">Skutečný stav (poslední záznam)</div>
+        <div style="font-size:1.4rem;font-weight:700;color:#92400e">${skutecny !== null ? czInt(skutecny) + ' Kč' : '—'}</div>
+        <div style="font-size:.72rem;color:var(--txt2);margin-top:.2rem">${posledni ? posledni.datum : 'Žádný záznam'}</div>
+      </div>
+      <div class="card" style="padding:.9rem 1rem">
+        <div style="font-size:.75rem;color:var(--txt2);font-weight:600;margin-bottom:.25rem">Rozdíl</div>
+        <div style="font-size:1.4rem;font-weight:700;color:${rozdilColor}">${rozdil !== null ? (rozdil >= 0 ? '+' : '') + czInt(rozdil) + ' Kč' : '—'}</div>
+        <div style="font-size:.72rem;color:var(--txt2);margin-top:.2rem">skutečný − teoretický</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Historie záznamů</div>
+      ${zaznamy.length ? `
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Datum</th>
+            <th style="text-align:right">Skutečný stav</th>
+            <th style="text-align:right">Teoretický stav</th>
+            <th style="text-align:right">Rozdíl</th>
+            <th>Poznámka</th>
+            <th></th>
+          </tr></thead>
+          <tbody>
+            ${zaznamy.map(z => {
+              const rozd = z.stav_skutecny - teoreticky;
+              const rc = rozd >= 0 ? "#16a34a" : "#dc2626";
+              return `<tr>
+                <td>${czDate(z.datum)}</td>
+                <td style="text-align:right;font-weight:600">${czInt(z.stav_skutecny)} Kč</td>
+                <td style="text-align:right;color:var(--txt2)">${czInt(teoreticky)} Kč</td>
+                <td style="text-align:right;font-weight:600;color:${rc}">${rozd >= 0 ? '+' : ''}${czInt(rozd)} Kč</td>
+                <td style="color:var(--txt2);font-size:.88rem">${escHtml(z.poznamka || '')}</td>
+                <td><button class="btn btn-danger btn-sm" onclick="smazatZaznamPenezenka(${z.id})">🗑</button></td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>` : `<div style="color:var(--txt2);padding:1rem;text-align:center">Žádné záznamy — klikni na "+ Zaznamenat stav"</div>`}
+    </div>`;
+}
+
+function openNovyZaznamPenezenka() {
+  const dnes = new Date().toISOString().split("T")[0];
+  openModal("Zaznamenat stav kasy", `
+    <div class="grid-2" style="gap:1rem">
+      <div class="form-group">
+        <label class="form-label">Datum</label>
+        <input type="date" id="pwDatum" class="form-control" value="${dnes}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Skutečný stav kasy (Kč)</label>
+        <input type="number" id="pwStav" class="form-control" placeholder="Kolik je fyzicky v kase">
+      </div>
+    </div>
+    <div class="form-group" style="margin-top:.5rem">
+      <label class="form-label">Poznámka (volitelné)</label>
+      <input id="pwPoznamka" class="form-control" placeholder="Např. po výplatách, před víkendem...">
+    </div>
+    <div style="text-align:right;margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitZaznamPenezenka()">💾 Uložit</button>
+    </div>`);
+  setTimeout(() => document.getElementById("pwStav")?.focus(), 100);
+}
+
+async function ulozitZaznamPenezenka() {
+  const datum   = document.getElementById("pwDatum")?.value;
+  const stav    = parseFloat(document.getElementById("pwStav")?.value || "");
+  const poznamka = document.getElementById("pwPoznamka")?.value || "";
+  if (!datum || isNaN(stav)) { toast("Vyplň datum a stav kasy", true); return; }
+  await api("/api/penezenka", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ datum, stav_skutecny: stav, poznamka })
+  });
+  toast("Záznam uložen ✓");
+  closeModal();
+  loadPenezenka();
+}
+
+async function smazatZaznamPenezenka(id) {
+  if (!confirm("Opravdu smazat tento záznam?")) return;
+  await api(`/api/penezenka/${id}`, { method: "DELETE" });
+  toast("Smazáno ✓");
+  loadPenezenka();
+}
