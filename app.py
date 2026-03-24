@@ -648,6 +648,16 @@ def migrate_db():
             except Exception: pass
     print("migrate_db OK")
 
+    # Peněženka — hotovostní záznamy
+    with get_db() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS penezenka (
+            id          SERIAL PRIMARY KEY,
+            datum       TEXT NOT NULL,
+            stav_skutecny REAL NOT NULL DEFAULT 0,
+            poznamka    TEXT DEFAULT '',
+            created_at  TEXT DEFAULT NOW()
+        )""")
+
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
@@ -5469,6 +5479,70 @@ def api_kalkulace_cena_polozky():
 @app.route("/ping")
 def ping():
     return "pong", 200
+
+
+
+# ═══════════════════════════════════════════════════════════════
+#  PENĚŽENKA — hotovostní kasa
+# ═══════════════════════════════════════════════════════════════
+
+PENEZENKA_START = "2026-03-24"  # od tohoto data počítáme teoretický stav
+
+@app.route("/api/penezenka")
+@vyzaduj_prihlaseni
+def api_penezenka_list():
+    """Vrátí záznamy peněženky + teoretický stav z reportů."""
+    import datetime as _dt
+    dnes = _dt.date.today().isoformat()
+
+    with get_db() as conn:
+        # Záznamy skutečného stavu
+        zaznamy = conn.execute(
+            "SELECT * FROM penezenka ORDER BY datum DESC"
+        ).fetchall()
+
+        # Teoretický stav: součet hotovosti z reportů od PENEZENKA_START do dnes
+        r_hot = conn.execute("""
+            SELECT COALESCE(SUM(hotovost), 0) as hot,
+                   COALESCE(SUM(vydaje), 0) as vyd
+            FROM reporty
+            WHERE datum >= ? AND datum <= ?
+        """, (PENEZENKA_START, dnes)).fetchone()
+
+        hot = float(r_hot["hot"] if isinstance(r_hot, dict) else r_hot[0])
+        vyd = float(r_hot["vyd"] if isinstance(r_hot, dict) else r_hot[1])
+        teoreticky = round(hot - vyd, 0)
+
+    return jsonify({
+        "zaznamy": [dict(r) for r in zaznamy],
+        "teoreticky_stav": teoreticky,
+        "hotovost_celkem": round(hot, 0),
+        "vydaje_celkem": round(vyd, 0),
+        "od_data": PENEZENKA_START,
+    })
+
+@app.route("/api/penezenka", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_penezenka_ulozit():
+    data = request.json or {}
+    datum = data.get("datum", "")
+    stav = float(data.get("stav_skutecny", 0) or 0)
+    poznamka = data.get("poznamka", "")
+    if not datum:
+        return jsonify({"error": "Chybí datum"}), 400
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO penezenka (datum, stav_skutecny, poznamka) VALUES (?,?,?)",
+            (datum, stav, poznamka)
+        )
+    return jsonify({"ok": True, "id": cur.lastrowid})
+
+@app.route("/api/penezenka/<int:pid>", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_penezenka_delete(pid):
+    with get_db() as conn:
+        conn.execute("DELETE FROM penezenka WHERE id=?", (pid,))
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":
