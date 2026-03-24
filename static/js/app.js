@@ -6325,3 +6325,4 @@ async function smazatZaznamPenezenka(id) {
   toast("Smazáno ✓");
   loadPenezenka();
 }
+
