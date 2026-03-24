@@ -4610,7 +4610,7 @@ function reportFormHtml(r = {}) {
           <input type="number" id="rfVydaje" class="form-control" value="${r.vydaje||0}" oninput="rfRecalc()">
         </div>
       </div>
-      <div class="grid-2" style="gap:.8rem;margin-top:.5rem">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.8rem;margin-top:.5rem">
         <div class="form-group">
           <label class="form-label">🎟 PK 50 Kč (kusů)</label>
           <input type="number" id="rfPk50" class="form-control" value="${r.pk50_ks||0}" oninput="rfRecalc()">
@@ -4618,6 +4618,10 @@ function reportFormHtml(r = {}) {
         <div class="form-group">
           <label class="form-label">🎟 PK 100 Kč (kusů)</label>
           <input type="number" id="rfPk100" class="form-control" value="${r.pk100_ks||0}" oninput="rfRecalc()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🎟 PK Celkem (Kč)</label>
+          <div id="rfPkCelkemDisp" style="padding:.5rem .75rem;background:var(--green-pale);border-radius:6px;font-weight:600;font-size:.95rem;min-height:2.2rem;display:flex;align-items:center">${czMoney((r.pk50_ks||0)*50+(r.pk100_ks||0)*100)} Kč</div>
         </div>
       </div>
       <div id="rfVypocty" style="background:var(--green-pale);border-radius:8px;padding:.6rem 1rem;margin:.8rem 0;font-size:.9rem">
@@ -4680,6 +4684,7 @@ function rfRecalc() {
   if (el("rfHotovostDisp"))  el("rfHotovostDisp").textContent  = "Hotovost: " + czMoney(hotovost);
   if (el("rfTrzbaDisp"))     el("rfTrzbaDisp").textContent     = "Tržba: " + czMoney(trzba);
   if (el("rfPkDisp"))        el("rfPkDisp").textContent        = "PK: " + czMoney(pkKc);
+  if (el("rfPkCelkemDisp"))  el("rfPkCelkemDisp").textContent  = czMoney(pkKc) + " Kč";
   if (el("rfTrzbaVcPkDisp")) el("rfTrzbaVcPkDisp").textContent = "Tržba vč. PK: " + czMoney(trzbaVcPk);
 }
 
