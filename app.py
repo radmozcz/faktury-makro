@@ -663,8 +663,12 @@ def migrate_db():
             air_cff   REAL NOT NULL DEFAULT 0,
             air_radek REAL NOT NULL DEFAULT 0,
             kb_radek  REAL NOT NULL DEFAULT 0,
-            akcie     REAL NOT NULL DEFAULT 0,
+            xtb_czk   REAL NOT NULL DEFAULT 0,
+            xtb_eur   REAL NOT NULL DEFAULT 0,
+            t212      REAL NOT NULL DEFAULT 0,
+            etoro     REAL NOT NULL DEFAULT 0,
             sporeni   REAL NOT NULL DEFAULT 0,
+            extras    TEXT DEFAULT '[]',
             poznamka  TEXT DEFAULT '',
             created_at TEXT DEFAULT NOW()
         )""")
@@ -674,13 +678,20 @@ def migrate_db():
             pen_cols = [r["column_name"] for r in cur.fetchall()]
         else:
             pen_cols = [row[1] for row in conn.execute("PRAGMA table_info(penezenka)").fetchall()]
-        for col in ["hotovost","rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek","akcie","sporeni"]:
+        for col in ["hotovost","rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek","xtb_czk","xtb_eur","t212","etoro","sporeni"]:
             if col not in pen_cols:
                 try: conn.execute(f"ALTER TABLE penezenka ADD COLUMN {col} REAL DEFAULT 0")
                 except Exception: pass
+        if "extras" not in pen_cols:
+            try: conn.execute("ALTER TABLE penezenka ADD COLUMN extras TEXT DEFAULT '[]'")
+            except Exception: pass
         # Přejmenovat stary sloupec stav_skutecny → hotovost pokud existuje
         if "stav_skutecny" in pen_cols and "hotovost" not in pen_cols:
             try: conn.execute("ALTER TABLE penezenka RENAME COLUMN stav_skutecny TO hotovost")
+            except Exception: pass
+        # Přejmenovat akcie → xtb_czk pokud existuje (starý sloupec)
+        if "akcie" in pen_cols and "xtb_czk" not in pen_cols:
+            try: conn.execute("ALTER TABLE penezenka RENAME COLUMN akcie TO xtb_czk")
             except Exception: pass
 
 
@@ -5543,13 +5554,15 @@ def api_penezenka_ulozit():
     datum = data.get("datum", "")
     if not datum:
         return jsonify({"error": "Chybí datum"}), 400
+    import json as _json
     with get_db() as conn:
         cur = conn.execute("""
             INSERT INTO penezenka
                 (datum, hotovost, rb_fp, rb_mr, rb_cff, rb_radek,
                  air_fp, air_mr, air_cff, air_radek, kb_radek,
-                 akcie, sporeni, poznamka)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                 xtb_czk, xtb_eur, t212, etoro,
+                 sporeni, extras, poznamka)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             datum,
             float(data.get("hotovost", 0) or 0),
@@ -5562,8 +5575,12 @@ def api_penezenka_ulozit():
             float(data.get("air_cff", 0) or 0),
             float(data.get("air_radek", 0) or 0),
             float(data.get("kb_radek", 0) or 0),
-            float(data.get("akcie", 0) or 0),
+            float(data.get("xtb_czk", 0) or 0),
+            float(data.get("xtb_eur", 0) or 0),
+            float(data.get("t212", 0) or 0),
+            float(data.get("etoro", 0) or 0),
             float(data.get("sporeni", 0) or 0),
+            _json.dumps(data.get("extras", []), ensure_ascii=False),
             data.get("poznamka", ""),
         ))
     return jsonify({"ok": True, "id": cur.lastrowid})
