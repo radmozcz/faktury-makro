@@ -651,12 +651,37 @@ def migrate_db():
     # Peněženka — hotovostní záznamy
     with get_db() as conn:
         conn.execute("""CREATE TABLE IF NOT EXISTS penezenka (
-            id          SERIAL PRIMARY KEY,
-            datum       TEXT NOT NULL,
-            stav_skutecny REAL NOT NULL DEFAULT 0,
-            poznamka    TEXT DEFAULT '',
-            created_at  TEXT DEFAULT NOW()
+            id        SERIAL PRIMARY KEY,
+            datum     TEXT NOT NULL,
+            hotovost  REAL NOT NULL DEFAULT 0,
+            rb_fp     REAL NOT NULL DEFAULT 0,
+            rb_mr     REAL NOT NULL DEFAULT 0,
+            rb_cff    REAL NOT NULL DEFAULT 0,
+            rb_radek  REAL NOT NULL DEFAULT 0,
+            air_fp    REAL NOT NULL DEFAULT 0,
+            air_mr    REAL NOT NULL DEFAULT 0,
+            air_cff   REAL NOT NULL DEFAULT 0,
+            air_radek REAL NOT NULL DEFAULT 0,
+            kb_radek  REAL NOT NULL DEFAULT 0,
+            akcie     REAL NOT NULL DEFAULT 0,
+            sporeni   REAL NOT NULL DEFAULT 0,
+            poznamka  TEXT DEFAULT '',
+            created_at TEXT DEFAULT NOW()
         )""")
+        # Migrace — přidat sloupce pokud tabulka existuje bez nich
+        if _USE_PG:
+            cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='penezenka'")
+            pen_cols = [r["column_name"] for r in cur.fetchall()]
+        else:
+            pen_cols = [row[1] for row in conn.execute("PRAGMA table_info(penezenka)").fetchall()]
+        for col in ["hotovost","rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek","akcie","sporeni"]:
+            if col not in pen_cols:
+                try: conn.execute(f"ALTER TABLE penezenka ADD COLUMN {col} REAL DEFAULT 0")
+                except Exception: pass
+        # Přejmenovat stary sloupec stav_skutecny → hotovost pokud existuje
+        if "stav_skutecny" in pen_cols and "hotovost" not in pen_cols:
+            try: conn.execute("ALTER TABLE penezenka RENAME COLUMN stav_skutecny TO hotovost")
+            except Exception: pass
 
 
 def allowed_file(filename):
@@ -5486,36 +5511,26 @@ def ping():
 #  PENĚŽENKA — hotovostní kasa
 # ═══════════════════════════════════════════════════════════════
 
-PENEZENKA_START = "2026-03-24"  # od tohoto data počítáme teoretický stav
+PENEZENKA_START = "2026-03-24"
+
+BANKY_SLOUPCE = ["rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek"]
 
 @app.route("/api/penezenka")
 @vyzaduj_prihlaseni
 def api_penezenka_list():
-    """Vrátí záznamy peněženky + teoretický stav z reportů."""
     import datetime as _dt
     dnes = _dt.date.today().isoformat()
-
     with get_db() as conn:
-        # Záznamy skutečného stavu
-        zaznamy = conn.execute(
-            "SELECT * FROM penezenka ORDER BY datum DESC"
-        ).fetchall()
-
-        # Teoretický stav: součet hotovosti z reportů od PENEZENKA_START do dnes
+        zaznamy = conn.execute("SELECT * FROM penezenka ORDER BY datum DESC").fetchall()
         r_hot = conn.execute("""
-            SELECT COALESCE(SUM(hotovost), 0) as hot,
-                   COALESCE(SUM(vydaje), 0) as vyd
-            FROM reporty
-            WHERE datum >= ? AND datum <= ?
+            SELECT COALESCE(SUM(hotovost), 0) as hot, COALESCE(SUM(vydaje), 0) as vyd
+            FROM reporty WHERE datum >= ? AND datum <= ?
         """, (PENEZENKA_START, dnes)).fetchone()
-
         hot = float(r_hot["hot"] if isinstance(r_hot, dict) else r_hot[0])
         vyd = float(r_hot["vyd"] if isinstance(r_hot, dict) else r_hot[1])
-        teoreticky = round(hot - vyd, 0)
-
     return jsonify({
         "zaznamy": [dict(r) for r in zaznamy],
-        "teoreticky_stav": teoreticky,
+        "teoreticky_stav": round(hot - vyd, 0),
         "hotovost_celkem": round(hot, 0),
         "vydaje_celkem": round(vyd, 0),
         "od_data": PENEZENKA_START,
@@ -5526,15 +5541,31 @@ def api_penezenka_list():
 def api_penezenka_ulozit():
     data = request.json or {}
     datum = data.get("datum", "")
-    stav = float(data.get("stav_skutecny", 0) or 0)
-    poznamka = data.get("poznamka", "")
     if not datum:
         return jsonify({"error": "Chybí datum"}), 400
     with get_db() as conn:
-        cur = conn.execute(
-            "INSERT INTO penezenka (datum, stav_skutecny, poznamka) VALUES (?,?,?)",
-            (datum, stav, poznamka)
-        )
+        cur = conn.execute("""
+            INSERT INTO penezenka
+                (datum, hotovost, rb_fp, rb_mr, rb_cff, rb_radek,
+                 air_fp, air_mr, air_cff, air_radek, kb_radek,
+                 akcie, sporeni, poznamka)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (
+            datum,
+            float(data.get("hotovost", 0) or 0),
+            float(data.get("rb_fp", 0) or 0),
+            float(data.get("rb_mr", 0) or 0),
+            float(data.get("rb_cff", 0) or 0),
+            float(data.get("rb_radek", 0) or 0),
+            float(data.get("air_fp", 0) or 0),
+            float(data.get("air_mr", 0) or 0),
+            float(data.get("air_cff", 0) or 0),
+            float(data.get("air_radek", 0) or 0),
+            float(data.get("kb_radek", 0) or 0),
+            float(data.get("akcie", 0) or 0),
+            float(data.get("sporeni", 0) or 0),
+            data.get("poznamka", ""),
+        ))
     return jsonify({"ok": True, "id": cur.lastrowid})
 
 @app.route("/api/penezenka/<int:pid>", methods=["DELETE"])
