@@ -672,12 +672,17 @@ def migrate_db():
             poznamka  TEXT DEFAULT '',
             created_at TEXT DEFAULT NOW()
         )""")
-        # Migrace — přidat sloupce pokud tabulka existuje bez nich
+        # Načti aktuální sloupce
         if _USE_PG:
             cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='penezenka'")
             pen_cols = [r["column_name"] for r in cur.fetchall()]
         else:
             pen_cols = [row[1] for row in conn.execute("PRAGMA table_info(penezenka)").fetchall()]
+        # Přejmenovat stav_skutecny → hotovost
+        if "stav_skutecny" in pen_cols and "hotovost" not in pen_cols:
+            try: conn.execute("ALTER TABLE penezenka RENAME COLUMN stav_skutecny TO hotovost")
+            except Exception: pass
+        # Přidat chybějící sloupce
         for col in ["hotovost","rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek","xtb_czk","xtb_eur","t212","etoro","sporeni"]:
             if col not in pen_cols:
                 try: conn.execute(f"ALTER TABLE penezenka ADD COLUMN {col} REAL DEFAULT 0")
@@ -685,13 +690,10 @@ def migrate_db():
         if "extras" not in pen_cols:
             try: conn.execute("ALTER TABLE penezenka ADD COLUMN extras TEXT DEFAULT '[]'")
             except Exception: pass
-        # Přejmenovat stary sloupec stav_skutecny → hotovost pokud existuje
-        if "stav_skutecny" in pen_cols and "hotovost" not in pen_cols:
-            try: conn.execute("ALTER TABLE penezenka RENAME COLUMN stav_skutecny TO hotovost")
-            except Exception: pass
-        # Přejmenovat akcie → xtb_czk pokud existuje (starý sloupec)
-        if "akcie" in pen_cols and "xtb_czk" not in pen_cols:
-            try: conn.execute("ALTER TABLE penezenka RENAME COLUMN akcie TO xtb_czk")
+        # Pokud existuje starý sloupec 'akcie', překopíruj data do xtb_czk a zahoď
+        if "akcie" in pen_cols:
+            try:
+                conn.execute("UPDATE penezenka SET xtb_czk = xtb_czk + COALESCE(akcie, 0) WHERE akcie > 0")
             except Exception: pass
 
 
