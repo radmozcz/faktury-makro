@@ -6137,15 +6137,28 @@ async function smazatVystavenu(id) {
 }
 
 
+
 // ═══════════════════════════════════════════════════════════════
 //  PENĚŽENKA — hotovostní kasa
 // ═══════════════════════════════════════════════════════════════
 
+const PW_BANKY = [
+  { key: "rb_fp",     label: "RB — FP" },
+  { key: "rb_mr",     label: "RB — MR" },
+  { key: "rb_cff",    label: "RB — CFF" },
+  { key: "rb_radek",  label: "RB — Radek" },
+  { key: "air_fp",    label: "Air — FP" },
+  { key: "air_mr",    label: "Air — MR" },
+  { key: "air_cff",   label: "Air — CFF" },
+  { key: "air_radek", label: "Air — Radek" },
+  { key: "kb_radek",  label: "KB — Radek" },
+];
+
 async function renderPenezenka() {
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
-      <h1 class="page-title">💵 Hotovostní peněženka</h1>
-      <button class="btn btn-primary btn-sm" onclick="openNovyZaznamPenezenka()">+ Zaznamenat stav</button>
+      <h1 class="page-title">💵 Peněženka</h1>
+      <button class="btn btn-primary btn-sm" onclick="openNovyZaznamPenezenka()">+ Nový záznam</button>
     </div>
     <div id="penezenkaObs"><div class="loading-center"><span class="spinner"></span></div></div>`;
   loadPenezenka();
@@ -6158,101 +6171,149 @@ async function loadPenezenka() {
   try { data = await api("/api/penezenka"); } catch { return; }
 
   const teoreticky = data.teoreticky_stav || 0;
-  const hotovost   = data.hotovost_celkem || 0;
-  const vydaje     = data.vydaje_celkem || 0;
   const zaznamy    = data.zaznamy || [];
+  const z0 = zaznamy[0] || null;
+  const z1 = zaznamy[1] || null;
 
-  // Poslední skutečný stav
-  const posledni = zaznamy[0];
-  const skutecny = posledni ? posledni.stav_skutecny : null;
-  const rozdil   = skutecny !== null ? skutecny - teoreticky : null;
-  const rozdilColor = rozdil === null ? "var(--txt2)" : rozdil >= 0 ? "#16a34a" : "#dc2626";
+  // Hodnoty z posledního záznamu
+  const hotovost  = z0 ? (z0.hotovost || 0) : null;
+  const banky     = z0 ? PW_BANKY.reduce((s, b) => s + (z0[b.key] || 0), 0) : null;
+  const akcie     = z0 ? (z0.akcie || 0) : null;
+  const sporeni   = z0 ? (z0.sporeni || 0) : null;
+  const aktiva    = akcie !== null ? akcie + sporeni : null;
+  const celkem    = hotovost !== null ? hotovost + banky + aktiva : null;
+  const rozdil    = celkem !== null ? celkem - teoreticky : null;
+
+  // Změny oproti předchozímu záznamu
+  const zm = (key) => {
+    if (!z0 || !z1) return null;
+    if (key === "banky") return PW_BANKY.reduce((s,b) => s + (z0[b.key]||0) - (z1[b.key]||0), 0);
+    if (key === "aktiva") return (z0.akcie + z0.sporeni) - (z1.akcie + z1.sporeni);
+    if (key === "celkem") return (z0.hotovost + PW_BANKY.reduce((s,b)=>s+(z0[b.key]||0),0) + z0.akcie + z0.sporeni)
+                               - (z1.hotovost + PW_BANKY.reduce((s,b)=>s+(z1[b.key]||0),0) + z1.akcie + z1.sporeni);
+    return (z0[key] || 0) - (z1[key] || 0);
+  };
+
+  const zmenaHtml = (val) => {
+    if (val === null) return `<div style="font-size:.72rem;color:var(--txt2);margin-top:.25rem">—</div>`;
+    const c = val >= 0 ? "#16a34a" : "#dc2626";
+    return `<div style="font-size:.78rem;font-weight:600;color:${c};margin-top:.25rem">${val >= 0 ? "+" : ""}${czInt(val)} Kč</div>`;
+  };
+
+  const boxik = (ikona, nazev, hodnota, zmena, bg, border, tc, sub) => `
+    <div style="background:${bg};border:1.5px solid ${border};border-radius:10px;padding:1rem 1.1rem">
+      <div style="font-size:.75rem;color:${tc};font-weight:600;opacity:.75;margin-bottom:.2rem">${ikona} ${nazev}</div>
+      <div style="font-size:1.5rem;font-weight:700;color:${tc}">${hodnota !== null ? czInt(hodnota) + " Kč" : "—"}</div>
+      ${sub ? `<div style="font-size:.7rem;color:${tc};opacity:.65;margin-top:.1rem">${sub}</div>` : ""}
+      ${zmenaHtml(zmena)}
+    </div>`;
+
+  const datumZaznamu = z0 ? czDate(z0.datum) : "žádný záznam";
 
   el.innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;margin-bottom:1.5rem">
-      <div class="card" style="padding:.9rem 1rem;background:#f0fdf4;border:1.5px solid #86efac">
-        <div style="font-size:.75rem;color:#166534;font-weight:600;margin-bottom:.25rem">Teoretický stav kasy</div>
-        <div style="font-size:1.4rem;font-weight:700;color:#166534">${czInt(teoreticky)} Kč</div>
-        <div style="font-size:.72rem;color:#166534;margin-top:.2rem">příjmy ${czInt(hotovost)} − výdaje ${czInt(vydaje)}</div>
-        <div style="font-size:.7rem;color:var(--txt2);margin-top:.15rem">od ${data.od_data}</div>
-      </div>
-      <div class="card" style="padding:.9rem 1rem;background:${skutecny !== null ? '#fefce8' : '#f9fafb'};border:1.5px solid ${skutecny !== null ? '#fcd34d' : 'var(--border)'}">
-        <div style="font-size:.75rem;color:#92400e;font-weight:600;margin-bottom:.25rem">Skutečný stav (poslední záznam)</div>
-        <div style="font-size:1.4rem;font-weight:700;color:#92400e">${skutecny !== null ? czInt(skutecny) + ' Kč' : '—'}</div>
-        <div style="font-size:.72rem;color:var(--txt2);margin-top:.2rem">${posledni ? posledni.datum : 'Žádný záznam'}</div>
-      </div>
-      <div class="card" style="padding:.9rem 1rem">
-        <div style="font-size:.75rem;color:var(--txt2);font-weight:600;margin-bottom:.25rem">Rozdíl</div>
-        <div style="font-size:1.4rem;font-weight:700;color:${rozdilColor}">${rozdil !== null ? (rozdil >= 0 ? '+' : '') + czInt(rozdil) + ' Kč' : '—'}</div>
-        <div style="font-size:.72rem;color:var(--txt2);margin-top:.2rem">skutečný − teoretický</div>
-      </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(175px,1fr));gap:.85rem;margin-bottom:1.5rem">
+      ${boxik("💵","Hotovost", hotovost, zm("hotovost"), "#fefce8","#fcd34d","#92400e", datumZaznamu)}
+      ${boxik("🏦","Banky celkem", banky, zm("banky"), "#eff6ff","#93c5fd","#1e40af", z0 ? PW_BANKY.filter(b=>z0[b.key]>0).map(b=>b.label+": "+czInt(z0[b.key])).join(" · ") : "")}
+      ${boxik("📈","Aktiva", aktiva, zm("aktiva"), "#f0fdf4","#86efac","#166534", z0 ? "Akcie: "+czInt(z0.akcie||0)+" · Spoření: "+czInt(z0.sporeni||0) : "")}
+      ${boxik("💰","Celkem", celkem, zm("celkem"), "#faf5ff","#c084fc","#7e22ce", "")}
+      ${boxik("🧮","Teoretický stav", teoreticky, null, "#f9fafb","var(--border)","var(--txt)", "hotovost z Reportů od "+data.od_data)}
+      ${boxik("⚖️","Rozdíl", rozdil, null, rozdil === null ? "#f9fafb" : rozdil >= 0 ? "#f0fdf4" : "#fee2e2", rozdil === null ? "var(--border)" : rozdil >= 0 ? "#86efac" : "#fca5a5", rozdil === null ? "var(--txt)" : rozdil >= 0 ? "#166534" : "#991b1b", "celkem − teoretický")}
     </div>
 
     <div class="card">
       <div class="card-title">Historie záznamů</div>
       ${zaznamy.length ? `
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
+      <div style="overflow-x:auto">
+        <table style="min-width:900px">
+          <thead><tr style="font-size:.78rem;color:var(--txt2)">
             <th>Datum</th>
-            <th style="text-align:right">Skutečný stav</th>
-            <th style="text-align:right">Teoretický stav</th>
-            <th style="text-align:right">Rozdíl</th>
-            <th>Poznámka</th>
+            <th style="text-align:right">💵 Hotovost</th>
+            ${PW_BANKY.map(b=>`<th style="text-align:right">${b.label}</th>`).join("")}
+            <th style="text-align:right">🏦 Banky</th>
+            <th style="text-align:right">📈 Akcie</th>
+            <th style="text-align:right">💰 Spoření</th>
+            <th style="text-align:right;font-weight:600">Celkem</th>
             <th></th>
           </tr></thead>
           <tbody>
-            ${zaznamy.map(z => {
-              const rozd = z.stav_skutecny - teoreticky;
-              const rc = rozd >= 0 ? "#16a34a" : "#dc2626";
+            ${zaznamy.map((z, idx) => {
+              const prev = zaznamy[idx + 1] || null;
+              const zBanky = PW_BANKY.reduce((s,b) => s + (z[b.key]||0), 0);
+              const zCelkem = (z.hotovost||0) + zBanky + (z.akcie||0) + (z.sporeni||0);
+              const prevCelkem = prev ? (prev.hotovost||0) + PW_BANKY.reduce((s,b)=>s+(prev[b.key]||0),0) + (prev.akcie||0) + (prev.sporeni||0) : null;
+              const diff = prevCelkem !== null ? zCelkem - prevCelkem : null;
+              const dc = diff === null ? "" : diff >= 0 ? "#16a34a" : "#dc2626";
               return `<tr>
-                <td>${czDate(z.datum)}</td>
-                <td style="text-align:right;font-weight:600">${czInt(z.stav_skutecny)} Kč</td>
-                <td style="text-align:right;color:var(--txt2)">${czInt(teoreticky)} Kč</td>
-                <td style="text-align:right;font-weight:600;color:${rc}">${rozd >= 0 ? '+' : ''}${czInt(rozd)} Kč</td>
-                <td style="color:var(--txt2);font-size:.88rem">${escHtml(z.poznamka || '')}</td>
+                <td style="white-space:nowrap"><strong>${czDate(z.datum)}</strong>${diff !== null ? `<br><small style="color:${dc}">${diff>=0?"+":""}${czInt(diff)}</small>` : ""}</td>
+                <td style="text-align:right">${czInt(z.hotovost||0)}</td>
+                ${PW_BANKY.map(b=>`<td style="text-align:right;color:var(--txt2);font-size:.82rem">${z[b.key] > 0 ? czInt(z[b.key]) : "—"}</td>`).join("")}
+                <td style="text-align:right;font-weight:600">${czInt(zBanky)}</td>
+                <td style="text-align:right">${czInt(z.akcie||0)}</td>
+                <td style="text-align:right">${czInt(z.sporeni||0)}</td>
+                <td style="text-align:right;font-weight:700">${czInt(zCelkem)}</td>
                 <td><button class="btn btn-danger btn-sm" onclick="smazatZaznamPenezenka(${z.id})">🗑</button></td>
               </tr>`;
-            }).join('')}
+            }).join("")}
           </tbody>
         </table>
-      </div>` : `<div style="color:var(--txt2);padding:1rem;text-align:center">Žádné záznamy — klikni na "+ Zaznamenat stav"</div>`}
+      </div>` : `<div style="color:var(--txt2);padding:1rem;text-align:center">Žádné záznamy — klikni na "+ Nový záznam"</div>`}
     </div>`;
 }
 
 function openNovyZaznamPenezenka() {
   const dnes = new Date().toISOString().split("T")[0];
-  openModal("Zaznamenat stav kasy", `
-    <div class="grid-2" style="gap:1rem">
-      <div class="form-group">
+  openModal("Nový záznam peněženky", `
+    <div class="grid-2" style="gap:.75rem">
+      <div class="form-group" style="grid-column:1/-1">
         <label class="form-label">Datum</label>
-        <input type="date" id="pwDatum" class="form-control" value="${dnes}">
+        <input type="date" id="pwDatum" class="form-control" value="${dnes}" style="max-width:200px">
       </div>
       <div class="form-group">
-        <label class="form-label">Skutečný stav kasy (Kč)</label>
-        <input type="number" id="pwStav" class="form-control" placeholder="Kolik je fyzicky v kase">
+        <label class="form-label">💵 Hotovost v kase (Kč)</label>
+        <input type="number" id="pwHotovost" class="form-control" placeholder="0">
+      </div>
+      <div></div>
+    </div>
+    <hr style="margin:.75rem 0;border-color:var(--border)">
+    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:.5rem">🏦 Bankovní účty (Kč)</div>
+    <div class="grid-2" style="gap:.5rem">
+      ${PW_BANKY.map(b => `
+        <div class="form-group">
+          <label class="form-label" style="font-size:.8rem">${b.label}</label>
+          <input type="number" id="pw_${b.key}" class="form-control" placeholder="0">
+        </div>`).join("")}
+    </div>
+    <hr style="margin:.75rem 0;border-color:var(--border)">
+    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:.5rem">📈 Aktiva</div>
+    <div class="grid-2" style="gap:.5rem">
+      <div class="form-group">
+        <label class="form-label" style="font-size:.8rem">Akcie (Kč)</label>
+        <input type="number" id="pwAkcie" class="form-control" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label" style="font-size:.8rem">Spoření (Kč)</label>
+        <input type="number" id="pwSporeni" class="form-control" placeholder="0">
       </div>
     </div>
     <div class="form-group" style="margin-top:.5rem">
       <label class="form-label">Poznámka (volitelné)</label>
-      <input id="pwPoznamka" class="form-control" placeholder="Např. po výplatách, před víkendem...">
+      <input id="pwPoznamka" class="form-control" placeholder="Volitelná poznámka">
     </div>
     <div style="text-align:right;margin-top:1rem">
       <button class="btn btn-primary" onclick="ulozitZaznamPenezenka()">💾 Uložit</button>
     </div>`);
-  setTimeout(() => document.getElementById("pwStav")?.focus(), 100);
+  setTimeout(() => document.getElementById("pwHotovost")?.focus(), 100);
 }
 
 async function ulozitZaznamPenezenka() {
-  const datum   = document.getElementById("pwDatum")?.value;
-  const stav    = parseFloat(document.getElementById("pwStav")?.value || "");
-  const poznamka = document.getElementById("pwPoznamka")?.value || "";
-  if (!datum || isNaN(stav)) { toast("Vyplň datum a stav kasy", true); return; }
-  await api("/api/penezenka", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ datum, stav_skutecny: stav, poznamka })
-  });
+  const datum = document.getElementById("pwDatum")?.value;
+  if (!datum) { toast("Vyplň datum", true); return; }
+  const payload = { datum, poznamka: document.getElementById("pwPoznamka")?.value || "" };
+  payload.hotovost = parseFloat(document.getElementById("pwHotovost")?.value || 0) || 0;
+  PW_BANKY.forEach(b => { payload[b.key] = parseFloat(document.getElementById(`pw_${b.key}`)?.value || 0) || 0; });
+  payload.akcie   = parseFloat(document.getElementById("pwAkcie")?.value || 0) || 0;
+  payload.sporeni = parseFloat(document.getElementById("pwSporeni")?.value || 0) || 0;
+  await api("/api/penezenka", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
   toast("Záznam uložen ✓");
   closeModal();
   loadPenezenka();
