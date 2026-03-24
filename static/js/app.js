@@ -2584,7 +2584,7 @@ function vyplataFormHtml(v = {}) {
         <input id="vJmenoF" class="form-control" value="${escHtml(v.jmeno||"")}" placeholder="Jméno zaměstnance">
       </div>
       <div class="form-group"><label class="form-label">Datum *</label>
-        <input type="date" id="vDatumF" class="form-control" value="${v.datum||new Date().toISOString().split("T")[0]}">
+        <input type="date" id="vDatumF" class="form-control" value="${v.datum||(()=>{const _x=new Date();return `${_x.getFullYear()}-${String(_x.getMonth()+1).padStart(2,"0")}-${String(_x.getDate()).padStart(2,"0")}`;})() }">
       </div>
       <div class="form-group"><label class="form-label">Částka (Kč) *</label>
         <input type="number" step="0.01" id="vCastkaF" class="form-control" value="${v.castka||""}">
@@ -3421,7 +3421,7 @@ async function renderStatistiky() {
   const rokAkt = new Date().getFullYear();
   const od = new Date(); od.setFullYear(od.getFullYear()-1);
   const odStr = od.toISOString().split("T")[0];
-  const doStr = new Date().toISOString().split("T")[0];
+  const doStr = (()=>{const _x=new Date();return `${_x.getFullYear()}-${String(_x.getMonth()+1).padStart(2,"0")}-${String(_x.getDate()).padStart(2,"0")}`;})() ;
 
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header"><h1 class="page-title">Statistiky</h1></div>
@@ -4541,7 +4541,7 @@ function renderReportyTable(rows) {
 
 // ── Formulář reportu ────────────────────────────────────────────
 function reportFormHtml(r = {}) {
-  const dnes = r.datum || new Date().toISOString().split("T")[0];
+  const dnes = r.datum || (()=>{const _x=new Date();return `${_x.getFullYear()}-${String(_x.getMonth()+1).padStart(2,"0")}-${String(_x.getDate()).padStart(2,"0")}`;})() ;
   return `
     <div class="form-group" style="margin-bottom:.8rem">
       <label class="form-label">Firma</label>
@@ -6327,7 +6327,8 @@ function _pwRenderPanel() {
   const el = document.getElementById("pwPanel");
   if (!el) return;
 
-  const dnes = new Date().toISOString().split("T")[0];
+  const _d = new Date();
+  const dnes = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`;
 
   // Sekce 1: Hotovost — kalkulačka
   const kalkulacka = PW_NOMINALY.map(n=>`
