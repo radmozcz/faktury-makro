@@ -4221,10 +4221,17 @@ function _kartaSouhrn(stats) {
   const sumKartyR = firmy.reduce((s,f) => s+(stats[f].rocni||0), 0);
   const sumHotR   = firmy.reduce((s,f) => s+(stats[f].hot_rok||0), 0);
   const sumTrzbaR = firmy.reduce((s,f) => s+(stats[f].trzba_rok||0), 0);
-  const r = (lbl,m,ro) => `<div style="display:flex;justify-content:space-between;font-size:.82rem;padding:.2rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--txt2)">${lbl}</span><span><strong>${czInt(m)}</strong> <span style="color:var(--txt2);font-size:.75rem">/ ${czInt(ro)}</span></span></div>`;
-  return `<div style="background:#ffffff;border:1px solid var(--border);border-radius:10px;padding:.85rem">
-    <div style="font-weight:700;font-size:.95rem;margin-bottom:.4rem">Celkem</div>
-    <div style="display:flex;justify-content:flex-end;font-size:.68rem;color:var(--txt2);margin-bottom:.15rem">měsíc / rok</div>
+  const r = (lbl, m, ro) => `
+    <div style="padding:.5rem 0;border-bottom:1px solid var(--border)">
+      <div style="font-size:.8rem;color:var(--txt2);margin-bottom:.2rem">${lbl}</div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <strong style="font-size:1.15rem">${czInt(m)}</strong>
+        <span style="font-size:.85rem;color:var(--txt2)">/ ${czInt(ro)}</span>
+      </div>
+    </div>`;
+  return `<div style="background:#ffffff;border:1px solid var(--border);border-radius:10px;padding:1rem 1.1rem">
+    <div style="font-weight:700;font-size:1rem;margin-bottom:.3rem">Celkem</div>
+    <div style="display:flex;justify-content:flex-end;font-size:.72rem;color:var(--txt2);margin-bottom:.1rem">měsíc / rok</div>
     ${r('💳 Karty', sumKartyM, sumKartyR)}
     ${r('💵 Hotovost', sumHotM, sumHotR)}
     ${r('📈 Tržba', sumTrzbaM, sumTrzbaR)}
