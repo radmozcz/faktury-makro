@@ -6624,6 +6624,8 @@ async function ulozitEditPenezenka(id) {
   closeModal();
   loadPenezenka();
 }
+
+async function smazatZaznamPenezenka(id) {
   if (!confirm("Opravdu smazat tento záznam?")) return;
   await api(`/api/penezenka/${id}`, { method:"DELETE" });
   toast("Smazáno ✓");
