@@ -321,7 +321,8 @@ function czInt(v) {
 }
 function czDate(s) {
   if (!s) return "—";
-  const d = new Date(s);
+  // Přidat čas aby se předešlo posunu při UTC→lokální konverzi
+  const d = new Date(s.length === 10 ? s + "T12:00:00" : s);
   if (isNaN(d)) return s;
   return d.toLocaleDateString("cs-CZ");
 }
