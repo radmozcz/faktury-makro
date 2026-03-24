@@ -672,17 +672,12 @@ def migrate_db():
             poznamka  TEXT DEFAULT '',
             created_at TEXT DEFAULT NOW()
         )""")
-        # Načti aktuální sloupce
+        # Migrace — přidat sloupce pokud tabulka existuje bez nich
         if _USE_PG:
             cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='penezenka'")
             pen_cols = [r["column_name"] for r in cur.fetchall()]
         else:
             pen_cols = [row[1] for row in conn.execute("PRAGMA table_info(penezenka)").fetchall()]
-        # Přejmenovat stav_skutecny → hotovost
-        if "stav_skutecny" in pen_cols and "hotovost" not in pen_cols:
-            try: conn.execute("ALTER TABLE penezenka RENAME COLUMN stav_skutecny TO hotovost")
-            except Exception: pass
-        # Přidat chybějící sloupce
         for col in ["hotovost","rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek","xtb_czk","xtb_eur","t212","etoro","sporeni"]:
             if col not in pen_cols:
                 try: conn.execute(f"ALTER TABLE penezenka ADD COLUMN {col} REAL DEFAULT 0")
@@ -690,10 +685,13 @@ def migrate_db():
         if "extras" not in pen_cols:
             try: conn.execute("ALTER TABLE penezenka ADD COLUMN extras TEXT DEFAULT '[]'")
             except Exception: pass
-        # Pokud existuje starý sloupec 'akcie', překopíruj data do xtb_czk a zahoď
-        if "akcie" in pen_cols:
-            try:
-                conn.execute("UPDATE penezenka SET xtb_czk = xtb_czk + COALESCE(akcie, 0) WHERE akcie > 0")
+        # Přejmenovat stary sloupec stav_skutecny → hotovost pokud existuje
+        if "stav_skutecny" in pen_cols and "hotovost" not in pen_cols:
+            try: conn.execute("ALTER TABLE penezenka RENAME COLUMN stav_skutecny TO hotovost")
+            except Exception: pass
+        # Přejmenovat akcie → xtb_czk pokud existuje (starý sloupec)
+        if "akcie" in pen_cols and "xtb_czk" not in pen_cols:
+            try: conn.execute("ALTER TABLE penezenka RENAME COLUMN akcie TO xtb_czk")
             except Exception: pass
 
 
@@ -5525,6 +5523,23 @@ def ping():
 # ═══════════════════════════════════════════════════════════════
 
 PENEZENKA_START = "2026-03-24"
+
+@app.route("/api/eur-kurz")
+@vyzaduj_prihlaseni
+def api_eur_kurz():
+    """Vrátí aktuální kurz EUR/CZK z CNB."""
+    import urllib.request as _ur
+    try:
+        req = _ur.Request("https://api.cnb.cz/cnbapi/exrates/daily?lang=EN",
+                          headers={"User-Agent": "faktury-makro/1.0"})
+        with _ur.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+        eur = next((r for r in data.get("rates", []) if r["currencyCode"] == "EUR"), None)
+        if eur:
+            return jsonify({"kurz": round(eur["rate"] / eur["amount"], 4)})
+    except Exception as e:
+        app.logger.warning(f"CNB kurz chyba: {e}")
+    return jsonify({"kurz": 25.0})
 
 BANKY_SLOUPCE = ["rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek"]
 
