@@ -6273,21 +6273,6 @@ async function loadPenezenka() {
           ${boxik("⚖️","Rozdíl",rozdil,null,rozdil===null?"#f9fafb":rozdil>=0?"#f0fdf4":"#fee2e2",rozdil===null?"var(--border)":rozdil>=0?"#86efac":"#fca5a5",rozdil===null?"var(--txt)":rozdil>=0?"#166534":"#991b1b","hotovost+banky − teoretický")}
         </div>
 
-        <div style="margin-bottom:1rem">
-          <button class="btn btn-secondary btn-sm" onclick="_dluhTogglePanel()" style="font-size:.78rem">
-            💸 Dluhy <span id="dluhPanelArr">▶</span>
-          </button>
-          <div id="dluhyPanel" style="display:none;margin-top:.75rem">
-          <div class="card">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
-            <div class="card-title" style="margin:0">💸 Dluhy</div>
-            <button class="btn btn-primary btn-sm" onclick="openNovaDluhOsoba()">+ Nová osoba</button>
-          </div>
-          <div id="dluhyObs"><div class="loading-center"><span class="spinner"></span></div></div>
-          </div>
-          </div>
-        </div>
-
         <div class="card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
             <div class="card-title" style="margin:0">Historie záznamů</div>
@@ -6363,6 +6348,7 @@ function _pwToggle(id) {
   const open = el.style.display!=="none";
   el.style.display = open?"none":"block";
   arr.textContent = open?"▶":"▼";
+  if (!open && id === "dluhy") loadDluhy();
 }
 
 function _pwRenderPanel() {
@@ -6452,7 +6438,8 @@ function _pwRenderPanel() {
     _pwSekce("hotovost","💵","Hotovost — kalkulačka", kalkulacka) +
     _pwSekce("banky","🏦","Bankovní účty", bankyForm) +
     _pwSekce("akcie","📈","Akcie & brokeři", akcieFrm) +
-    _pwSekce("shrnuti","💰","Shrnutí & Uložit", shrnuti, true);
+    _pwSekce("shrnuti","💰","Shrnutí & Uložit", shrnuti, true) +
+    _pwSekce("dluhy","💸","Náklady", `<div id="dluhyObs"><div class="loading-center"><span class="spinner"></span></div></div><div style="margin-top:.5rem"><button class="btn btn-primary btn-sm" onclick="openNovaDluhOsoba()">+ Nová osoba</button></div>`);
 
   // Načíst EUR kurz
   _pwNacistKurz().then(kurz => {
