@@ -15,6 +15,7 @@ const App = {
   role: null,               // přihlášená role: "admin" | "verunka" | "ucetni"
   jmeno: null,              // zobrazované jméno
   prava: {},                // matice oprávnění
+  history: [],              // navigační historie
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -172,7 +173,14 @@ function setupNav() {
 }
 
 function navigateTo(page) {
+  if (App.currentPage && App.currentPage !== page) {
+    App.history.push(App.currentPage);
+    if (App.history.length > 20) App.history.shift();
+  }
   App.currentPage = page;
+  // Zobraz/skryj tlačítko zpět
+  const btn = document.getElementById("backBtnWrap");
+  if (btn) btn.style.display = App.history.length > 0 ? "block" : "none";
   document.querySelectorAll(".nav-item").forEach(a => {
     a.classList.toggle("active", a.dataset.page === page);
   });
@@ -202,6 +210,37 @@ function navigateTo(page) {
 // ═══════════════════════════════════════════════════════════════
 //  Téma
 // ═══════════════════════════════════════════════════════════════
+function goBack() {
+  if (App.history.length === 0) return;
+  const prev = App.history.pop();
+  App.currentPage = prev;
+  document.querySelectorAll(".nav-item").forEach(a => {
+    a.classList.toggle("active", a.dataset.page === prev);
+  });
+  const btn = document.getElementById("backBtnWrap");
+  if (btn) btn.style.display = App.history.length > 0 ? "block" : "none";
+  const pages = {
+    dashboard:  renderDashboard,
+    faktury:    renderFaktury,
+    nahrat:     renderNahrat,
+    polozky:    renderPolozky,
+    vyplaty:    renderVyplaty,
+    reporty:    renderReporty,
+    penezenka:  renderPenezenka,
+    statistiky: renderStatistiky,
+    kalkulace:  renderKalkulace,
+    "ai-asistent": renderAiAsistent,
+    nastaveni:  renderNastaveni,
+    banky:      renderBanky,
+    vydaje:          renderVydaje,
+    soukrome_vydaje: () => renderVydaje("soukrome"),
+    vystavene:       renderVystavene,
+    radek:           renderRadek,
+    dokumenty:       renderDokumenty,
+  };
+  if (pages[prev]) pages[prev]();
+}
+
 function loadTheme() {
   const t = localStorage.getItem("theme") || "light";
   document.documentElement.setAttribute("data-theme", t);
