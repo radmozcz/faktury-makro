@@ -103,7 +103,18 @@ a { color: var(--green); text-decoration: none; }
   margin: .1rem .6rem .1rem 0;
   transition: background .2s, color .2s;
 }
-.nav-item:hover { background: rgba(255,255,255,0.07); color: #fff; }
+.nav-item.nav-section-header {
+  font-weight: 600;
+  opacity: 0.7;
+  font-size: .8rem;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  pointer-events: auto;
+  margin-top: .6rem;
+}
+.nav-item.nav-sub {
+  padding-left: 2rem;
+}
 .nav-item.active { background: var(--sidebar-act); color: #fff; }
 .nav-icon { font-size: 1.1rem; width: 1.4rem; text-align: center; }
 .sidebar-footer {
@@ -410,3 +421,44 @@ select.form-control { cursor: pointer; }
   border-radius: 20px; padding: .2rem .7rem; font-size: .82rem;
   display: flex; align-items: center; gap: .3rem;
 }
+
+/* ── Dokumenty ─────────────────────────────────────────────── */
+.dokumenty-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.dok-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: .4rem;
+}
+.dok-card-title { font-weight: 600; font-size: 1rem; }
+.dok-card-meta  { font-size: .82rem; color: var(--text-muted); }
+.dok-card-actions { display: flex; gap: .5rem; margin-top: .5rem; }
+
+/* ── Radek rozcestník ───────────────────────────────────────── */
+.radek-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+}
+.radek-box {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 2rem 1.5rem;
+  text-align: center;
+  cursor: pointer;
+  transition: box-shadow .2s, transform .15s;
+  font-size: 1rem;
+  font-weight: 600;
+}
+.radek-box:hover { box-shadow: 0 4px 18px rgba(0,0,0,.12); transform: translateY(-2px); }
+.radek-box-icon { font-size: 2.5rem; margin-bottom: .7rem; }

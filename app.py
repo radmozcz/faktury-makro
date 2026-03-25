@@ -5779,3 +5779,111 @@ if __name__ == "__main__":
     print("  Otevři prohlížeč na: http://localhost:5000")
     print("=" * 55)
     app.run(host="0.0.0.0", port=5000, debug=False)
+
+# ════════════════════════════════════════════════════════════════
+#  DOKUMENTY
+# ════════════════════════════════════════════════════════════════
+
+def init_dokumenty():
+    with get_db() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS dokumenty (
+            id          SERIAL PRIMARY KEY,
+            datum       TEXT NOT NULL,
+            nazev       TEXT NOT NULL,
+            misto       TEXT DEFAULT 'Praha',
+            soubor_cesta TEXT DEFAULT '',
+            soubor_url  TEXT DEFAULT '',
+            created_at  TEXT DEFAULT NOW()
+        )""")
+
+init_dokumenty()
+
+def upload_dokument_to_gcs(local_path, filename):
+    bucket = get_gcs_client()
+    if not bucket:
+        return None
+    try:
+        blob = bucket.blob(f"dokumenty/{filename}")
+        blob.upload_from_filename(local_path)
+        url = blob.generate_signed_url(expiration=timedelta(days=7), method="GET", version="v4")
+        return url
+    except Exception as e:
+        print(f"⚠  GCS dokumenty upload error: {e}")
+        return None
+
+def get_dokument_gcs_url(filename):
+    bucket = get_gcs_client()
+    if not bucket:
+        return None
+    try:
+        blob = bucket.blob(f"dokumenty/{filename}")
+        if not blob.exists():
+            return None
+        return blob.generate_signed_url(expiration=timedelta(days=7), method="GET", version="v4")
+    except Exception as e:
+        print(f"⚠  GCS dokumenty url error: {e}")
+        return None
+
+@app.route("/api/dokumenty")
+@vyzaduj_prihlaseni
+def api_dokumenty_list():
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM dokumenty ORDER BY datum DESC, id DESC").fetchall()
+    return jsonify([dict(r) for r in rows])
+
+@app.route("/api/dokumenty", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_dokumenty_create():
+    datum  = request.form.get("datum", "")
+    nazev  = request.form.get("nazev", "").strip()
+    misto  = request.form.get("misto", "Praha")
+    if not nazev:
+        return jsonify({"chyba": "Chybí název"}), 400
+    soubor_cesta = ""
+    soubor_url   = ""
+    if "soubor" in request.files:
+        f = request.files["soubor"]
+        if f and f.filename:
+            fname = secure_filename(f.filename)
+            ts    = datetime.now().strftime("%Y%m%d_%H%M%S")
+            fname = f"{ts}_{fname}"
+            fpath = os.path.join(UPLOAD_DIR, fname)
+            f.save(fpath)
+            url = upload_dokument_to_gcs(fpath, fname)
+            soubor_cesta = fname
+            soubor_url   = url or ""
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO dokumenty (datum, nazev, misto, soubor_cesta, soubor_url) VALUES (?,?,?,?,?)",
+            (datum, nazev, misto, soubor_cesta, soubor_url)
+        )
+    return jsonify({"ok": True, "id": cur.lastrowid})
+
+@app.route("/api/dokumenty/<int:did>", methods=["PUT"])
+@vyzaduj_prihlaseni
+def api_dokumenty_update(did):
+    d = request.json or {}
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE dokumenty SET datum=?, nazev=?, misto=? WHERE id=?",
+            (d.get("datum",""), d.get("nazev",""), d.get("misto","Praha"), did)
+        )
+    return jsonify({"ok": True})
+
+@app.route("/api/dokumenty/<int:did>", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_dokumenty_delete(did):
+    with get_db() as conn:
+        conn.execute("DELETE FROM dokumenty WHERE id=?", (did,))
+    return jsonify({"ok": True})
+
+@app.route("/api/dokumenty/<int:did>/url")
+@vyzaduj_prihlaseni
+def api_dokumenty_url(did):
+    with get_db() as conn:
+        row = conn.execute("SELECT soubor_cesta, soubor_url FROM dokumenty WHERE id=?", (did,)).fetchone()
+    if not row:
+        return jsonify({"chyba": "Nenalezeno"}), 404
+    url = get_dokument_gcs_url(row["soubor_cesta"]) or row["soubor_url"] or ""
+    return jsonify({"url": url})
+

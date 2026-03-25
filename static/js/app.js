@@ -193,6 +193,8 @@ function navigateTo(page) {
     vydaje:          renderVydaje,
     soukrome_vydaje: () => renderVydaje("soukrome"),
     vystavene:       renderVystavene,
+    radek:           renderRadek,
+    dokumenty:       renderDokumenty,
   };
   if (pages[page]) pages[page]();
 }
@@ -6870,4 +6872,168 @@ async function smazatDluhOsobu(oid, jmeno) {
   await api(`/api/dluhy/osoby/${oid}`, { method:"DELETE" });
   toast("Smazáno ✓");
   loadDluhy();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  RADEK — rozcestník
+// ═══════════════════════════════════════════════════════════════
+function renderRadek() {
+  setContent(`
+    <h2>👤 Radek</h2>
+    <div class="radek-grid">
+      <div class="radek-box" onclick="navigateTo('soukrome_vydaje')">
+        <div class="radek-box-icon">🏠</div>
+        Soukromé výdaje
+      </div>
+      <div class="radek-box" onclick="navigateTo('penezenka')">
+        <div class="radek-box-icon">💵</div>
+        Peněženka
+      </div>
+      <div class="radek-box" onclick="navigateTo('dokumenty')">
+        <div class="radek-box-icon">🗂️</div>
+        Dokumenty
+      </div>
+    </div>
+  `);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DOKUMENTY
+// ═══════════════════════════════════════════════════════════════
+let _dokData = [];
+
+async function renderDokumenty() {
+  setContent(`
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.8rem">
+      <h2>🗂️ Dokumenty</h2>
+      <button class="btn btn-primary" onclick="dokModalNovy()">＋ Přidat dokument</button>
+    </div>
+    <div id="dok-list" style="margin-top:1rem">Načítám…</div>
+
+    <!-- Modal nový/edit -->
+    <div id="dok-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:900;align-items:center;justify-content:center">
+      <div style="background:var(--card-bg);border-radius:14px;padding:1.8rem 2rem;width:min(480px,95vw);position:relative">
+        <h3 id="dok-modal-title" style="margin-bottom:1.2rem">Nový dokument</h3>
+        <input type="hidden" id="dok-id">
+        <div style="display:flex;flex-direction:column;gap:.8rem">
+          <label>Datum
+            <input type="date" id="dok-datum" class="form-control" style="margin-top:.3rem">
+          </label>
+          <label>Název
+            <input type="text" id="dok-nazev" class="form-control" placeholder="např. Pojistná smlouva auto" style="margin-top:.3rem">
+          </label>
+          <label>Místo
+            <select id="dok-misto" class="form-control" style="margin-top:.3rem">
+              <option value="Praha">Praha</option>
+              <option value="Třebovle">Třebovle</option>
+              <option value="Oboje">Oboje</option>
+            </select>
+          </label>
+          <label id="dok-soubor-wrap">Soubor (PDF nebo JPG)
+            <input type="file" id="dok-soubor" accept=".pdf,.jpg,.jpeg,.png" style="margin-top:.3rem">
+          </label>
+        </div>
+        <div style="display:flex;gap:.7rem;justify-content:flex-end;margin-top:1.4rem">
+          <button class="btn btn-secondary" onclick="dokModalZavrit()">Zrušit</button>
+          <button class="btn btn-primary" onclick="dokUlozit()">Uložit</button>
+        </div>
+      </div>
+    </div>
+  `);
+  // Nastav dnešní datum
+  document.getElementById("dok-datum").value = new Date().toISOString().slice(0,10);
+  await dokNacist();
+}
+
+async function dokNacist() {
+  const res = await fetch("/api/dokumenty");
+  _dokData = await res.json();
+  dokRenderList();
+}
+
+function dokRenderList() {
+  const el = document.getElementById("dok-list");
+  if (!el) return;
+  if (!_dokData.length) {
+    el.innerHTML = `<p style="color:var(--text-muted)">Žádné dokumenty.</p>`;
+    return;
+  }
+  el.innerHTML = `<div class="dokumenty-grid">${_dokData.map(d => `
+    <div class="dok-card">
+      <div class="dok-card-title">${d.nazev}</div>
+      <div class="dok-card-meta">${d.datum} &nbsp;·&nbsp; ${d.misto}</div>
+      <div class="dok-card-actions">
+        ${d.soubor_cesta ? `<button class="btn btn-sm btn-secondary" onclick="dokNahled(${d.id})">👁 Náhled</button>` : ''}
+        <button class="btn btn-sm btn-secondary" onclick="dokEditModal(${d.id})">✏️ Upravit</button>
+        <button class="btn btn-sm btn-danger" onclick="dokSmazat(${d.id})">🗑</button>
+      </div>
+    </div>
+  `).join("")}</div>`;
+}
+
+function dokModalNovy() {
+  document.getElementById("dok-id").value = "";
+  document.getElementById("dok-modal-title").textContent = "Nový dokument";
+  document.getElementById("dok-nazev").value = "";
+  document.getElementById("dok-datum").value = new Date().toISOString().slice(0,10);
+  document.getElementById("dok-misto").value = "Praha";
+  document.getElementById("dok-soubor-wrap").style.display = "";
+  document.getElementById("dok-modal").style.display = "flex";
+}
+
+function dokEditModal(id) {
+  const d = _dokData.find(x => x.id === id);
+  if (!d) return;
+  document.getElementById("dok-id").value = id;
+  document.getElementById("dok-modal-title").textContent = "Upravit dokument";
+  document.getElementById("dok-nazev").value = d.nazev;
+  document.getElementById("dok-datum").value = d.datum;
+  document.getElementById("dok-misto").value = d.misto || "Praha";
+  document.getElementById("dok-soubor-wrap").style.display = "none";
+  document.getElementById("dok-modal").style.display = "flex";
+}
+
+function dokModalZavrit() {
+  document.getElementById("dok-modal").style.display = "none";
+}
+
+async function dokUlozit() {
+  const id    = document.getElementById("dok-id").value;
+  const nazev = document.getElementById("dok-nazev").value.trim();
+  const datum = document.getElementById("dok-datum").value;
+  const misto = document.getElementById("dok-misto").value;
+  if (!nazev) { alert("Zadej název dokumentu"); return; }
+
+  if (id) {
+    // Úprava
+    await fetch(`/api/dokumenty/${id}`, {
+      method: "PUT",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({datum, nazev, misto})
+    });
+  } else {
+    // Nový
+    const fd = new FormData();
+    fd.append("datum", datum);
+    fd.append("nazev", nazev);
+    fd.append("misto", misto);
+    const soubor = document.getElementById("dok-soubor").files[0];
+    if (soubor) fd.append("soubor", soubor);
+    await fetch("/api/dokumenty", {method:"POST", body:fd});
+  }
+  dokModalZavrit();
+  await dokNacist();
+}
+
+async function dokSmazat(id) {
+  if (!confirm("Smazat dokument?")) return;
+  await fetch(`/api/dokumenty/${id}`, {method:"DELETE"});
+  await dokNacist();
+}
+
+async function dokNahled(id) {
+  const res = await fetch(`/api/dokumenty/${id}/url`);
+  const data = await res.json();
+  if (data.url) window.open(data.url, "_blank");
+  else alert("Soubor není dostupný");
 }
