@@ -5219,25 +5219,49 @@ Známá IČO firem: {json.dumps(ico_map)}"""
 def api_zaloha_db():
     if session.get("role") != "admin":
         return jsonify({"error": "Pouze admin"}), 403
-    import subprocess, tempfile, os as _os
-    from datetime import datetime as _dt
-    db_url = _os.environ.get("DATABASE_URL", "")
-    if not db_url:
-        return jsonify({"error": "DATABASE_URL není nastavena"}), 500
-    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+    import os as _os
+    import datetime as _dt_mod
+    ts = _dt_mod.datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"zaloha_{ts}.sql"
     try:
-        result = subprocess.run(
-            ["pg_dump", "--no-password", "--format=plain", "--encoding=UTF8", db_url],
-            capture_output=True, timeout=60
-        )
-        if result.returncode != 0:
-            return jsonify({"error": result.stderr.decode("utf-8", errors="replace")}), 500
-        sql_data = result.stdout
-    except FileNotFoundError:
-        return jsonify({"error": "pg_dump není dostupný na serveru"}), 500
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "Záloha trvá příliš dlouho"}), 500
+        import psycopg2 as _pg
+        db_url = _os.environ.get("DATABASE_URL", "")
+        if not db_url:
+            return jsonify({"error": "DATABASE_URL není nastavena"}), 500
+        conn = _pg.connect(db_url)
+        cur = conn.cursor()
+        cur.execute("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")
+        tables = [r[0] for r in cur.fetchall()]
+        lines = ["-- SQL záloha vygenerovaná aplikací", f"-- Datum: {ts}", ""]
+        for tbl in tables:
+            try:
+                cur.execute(f"SELECT * FROM {tbl}")
+                rows = cur.fetchall()
+                cols = [d[0] for d in cur.description]
+                if not rows:
+                    continue
+                lines.append(f"-- Tabulka: {tbl}")
+                for row in rows:
+                    vals = []
+                    for v in row:
+                        if v is None:
+                            vals.append("NULL")
+                        elif isinstance(v, bool):
+                            vals.append("TRUE" if v else "FALSE")
+                        elif isinstance(v, (int, float)):
+                            vals.append(str(v))
+                        else:
+                            vals.append("'" + str(v).replace("'", "''") + "'")
+                    col_str = ", ".join(cols)
+                    val_str = ", ".join(vals)
+                    lines.append(f"INSERT INTO {tbl} ({col_str}) VALUES ({val_str}) ON CONFLICT DO NOTHING;")
+                lines.append("")
+            except Exception as e:
+                lines.append(f"-- Chyba při záloze tabulky {tbl}: {e}")
+        conn.close()
+        sql_data = "\n".join(lines).encode("utf-8")
+    except Exception as e:
+        return jsonify({"error": f"Záloha selhala: {str(e)}"}), 500
 
     gcs_url = None
     try:
