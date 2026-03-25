@@ -878,6 +878,8 @@ async function loadFaktury() {
     cislo_faktury:   (a,b) => (a.cislo_faktury||"").localeCompare(b.cislo_faktury||""),
     datum_vystaveni: (a,b) => (a.datum_vystaveni||"").localeCompare(b.datum_vystaveni||""),
     celkem_s_dph:    (a,b) => (a.celkem_s_dph||0) - (b.celkem_s_dph||0),
+    dodavatel:       (a,b) => (a.dodavatel||"").localeCompare(b.dodavatel||""),
+    firma_zkratka:   (a,b) => (a.firma_zkratka||"").localeCompare(b.firma_zkratka||""),
   };
   if (sortFns[_faktSort.col]) {
     data.faktury.sort((a,b) => {
