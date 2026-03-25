@@ -6273,6 +6273,14 @@ async function loadPenezenka() {
           ${boxik("⚖️","Rozdíl",rozdil,null,rozdil===null?"#f9fafb":rozdil>=0?"#f0fdf4":"#fee2e2",rozdil===null?"var(--border)":rozdil>=0?"#86efac":"#fca5a5",rozdil===null?"var(--txt)":rozdil>=0?"#166534":"#991b1b","hotovost+banky − teoretický")}
         </div>
 
+        <div class="card" style="margin-bottom:1rem">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+            <div class="card-title" style="margin:0">💸 Dluhy</div>
+            <button class="btn btn-primary btn-sm" onclick="openNovaDluhOsoba()">+ Nová osoba</button>
+          </div>
+          <div id="dluhyObs"><div class="loading-center"><span class="spinner"></span></div></div>
+        </div>
+
         <div class="card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
             <div class="card-title" style="margin:0">Historie záznamů</div>
@@ -6326,6 +6334,7 @@ async function loadPenezenka() {
 
   // Sestavit pravý panel
   _pwRenderPanel();
+  loadDluhy();
 }
 
 function _pwSekce(id, ikona, nazev, obsah, otevrena=false) {
@@ -6654,4 +6663,195 @@ async function smazatZaznamPenezenka(id) {
   await api(`/api/penezenka/${id}`, { method:"DELETE" });
   toast("Smazáno ✓");
   loadPenezenka();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DLUHY — půjčky kamarádům
+// ═══════════════════════════════════════════════════════════════
+
+async function loadDluhy() {
+  const el = document.getElementById("dluhyObs");
+  if (!el) return;
+  let data;
+  try { data = await api("/api/dluhy"); } catch { return; }
+
+  if (!data.length) {
+    el.innerHTML = `<div style="color:var(--txt2);font-size:.88rem;padding:.5rem 0">Žádné záznamy — přidej první osobu tlačítkem výše.</div>`;
+    return;
+  }
+
+  el.innerHTML = `<table style="width:100%;font-size:.88rem">
+    <thead><tr style="font-size:.75rem;color:var(--txt2)">
+      <th>Jméno</th>
+      <th style="text-align:right">První půjčka</th>
+      <th style="text-align:right">Celkový dluh</th>
+      <th style="text-align:center">Stav</th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+      ${data.map(o => {
+        const splaceno = o.celkem <= 0;
+        const stavColor = splaceno ? "#16a34a" : "#dc2626";
+        const stavText  = splaceno ? "✓ Splaceno" : "Dluží";
+        return `<tr style="cursor:pointer;border-top:1px solid var(--border)" onclick="_dluhToggle(${o.id})">
+          <td style="padding:.5rem .4rem;font-weight:600">
+            <span id="dluhArr_${o.id}" style="font-size:.7rem;margin-right:.3rem">▶</span>
+            ${escHtml(o.jmeno)}
+          </td>
+          <td style="text-align:right;color:var(--txt2);padding:.5rem .4rem">${o.prvni_pujcka ? czDate(o.prvni_pujcka) : "—"}</td>
+          <td style="text-align:right;font-weight:700;color:${stavColor};padding:.5rem .4rem">${czInt(Math.abs(o.celkem))} Kč</td>
+          <td style="text-align:center;padding:.5rem .4rem">
+            <span style="font-size:.75rem;font-weight:600;color:${stavColor}">${stavText}</span>
+          </td>
+          <td style="padding:.5rem .4rem;white-space:nowrap" onclick="event.stopPropagation()">
+            <button class="btn btn-primary btn-sm" onclick="openPridatTransakci(${o.id},'${escHtml(o.jmeno)}')">+ Splátka / půjčka</button>
+            <button class="btn btn-danger btn-sm" onclick="smazatDluhOsobu(${o.id},'${escHtml(o.jmeno)}')">🗑</button>
+          </td>
+        </tr>
+        <tr id="dluhDetail_${o.id}" style="display:none">
+          <td colspan="5" style="padding:0 0 .5rem 1.5rem;background:var(--bg2)">
+            ${_dluhHistorieHtml(o.transakce)}
+          </td>
+        </tr>`;
+      }).join("")}
+    </tbody>
+  </table>`;
+}
+
+function _dluhHistorieHtml(transakce) {
+  if (!transakce.length) return `<div style="color:var(--txt2);font-size:.82rem;padding:.5rem">Žádné transakce</div>`;
+  let zustatek = 0;
+  const radky = transakce.map(t => {
+    zustatek += t.castka;
+    const c = t.castka > 0 ? "#dc2626" : "#16a34a";
+    const sign = t.castka > 0 ? "+" : "";
+    return `<tr style="font-size:.82rem;border-top:1px solid var(--border)">
+      <td style="padding:.3rem .4rem;color:var(--txt2)">${czDate(t.datum)}</td>
+      <td style="padding:.3rem .4rem">${escHtml(t.poznamka||"—")}</td>
+      <td style="padding:.3rem .4rem;text-align:right;font-weight:600;color:${c}">${sign}${czInt(t.castka)} Kč</td>
+      <td style="padding:.3rem .4rem;text-align:right;color:var(--txt2)">${czInt(zustatek)} Kč</td>
+      <td style="padding:.3rem .4rem">
+        <button class="btn btn-danger btn-sm" onclick="smazatDluhTransakci(${t.id})" title="Smazat">🗑</button>
+      </td>
+    </tr>`;
+  }).join("");
+  return `<table style="width:100%;border-collapse:collapse">
+    <thead><tr style="font-size:.72rem;color:var(--txt2)">
+      <th style="padding:.3rem .4rem">Datum</th>
+      <th style="padding:.3rem .4rem">Poznámka</th>
+      <th style="text-align:right;padding:.3rem .4rem">Částka</th>
+      <th style="text-align:right;padding:.3rem .4rem">Zůstatek</th>
+      <th></th>
+    </tr></thead>
+    <tbody>${radky}</tbody>
+  </table>`;
+}
+
+function _dluhToggle(id) {
+  const det = document.getElementById(`dluhDetail_${id}`);
+  const arr = document.getElementById(`dluhArr_${id}`);
+  if (!det) return;
+  const open = det.style.display !== "none";
+  det.style.display = open ? "none" : "";
+  if (arr) arr.textContent = open ? "▶" : "▼";
+}
+
+function openNovaDluhOsoba() {
+  const dnes = (()=>{const _x=new Date();return `${_x.getFullYear()}-${String(_x.getMonth()+1).padStart(2,"0")}-${String(_x.getDate()).padStart(2,"0")}`;})();
+  openModal("Nová osoba + první půjčka", `
+    <div class="grid-2" style="gap:.75rem">
+      <div class="form-group">
+        <label class="form-label">Jméno *</label>
+        <input id="dluhJmeno" class="form-control" placeholder="Jméno nebo přezdívka">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Datum půjčky *</label>
+        <input type="date" id="dluhDatum" class="form-control" value="${dnes}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Půjčená částka (Kč) *</label>
+        <input type="number" id="dluhCastka" class="form-control" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Poznámka</label>
+        <input id="dluhPoznamka" class="form-control" placeholder="Na co, proč...">
+      </div>
+    </div>
+    <div style="text-align:right;margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitNovuDluhOsobu()">💾 Uložit</button>
+    </div>`);
+  setTimeout(() => document.getElementById("dluhJmeno")?.focus(), 100);
+}
+
+async function ulozitNovuDluhOsobu() {
+  const jmeno  = document.getElementById("dluhJmeno")?.value.trim();
+  const datum  = document.getElementById("dluhDatum")?.value;
+  const castka = parseFloat(document.getElementById("dluhCastka")?.value || 0);
+  const pozn   = document.getElementById("dluhPoznamka")?.value || "";
+  if (!jmeno || !datum || !castka) { toast("Vyplň jméno, datum a částku", true); return; }
+  const res = await api("/api/dluhy/osoby", { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({jmeno}) });
+  await api("/api/dluhy/transakce", { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({osoba_id: res.id, datum, castka: Math.abs(castka), poznamka: pozn}) });
+  toast("Uloženo ✓");
+  closeModal();
+  loadDluhy();
+}
+
+function openPridatTransakci(osobaId, jmeno) {
+  const dnes = (()=>{const _x=new Date();return `${_x.getFullYear()}-${String(_x.getMonth()+1).padStart(2,"0")}-${String(_x.getDate()).padStart(2,"0")}`;})();
+  openModal(`${escHtml(jmeno)} — přidat záznam`, `
+    <div class="grid-2" style="gap:.75rem">
+      <div class="form-group">
+        <label class="form-label">Typ</label>
+        <select id="dluhTyp" class="form-control">
+          <option value="pujcka">💸 Půjčuji (+ dluh)</option>
+          <option value="splatka">✅ Splátka (− dluh)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Datum *</label>
+        <input type="date" id="dluhTDatum" class="form-control" value="${dnes}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Částka (Kč) *</label>
+        <input type="number" id="dluhTCastka" class="form-control" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Poznámka</label>
+        <input id="dluhTPoznamka" class="form-control" placeholder="Volitelná poznámka">
+      </div>
+    </div>
+    <div style="text-align:right;margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitTransakciDluhu(${osobaId})">💾 Uložit</button>
+    </div>`);
+  setTimeout(() => document.getElementById("dluhTCastka")?.focus(), 100);
+}
+
+async function ulozitTransakciDluhu(osobaId) {
+  const typ    = document.getElementById("dluhTyp")?.value;
+  const datum  = document.getElementById("dluhTDatum")?.value;
+  const castka = parseFloat(document.getElementById("dluhTCastka")?.value || 0);
+  const pozn   = document.getElementById("dluhTPoznamka")?.value || "";
+  if (!datum || !castka) { toast("Vyplň datum a částku", true); return; }
+  const finalCastka = typ === "splatka" ? -Math.abs(castka) : Math.abs(castka);
+  await api("/api/dluhy/transakce", { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({osoba_id: osobaId, datum, castka: finalCastka, poznamka: pozn}) });
+  toast("Uloženo ✓");
+  closeModal();
+  loadDluhy();
+}
+
+async function smazatDluhTransakci(tid) {
+  if (!confirm("Opravdu smazat tento záznam?")) return;
+  await api(`/api/dluhy/transakce/${tid}`, { method:"DELETE" });
+  toast("Smazáno ✓");
+  loadDluhy();
+}
+
+async function smazatDluhOsobu(oid, jmeno) {
+  if (!confirm(`Smazat ${jmeno} a všechny záznamy?`)) return;
+  await api(`/api/dluhy/osoby/${oid}`, { method:"DELETE" });
+  toast("Smazáno ✓");
+  loadDluhy();
 }
