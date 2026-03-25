@@ -694,8 +694,22 @@ def migrate_db():
             try: conn.execute("ALTER TABLE penezenka RENAME COLUMN akcie TO xtb_czk")
             except Exception: pass
 
-
-def allowed_file(filename):
+    # Dluhy — půjčky kamarádům
+    with get_db() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS dluhy_osoby (
+            id         SERIAL PRIMARY KEY,
+            jmeno      TEXT NOT NULL UNIQUE,
+            poznamka   TEXT DEFAULT '',
+            created_at TEXT DEFAULT NOW()
+        )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS dluhy_transakce (
+            id         SERIAL PRIMARY KEY,
+            osoba_id   INTEGER NOT NULL REFERENCES dluhy_osoby(id) ON DELETE CASCADE,
+            datum      TEXT NOT NULL,
+            castka     REAL NOT NULL,
+            poznamka   TEXT DEFAULT '',
+            created_at TEXT DEFAULT NOW()
+        )""")
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
 
 def update_stav_po_splatnosti():
@@ -5656,6 +5670,81 @@ def api_penezenka_edit(pid):
 def api_penezenka_delete(pid):
     with get_db() as conn:
         conn.execute("DELETE FROM penezenka WHERE id=?", (pid,))
+    return jsonify({"ok": True})
+
+
+
+# ═══════════════════════════════════════════════════════════════
+#  DLUHY — půjčky kamarádům
+# ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/dluhy")
+@vyzaduj_prihlaseni
+def api_dluhy_list():
+    with get_db() as conn:
+        osoby = conn.execute("SELECT * FROM dluhy_osoby ORDER BY jmeno").fetchall()
+        result = []
+        for o in osoby:
+            oid = o["id"] if isinstance(o, dict) else o[0]
+            jmeno = o["jmeno"] if isinstance(o, dict) else o[1]
+            poznamka = o["poznamka"] if isinstance(o, dict) else o[2]
+            transakce = conn.execute(
+                "SELECT * FROM dluhy_transakce WHERE osoba_id=? ORDER BY datum ASC, id ASC", (oid,)
+            ).fetchall()
+            trans_list = [dict(t) for t in transakce]
+            celkem = sum(float(t["castka"] if isinstance(t, dict) else t[2]) for t in transakce)
+            prvni = trans_list[0]["datum"] if trans_list else None
+            result.append({
+                "id": oid, "jmeno": jmeno, "poznamka": poznamka,
+                "celkem": round(celkem, 0),
+                "prvni_pujcka": prvni,
+                "transakce": trans_list,
+            })
+    return jsonify(result)
+
+@app.route("/api/dluhy/osoby", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_dluhy_nova_osoba():
+    data = request.json or {}
+    jmeno = (data.get("jmeno") or "").strip()
+    if not jmeno:
+        return jsonify({"error": "Chybí jméno"}), 400
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO dluhy_osoby (jmeno, poznamka) VALUES (?,?)",
+            (jmeno, data.get("poznamka",""))
+        )
+    return jsonify({"ok": True, "id": cur.lastrowid})
+
+@app.route("/api/dluhy/transakce", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_dluhy_nova_transakce():
+    data = request.json or {}
+    osoba_id = data.get("osoba_id")
+    datum    = data.get("datum","")
+    castka   = float(data.get("castka", 0) or 0)
+    if not osoba_id or not datum:
+        return jsonify({"error": "Chybí osoba nebo datum"}), 400
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO dluhy_transakce (osoba_id, datum, castka, poznamka) VALUES (?,?,?,?)",
+            (osoba_id, datum, castka, data.get("poznamka",""))
+        )
+    return jsonify({"ok": True, "id": cur.lastrowid})
+
+@app.route("/api/dluhy/transakce/<int:tid>", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_dluhy_smazat_transakci(tid):
+    with get_db() as conn:
+        conn.execute("DELETE FROM dluhy_transakce WHERE id=?", (tid,))
+    return jsonify({"ok": True})
+
+@app.route("/api/dluhy/osoby/<int:oid>", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_dluhy_smazat_osobu(oid):
+    with get_db() as conn:
+        conn.execute("DELETE FROM dluhy_transakce WHERE osoba_id=?", (oid,))
+        conn.execute("DELETE FROM dluhy_osoby WHERE id=?", (oid,))
     return jsonify({"ok": True})
 
 
