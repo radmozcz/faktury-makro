@@ -6277,7 +6277,7 @@ async function loadPenezenka() {
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
             <div class="card-title" style="margin:0">Historie záznamů</div>
           </div>
-          ${zaznamy.length ? `<div style="overflow-x:auto"><table style="min-width:700px;font-size:.83rem">
+          ${zaznamy.length ? `<div><table style="width:100%;font-size:.83rem">
             <thead><tr style="font-size:.75rem;color:var(--txt2)">
               <th>Datum</th>
               <th style="text-align:right">💵 Hotovost</th>
