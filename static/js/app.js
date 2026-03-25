@@ -6261,7 +6261,7 @@ async function loadPenezenka() {
 
   // Levá strana — boxíky, pravá strana — zadávací panel
   el.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 360px;gap:1.25rem;align-items:start">
+    <div style="display:grid;grid-template-columns:1fr 340px;gap:1.25rem;align-items:start;min-width:0">
 
       <!-- LEVÁ: boxíky + tabulka -->
       <div>
