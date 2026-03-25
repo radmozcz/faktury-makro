@@ -6273,6 +6273,16 @@ async function loadPenezenka() {
           ${boxik("⚖️","Rozdíl",rozdil,null,rozdil===null?"#f9fafb":rozdil>=0?"#f0fdf4":"#fee2e2",rozdil===null?"var(--border)":rozdil>=0?"#86efac":"#fca5a5",rozdil===null?"var(--txt)":rozdil>=0?"#166534":"#991b1b","hotovost+banky − teoretický")}
         </div>
 
+        <div id="dluhyRozbalenoPanel" style="display:none;margin-bottom:1rem">
+          <div class="card">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+              <div class="card-title" style="margin:0">💸 Náklady</div>
+              <button class="btn btn-primary btn-sm" onclick="openNovaDluhOsoba()">+ Nová osoba</button>
+            </div>
+            <div id="dluhyObs2"></div>
+          </div>
+        </div>
+
         <div class="card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
             <div class="card-title" style="margin:0">Historie záznamů</div>
@@ -6348,7 +6358,11 @@ function _pwToggle(id) {
   const open = el.style.display!=="none";
   el.style.display = open?"none":"block";
   arr.textContent = open?"▶":"▼";
-  if (!open && id === "dluhy") loadDluhy();
+  if (id === "dluhy") {
+    const panel = document.getElementById("dluhyRozbalenoPanel");
+    if (panel) panel.style.display = open ? "none" : "block";
+    if (!open) loadDluhy();
+  }
 }
 
 function _pwRenderPanel() {
@@ -6439,7 +6453,7 @@ function _pwRenderPanel() {
     _pwSekce("banky","🏦","Bankovní účty", bankyForm) +
     _pwSekce("akcie","📈","Akcie & brokeři", akcieFrm) +
     _pwSekce("shrnuti","💰","Shrnutí & Uložit", shrnuti, true) +
-    _pwSekce("dluhy","💸","Náklady", `<div id="dluhyObs"><div class="loading-center"><span class="spinner"></span></div></div><div style="margin-top:.5rem"><button class="btn btn-primary btn-sm" onclick="openNovaDluhOsoba()">+ Nová osoba</button></div>`);
+    _pwSekce("dluhy","💸","Náklady", `<div style="color:var(--txt2);font-size:.85rem">Rozbaleno vlevo ↙</div>`);
 
   // Načíst EUR kurz
   _pwNacistKurz().then(kurz => {
@@ -6673,7 +6687,7 @@ function _dluhTogglePanel() {
 }
 
 async function loadDluhy() {
-  const el = document.getElementById("dluhyObs");
+  const el = document.getElementById("dluhyObs2") || document.getElementById("dluhyObs");
   if (!el) return;
   let data;
   try { data = await api("/api/dluhy"); } catch { return; }
