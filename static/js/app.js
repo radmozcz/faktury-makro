@@ -6273,12 +6273,19 @@ async function loadPenezenka() {
           ${boxik("⚖️","Rozdíl",rozdil,null,rozdil===null?"#f9fafb":rozdil>=0?"#f0fdf4":"#fee2e2",rozdil===null?"var(--border)":rozdil>=0?"#86efac":"#fca5a5",rozdil===null?"var(--txt)":rozdil>=0?"#166534":"#991b1b","hotovost+banky − teoretický")}
         </div>
 
-        <div class="card" style="margin-bottom:1rem">
+        <div style="margin-bottom:1rem">
+          <button class="btn btn-secondary btn-sm" onclick="_dluhTogglePanel()" style="font-size:.78rem">
+            💸 Dluhy <span id="dluhPanelArr">▶</span>
+          </button>
+          <div id="dluhyPanel" style="display:none;margin-top:.75rem">
+          <div class="card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
             <div class="card-title" style="margin:0">💸 Dluhy</div>
             <button class="btn btn-primary btn-sm" onclick="openNovaDluhOsoba()">+ Nová osoba</button>
           </div>
           <div id="dluhyObs"><div class="loading-center"><span class="spinner"></span></div></div>
+          </div>
+          </div>
         </div>
 
         <div class="card">
@@ -6334,7 +6341,6 @@ async function loadPenezenka() {
 
   // Sestavit pravý panel
   _pwRenderPanel();
-  loadDluhy();
 }
 
 function _pwSekce(id, ikona, nazev, obsah, otevrena=false) {
@@ -6669,6 +6675,16 @@ async function smazatZaznamPenezenka(id) {
 //  DLUHY — půjčky kamarádům
 // ═══════════════════════════════════════════════════════════════
 
+function _dluhTogglePanel() {
+  const panel = document.getElementById("dluhyPanel");
+  const arr   = document.getElementById("dluhPanelArr");
+  if (!panel) return;
+  const open = panel.style.display !== "none";
+  panel.style.display = open ? "none" : "block";
+  if (arr) arr.textContent = open ? "▶" : "▼";
+  if (!open) loadDluhy();
+}
+
 async function loadDluhy() {
   const el = document.getElementById("dluhyObs");
   if (!el) return;
@@ -6692,7 +6708,6 @@ async function loadDluhy() {
       ${data.map(o => {
         const splaceno = o.celkem <= 0;
         const stavColor = splaceno ? "#16a34a" : "#dc2626";
-        const stavText  = splaceno ? "✓ Splaceno" : "Dluží";
         return `<tr style="cursor:pointer;border-top:1px solid var(--border)" onclick="_dluhToggle(${o.id})">
           <td style="padding:.5rem .4rem;font-weight:600">
             <span id="dluhArr_${o.id}" style="font-size:.7rem;margin-right:.3rem">▶</span>
@@ -6701,7 +6716,7 @@ async function loadDluhy() {
           <td style="text-align:right;color:var(--txt2);padding:.5rem .4rem">${o.prvni_pujcka ? czDate(o.prvni_pujcka) : "—"}</td>
           <td style="text-align:right;font-weight:700;color:${stavColor};padding:.5rem .4rem">${czInt(Math.abs(o.celkem))} Kč</td>
           <td style="text-align:center;padding:.5rem .4rem">
-            <span style="font-size:.75rem;font-weight:600;color:${stavColor}">${stavText}</span>
+            ${splaceno ? `<span style="font-size:.75rem;font-weight:600;color:#16a34a">✓ Splaceno</span>` : ""}
           </td>
           <td style="padding:.5rem .4rem;white-space:nowrap" onclick="event.stopPropagation()">
             <button class="btn btn-primary btn-sm" onclick="openPridatTransakci(${o.id},'${escHtml(o.jmeno)}')">+ Splátka / půjčka</button>
