@@ -88,8 +88,10 @@ a { color: var(--green); text-decoration: none; }
 .sidebar-nav {
   flex: 1;
   padding: .8rem 0;
-  overflow-y: hidden;
+  overflow-y: auto;
+  scrollbar-width: none;
 }
+.sidebar-nav::-webkit-scrollbar { display: none; }
 .nav-item {
   display: flex;
   align-items: center;
