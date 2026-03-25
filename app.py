@@ -710,9 +710,10 @@ def migrate_db():
             poznamka   TEXT DEFAULT '',
             created_at TEXT DEFAULT NOW()
         )""")
-    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
 
-def update_stav_po_splatnosti():
+
+def allowed_file(filename):
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
     today = date.today().isoformat()
     with get_db() as conn:
         conn.execute("""
