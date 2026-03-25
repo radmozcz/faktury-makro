@@ -6206,7 +6206,7 @@ async function loadPenezenka() {
   const extrasSum = extras.reduce((s,e)=>s+(e.castka||0),0);
   const celkem   = hotovost !== null ? hotovost + banky : null;  // jen hotovost + banky
   const celkemVse = hotovost !== null ? hotovost + banky + akcie + sporeni + extrasSum : null;
-  const rozdil   = celkemVse !== null ? celkemVse - teoreticky : null;
+  const rozdil   = celkem !== null ? celkem - teoreticky : null;
 
   const zm = (klic) => {
     if (!z0 || !z1) return null;
@@ -6271,7 +6271,7 @@ async function loadPenezenka() {
           ${boxikAkcieSporeni()}
           ${boxik("💰","Celkem (hotovost + banky)",celkem,zm("celkem"),"#faf5ff","#c084fc","#7e22ce","")}
           ${boxik("🧮","Teoretický stav",teoreticky,null,"#f9fafb","var(--border)","var(--txt)","z Reportů od "+data.od_data)}
-          ${boxik("⚖️","Rozdíl",rozdil,null,rozdil===null?"#f9fafb":rozdil>=0?"#f0fdf4":"#fee2e2",rozdil===null?"var(--border)":rozdil>=0?"#86efac":"#fca5a5",rozdil===null?"var(--txt)":rozdil>=0?"#166534":"#991b1b","celkem vše − teoretický")}
+          ${boxik("⚖️","Rozdíl",rozdil,null,rozdil===null?"#f9fafb":rozdil>=0?"#f0fdf4":"#fee2e2",rozdil===null?"var(--border)":rozdil>=0?"#86efac":"#fca5a5",rozdil===null?"var(--txt)":rozdil>=0?"#166534":"#991b1b","hotovost+banky − teoretický")}
         </div>
 
         <div class="card">
