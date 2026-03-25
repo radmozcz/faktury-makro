@@ -1935,6 +1935,30 @@ def api_nastenka_check():
             "stav": "ok" if pocet_dup == 0 else "error",
         }
 
+        # Faktury blížící se splatnosti (do 7 dní)
+        blizi_cond = "AND datum_splatnosti::date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'" if _USE_PG else "AND datum_splatnosti BETWEEN date('now') AND date('now','+7 days')"
+        r_blizi = conn.execute(f"""
+            SELECT COUNT(*) as pocet, COALESCE(SUM(celkem_s_dph),0) as castka
+            FROM faktury WHERE stav='ceka'
+            AND datum_splatnosti IS NOT NULL AND datum_splatnosti != ''
+            {blizi_cond}
+        """).fetchone()
+        pocet_blizi = int(r_blizi["pocet"] if isinstance(r_blizi, dict) else r_blizi[0])
+        castka_blizi = float(r_blizi["castka"] if isinstance(r_blizi, dict) else r_blizi[1])
+        rows_blizi = conn.execute(f"""
+            SELECT id, dodavatel, cislo_faktury, datum_splatnosti, celkem_s_dph, firma_zkratka
+            FROM faktury WHERE stav='ceka'
+            AND datum_splatnosti IS NOT NULL AND datum_splatnosti != ''
+            {blizi_cond}
+            ORDER BY datum_splatnosti ASC LIMIT 5
+        """).fetchall()
+        result["faktury_blizi_splatnost"] = {
+            "pocet": pocet_blizi,
+            "castka": round(castka_blizi, 2),
+            "items": [dict(r) for r in rows_blizi],
+            "stav": "ok" if pocet_blizi == 0 else "warning",
+        }
+
         # 4. Vystavené faktury po splatnosti (Bauhaus nezaplatil)
         datum_cond = "AND datum_splatnosti::date < CURRENT_DATE" if _USE_PG else "AND datum_splatnosti < date('now')"
         datum_not_empty = "AND datum_splatnosti IS NOT NULL AND datum_splatnosti != ''" 

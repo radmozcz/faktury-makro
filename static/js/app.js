@@ -679,6 +679,19 @@ function _renderNastenkaBoxiky(c) {
     fps.pocet > 0 ? "navigateTo('faktury')" : null
   ));
 
+  // 3b. Faktury blížící se splatnosti (do 7 dní)
+  const fb = c.faktury_blizi_splatnost || {pocet:0, castka:0, stav:"ok"};
+  const fbSub = fb.pocet === 0 ? "Žádné" : fb.items && fb.items.length
+    ? fb.items.map(f => `${f.dodavatel} – ${f.datum_splatnosti}`).join(", ")
+    : czMoney(fb.castka);
+  boxiky.push(_nastenkaBoxik(
+    "Splatnost do 7 dní",
+    fb.stav,
+    fb.pocet === 0 ? "Vše OK" : `${fb.pocet} faktur`,
+    fbSub,
+    fb.pocet > 0 ? "navigateTo('faktury')" : null
+  ));
+
   // 4. Vystavené po splatnosti (nám nezaplatili)
   const fv = c.vystavene_po_splatnosti;
   boxiky.push(_nastenkaBoxik(
