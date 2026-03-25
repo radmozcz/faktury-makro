@@ -6878,7 +6878,7 @@ async function smazatDluhOsobu(oid, jmeno) {
 //  RADEK — rozcestník
 // ═══════════════════════════════════════════════════════════════
 function renderRadek() {
-  setContent(`
+  document.getElementById("mainContent").innerHTML = `
     <h2>👤 Radek</h2>
     <div class="radek-grid">
       <div class="radek-box" onclick="navigateTo('soukrome_vydaje')">
@@ -6894,7 +6894,7 @@ function renderRadek() {
         Dokumenty
       </div>
     </div>
-  `);
+  `;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -6903,7 +6903,7 @@ function renderRadek() {
 let _dokData = [];
 
 async function renderDokumenty() {
-  setContent(`
+  document.getElementById("mainContent").innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.8rem">
       <h2>🗂️ Dokumenty</h2>
       <button class="btn btn-primary" onclick="dokModalNovy()">＋ Přidat dokument</button>
@@ -6939,7 +6939,7 @@ async function renderDokumenty() {
         </div>
       </div>
     </div>
-  `);
+  `;
   // Nastav dnešní datum
   document.getElementById("dok-datum").value = new Date().toISOString().slice(0,10);
   await dokNacist();
