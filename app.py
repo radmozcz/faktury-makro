@@ -3963,7 +3963,7 @@ def api_statistiky_prehled_pl():
                    TO_CHAR(NULLIF(datum_vystaveni,'')::date,'MM') as mesic,
                    ROUND(SUM(celkem_s_dph)::numeric,0) as castka
             FROM faktury
-            WHERE datum_vystaveni >= ? AND datum_vystaveni <= ? {ffw}
+            WHERE datum_vystaveni > '' AND datum_vystaveni >= ? AND datum_vystaveni <= ? {ffw}
             GROUP BY rok, mesic ORDER BY rok, mesic
         """, [od, do] + fp).fetchall()
 
@@ -3973,7 +3973,7 @@ def api_statistiky_prehled_pl():
                    TO_CHAR(NULLIF(datum,'')::date,'MM') as mesic,
                    ROUND(SUM(castka)::numeric,0) as castka
             FROM vydaje
-            WHERE datum >= ? AND datum <= ?
+            WHERE datum > '' AND datum >= ? AND datum <= ?
             AND COALESCE(typ,'provozni')='provozni' {ffw}
             GROUP BY rok, mesic ORDER BY rok, mesic
         """, [od, do] + fp).fetchall()
