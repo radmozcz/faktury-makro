@@ -5592,13 +5592,9 @@ def api_oprav_sekvence():
     for tbl in ["vystavene_faktury", "faktury", "reporty", "vyplaty", "vydaje", "bankovni_pohyby", "zbozi", "polozky"]:
         try:
             with get_db() as conn:
-                conn.execute(f"""
-                    SELECT setval(
-                        pg_get_serial_sequence('{tbl}', 'id'),
-                        COALESCE((SELECT MAX(id) FROM {tbl}), 0) + 1,
-                        false
-                    )
-                """)
+                conn.execute(f"CREATE SEQUENCE IF NOT EXISTS {tbl}_id_seq")
+                conn.execute(f"ALTER TABLE {tbl} ALTER COLUMN id SET DEFAULT nextval('{tbl}_id_seq')")
+                conn.execute(f"SELECT setval('{tbl}_id_seq', COALESCE((SELECT MAX(id) FROM {tbl}), 0) + 1, false)")
             vysledky[tbl] = "OK"
         except Exception as e:
             vysledky[tbl] = str(e)
