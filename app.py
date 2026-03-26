@@ -5581,7 +5581,28 @@ def api_kalkulace_cena_polozky():
             })
     return jsonify({"cena": None, "zdroj": None})
 
-
+@app.route("/api/oprav-sekvence")
+@vyzaduj_prihlaseni
+def api_oprav_sekvence():
+    if session.get("role") != "admin":
+        return jsonify({"error": "Pouze admin"}), 403
+    if not _USE_PG:
+        return jsonify({"error": "Pouze PostgreSQL"}), 400
+    vysledky = {}
+    for tbl in ["vystavene_faktury", "faktury", "reporty", "vyplaty", "vydaje", "bankovni_pohyby", "zbozi", "polozky"]:
+        try:
+            with get_db() as conn:
+                conn.execute(f"""
+                    SELECT setval(
+                        pg_get_serial_sequence('{tbl}', 'id'),
+                        COALESCE((SELECT MAX(id) FROM {tbl}), 0) + 1,
+                        false
+                    )
+                """)
+            vysledky[tbl] = "OK"
+        except Exception as e:
+            vysledky[tbl] = str(e)
+    return jsonify(vysledky)
 @app.route("/ping")
 def ping():
     return "pong", 200
