@@ -1052,7 +1052,7 @@ Odpověz POUZE platným JSON objektem, žádný jiný text, žádné backticky, 
 Formát odpovědi:
 {
   "dodavatel": "název dodavatele nebo obchodu",
-  "cislo_faktury": "číslo faktury nebo variabilní symbol nebo číslo účtenky, nebo null",
+  "cislo_faktury": "pro MAKRO faktury: číslo POUZE z pole 'Faktura č. / VS' (10 číslic, např. 0415000291) — IGNORUJ číslo vpravo nahoře (formát 0015/0135) a IGNORUJ č. zákazníka. Pro ostatní faktury: číslo faktury nebo VS nebo null",
   "datum_vystaveni": "YYYY-MM-DD nebo null",
   "datum_splatnosti": "YYYY-MM-DD nebo null",
   "zpusob_uhrady": "hotově/kartou/převodem nebo null",
