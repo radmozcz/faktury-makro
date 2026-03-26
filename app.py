@@ -4622,9 +4622,9 @@ def api_polozky():
     od    = request.args.get("od", "")
     do_   = request.args.get("do", "")
 
-    f_cond = "AND f.firma_zkratka=?" if firma else ""
-    od_c   = "AND f.datum_vystaveni>=?" if od else ""
-    do_c   = "AND f.datum_vystaveni<=?" if do_ else ""
+    f_cond  = "AND fakt.firma_zkratka=?" if firma else ""
+    od_c    = "AND fakt.datum_vystaveni>=?" if od else ""
+    do_c    = "AND fakt.datum_vystaveni<=?" if do_ else ""
     params = tuple(v for v in [firma, od, do_] if v)
 
     with get_db() as conn:
@@ -4637,10 +4637,10 @@ def api_polozky():
                 ROUND(CAST(SUM(p.celkem_s_dph) AS NUMERIC), 2)        AS celkem_utraceno,
                 ROUND(CAST(AVG(p.cena_za_jednotku_s_dph) AS NUMERIC), 4) AS prumerna_cena,
                 COUNT(DISTINCT p.faktura_id)        AS pocet_nakupu,
-                STRING_AGG(DISTINCT f.dodavatel, ', ')  AS dodavatele,
+                STRING_AGG(DISTINCT fakt.dodavatel, ', ')  AS dodavatele,
                 (SELECT a.alias FROM zbozi_aliasy a WHERE a.zbozi_id = z.id LIMIT 1) AS skupina
             FROM polozky p
-            JOIN faktury f ON f.id = p.faktura_id
+            JOIN faktury fakt ON fakt.id = p.faktura_id
             LEFT JOIN zbozi z ON z.id = p.zbozi_id
             WHERE 1=1 {f_cond} {od_c} {do_c}
             GROUP BY z.id, COALESCE(z.nazev_canonical, p.nazev), p.jednotka
