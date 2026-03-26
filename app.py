@@ -635,7 +635,14 @@ def migrate_db():
         if "platnost_od" not in po_cols:
             try: conn.execute("ALTER TABLE pausalni_odvody ADD COLUMN platnost_od TEXT DEFAULT '2020-01-01'")
             except Exception: pass
-
+# Reset sekvencí pro SERIAL sloupce (oprava null id)
+    if _USE_PG:
+        for tbl in ["vystavene_faktury", "faktury", "reporty", "vyplaty", "vydaje", "bankovni_pohyby", "zbozi", "polozky"]:
+            try:
+                with get_db() as conn:
+                    conn.execute(f"SELECT setval(pg_get_serial_sequence('{tbl}', 'id'), COALESCE((SELECT MAX(id) FROM {tbl}), 0) + 1, false)")
+            except Exception as e:
+                print(f"⚠ Sekvence {tbl}: {e}")
     # paska_url ve vyplaty
     with get_db() as conn:
         if _USE_PG:
