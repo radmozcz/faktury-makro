@@ -5126,12 +5126,15 @@ def _zpracuj_nove_faktury_z_drive():
                     duplicita_id = None
                     if cislo:
                         dup = conn.execute(
-                            "SELECT id FROM faktury WHERE cislo_faktury=? AND dodavatel LIKE ? AND (duplicita_id IS NULL OR duplicita_id=0)",
-                            (cislo, "%MAKRO%")
-                        ).fetchone()
-                        if dup:
-                            duplicita_id = dup["id"] if isinstance(dup, dict) else dup[0]
-                            print(f"⚠ Drive: duplicita č. {cislo}, ukládám s příznakem duplicita_id={duplicita_id}")
+                        "SELECT id FROM faktury WHERE cislo_faktury=? AND dodavatel LIKE ?",
+                        (cislo, "%MAKRO%")
+                    ).fetchone()
+                    if dup:
+                        print(f"⏭ Drive: přeskakuji duplicitu č. {cislo}, již existuje")
+                        conn.execute("INSERT INTO drive_zpracovane (file_id, zpracovano_at) VALUES (?,?)",
+                            (f["id"], __import__("datetime").datetime.now().isoformat()))
+                        stats["preskoceno"] += 1
+                        continue
                     conn.execute("""
                         INSERT INTO faktury (firma_zkratka, dodavatel, cislo_faktury,
                             datum_vystaveni, datum_splatnosti, celkem_s_dph,
