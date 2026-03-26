@@ -5211,11 +5211,11 @@ def _ocr_faktura(fpath):
             messages=[{"role": "user", "content": [block, {"type": "text", "text": f"""Analyzuj tuto MAKRO fakturu (daňový doklad).
 Odpověz POUZE platným JSON, žádný jiný text.
 
-Důležité pro číslo faktury: hledej pole "Faktura č." nebo "Faktura č. / VS" — to je správné číslo faktury (např. 0466005189). IGNORUJ číslo vpravo nahoře které vypadá jako 0066/0955 — to je číslo objednávky.
+Důležité pro číslo faktury: hledej POUZE pole "Faktura č. / VS" — hodnota je číslo ve formátu 0415000291 (10 číslic, pouze číslice). IGNORUJ číslo vpravo nahoře (formát 0015/0135 — to je číslo stránky), IGNORUJ "č. zákazníka" a IGNORUJ "Technické ID".
 
 {{
   "dodavatel": "název dodavatele (obvykle MAKRO Cash & Carry ČR s.r.o.)",
-  "cislo_faktury": "číslo z pole Faktura č. nebo Faktura č. / VS",
+  "cislo_faktury": "číslo POUZE z pole Faktura č. / VS (10 číslic, např. 0415000291)",
   "datum_vystaveni": "YYYY-MM-DD nebo null",
   "datum_splatnosti": "YYYY-MM-DD nebo null",
   "celkem_s_dph": číslo (celková částka včetně DPH),
