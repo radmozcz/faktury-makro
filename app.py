@@ -1046,7 +1046,7 @@ def parse_faktura_claude(filepath):
                 "source": {"type": "base64", "media_type": media_type, "data": b64}
             }
 
-       prompt = """Jsi expert na čtení faktur a účtenek. Přečti tento doklad VELMI PEČLIVĚ.
+        prompt = """Jsi expert na čtení faktur a účtenek. Přečti tento doklad VELMI PEČLIVĚ.
 Odpověz POUZE platným JSON objektem, žádný jiný text, žádné backticky, žádné komentáře.
 
 Formát odpovědi:
