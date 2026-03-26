@@ -3047,7 +3047,7 @@ def api_vystavene_ulozit():
         conn.execute(
             """INSERT INTO vystavene_faktury
                (firma_zkratka, cislo_faktury, datum, datum_splatnosti, odberatel, popis, castka, stav, soubor_url, duplicita_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id""",
             (d.get("firma_zkratka",""), d.get("cislo_faktury",""),
              d.get("datum",""), d.get("datum_splatnosti",""),
              d.get("odberatel",""), d.get("popis",""),
