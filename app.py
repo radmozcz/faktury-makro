@@ -5386,7 +5386,14 @@ def api_zaloha_stahnout(nazev):
         headers={"Content-Disposition": f"attachment; filename={nazev}"}
     )
 
-
+@app.route("/api/reset-drive-zpracovane", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_reset_drive_zpracovane():
+    if session.get("role") != "admin":
+        return jsonify({"error": "Pouze admin"}), 403
+    with get_db() as conn:
+        conn.execute("DELETE FROM drive_zpracovane")
+    return jsonify({"ok": True})
 @app.route("/api/smazat-vse-faktury", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_smazat_vse_faktury():
