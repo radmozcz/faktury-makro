@@ -301,8 +301,8 @@ class _PgConn:
         sql = sql.replace("date('now','-12 months')", "(CURRENT_DATE - INTERVAL '12 months')")
         sql = sql.replace("date('now')", "CURRENT_DATE::text")
         # datum_vystaveni a datum jsou TEXT sloupce – při porovnání s datem je nutný cast
-        sql = _re.sub(r"\bdatum_vystaveni\b(\s*)(>=|<=|>|<)", r"datum_vystaveni::date\1\2", sql)
-        sql = _re.sub(r"\bdatum\b(\s*)(>=|<=|>|<)", r"datum::date\1\2", sql)
+        sql = _re.sub(r"\bdatum_vystaveni\b(\s*)(>=|<=|>|<)", r"NULLIF(datum_vystaveni,'')::date\1\2", sql)
+        sql = _re.sub(r"\bdatum\b(\s*)(>=|<=|>|<)", r"NULLIF(datum,'')::date\1\2", sql)
         sql = _re.sub(r"strftime\('%Y',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'YYYY')", sql)
         sql = _re.sub(r"strftime\('%m',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'MM')", sql)
         sql = _re.sub(r"strftime\('%Y-%m',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'YYYY-MM')", sql)
