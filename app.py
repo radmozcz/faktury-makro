@@ -5405,7 +5405,25 @@ def api_smazat_vse_faktury():
         cur = conn.execute("DELETE FROM faktury")
         smazano = cur.rowcount if hasattr(cur, 'rowcount') else 0
     return jsonify({"ok": True, "smazano": smazano})
-
+@app.route("/api/normalizuj-dodavatele", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_normalizuj_dodavatele():
+    if session.get("role") != "admin":
+        return jsonify({"error": "Pouze admin"}), 403
+    opravy = [
+        ("MAKRO Cash & Carry CR s.r.o.", "MAKRO Cash & Carry ČR s.r.o."),
+        ("MAKRO Cash&Carry ČR s.r.o.", "MAKRO Cash & Carry ČR s.r.o."),
+        ("MAKRO Cash&Carry CR s.r.o.", "MAKRO Cash & Carry ČR s.r.o."),
+    ]
+    opraveno = 0
+    with get_db() as conn:
+        for spatne, spravne in opravy:
+            cur = conn.execute(
+                "UPDATE faktury SET dodavatel=? WHERE dodavatel=?",
+                (spravne, spatne)
+            )
+            opraveno += cur.rowcount
+    return jsonify({"ok": True, "opraveno": opraveno})
 @app.route("/api/normalizuj-nazvy", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_normalizuj_nazvy():
