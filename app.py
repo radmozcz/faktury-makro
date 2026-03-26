@@ -1046,18 +1046,19 @@ def parse_faktura_claude(filepath):
                 "source": {"type": "base64", "media_type": media_type, "data": b64}
             }
 
-        prompt = """Jsi expert na čtení faktur a účtenek. Přečti tento doklad VELMI PEČLIVĚ.
+       prompt = """Jsi expert na čtení faktur a účtenek. Přečti tento doklad VELMI PEČLIVĚ.
 Odpověz POUZE platným JSON objektem, žádný jiný text, žádné backticky, žádné komentáře.
 
 Formát odpovědi:
 {
   "dodavatel": "název dodavatele nebo obchodu",
-  "cislo_faktury": "pro MAKRO faktury: číslo POUZE z pole 'Faktura č. / VS' (10 číslic, např. 0415000291) — IGNORUJ číslo vpravo nahoře (formát 0015/0135) a IGNORUJ č. zákazníka. Pro ostatní faktury: číslo faktury nebo VS nebo null",
+  "cislo_faktury": "pro MAKRO faktury: číslo POUZE z pole Faktura c. / VS (10 číslic, např. 0415000291) — IGNORUJ číslo vpravo nahoře (formát 0015/0135) a IGNORUJ c. zákazníka. Pro ostatní faktury: číslo faktury nebo VS nebo null",
   "datum_vystaveni": "YYYY-MM-DD nebo null",
   "datum_splatnosti": "YYYY-MM-DD nebo null",
   "zpusob_uhrady": "hotově/kartou/převodem nebo null",
   "celkem_s_dph": číslo (celková částka včetně DPH),
   "polozky": [
+    {
     {
       "nazev": "název položky",
       "mnozstvi": číslo,
