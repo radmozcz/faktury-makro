@@ -1059,7 +1059,6 @@ Formát odpovědi:
   "celkem_s_dph": číslo (celková částka včetně DPH),
   "polozky": [
     {
-    {
       "nazev": "název položky",
       "mnozstvi": číslo,
       "jednotka": "ks/kg/l/...",
