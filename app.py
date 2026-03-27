@@ -4633,16 +4633,8 @@ def api_polozky():
     with get_db() as conn:
         rows = conn.execute(f"""
             SELECT
-                COALESCE(
-                    (SELECT a.alias FROM zbozi_aliasy a WHERE a.zbozi_id = z.id LIMIT 1),
-                    z.nazev_canonical,
-                    p.nazev
-                ) AS zbozi_nazev,
-                COALESCE(
-                    (SELECT MIN(a2.zbozi_id) FROM zbozi_aliasy a2
-                     WHERE a2.alias = (SELECT a.alias FROM zbozi_aliasy a WHERE a.zbozi_id = z.id LIMIT 1)),
-                    z.id
-                ) AS zbozi_id,
+                COALESCE(al.alias, z.nazev_canonical, p.nazev) AS zbozi_nazev,
+                MIN(z.id) AS zbozi_id,
                 ROUND(CAST(SUM(p.mnozstvi) AS NUMERIC), 3)               AS celkove_mnozstvi,
                 ROUND(CAST(SUM(p.celkem_s_dph) AS NUMERIC), 2)           AS celkem_utraceno,
                 ROUND(CAST(AVG(p.cena_za_jednotku_s_dph) AS NUMERIC), 4) AS prumerna_cena,
@@ -4652,12 +4644,9 @@ def api_polozky():
             FROM polozky p
             JOIN faktury fakt ON fakt.id = p.faktura_id
             LEFT JOIN zbozi z ON z.id = p.zbozi_id
+            LEFT JOIN zbozi_aliasy al ON al.zbozi_id = z.id
             WHERE 1=1 {f_cond} {od_c} {do_c}
-            GROUP BY COALESCE(
-                (SELECT a.alias FROM zbozi_aliasy a WHERE a.zbozi_id = z.id LIMIT 1),
-                z.nazev_canonical,
-                p.nazev
-            )
+            GROUP BY COALESCE(al.alias, z.nazev_canonical, p.nazev)
             ORDER BY celkem_utraceno DESC
         """, params).fetchall()
     return jsonify([dict(r) for r in rows])
