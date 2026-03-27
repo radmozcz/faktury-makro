@@ -2286,7 +2286,7 @@ async function smazatAlias(zbozi_id, alias, el) {
     toast("Chyba při mazání aliasu", true);
   }
 }
-}
+
 
 async function addAlias(zbozi_id) {
   const alias = document.getElementById("newAlias").value.trim();
