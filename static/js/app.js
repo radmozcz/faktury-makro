@@ -4867,10 +4867,17 @@ async function uploadReportFoto(file) {
       statusEl.textContent = "❌ " + data.error;
       return;
     }
-    statusEl.textContent = "✅ Lístek přečten – zkontrolujte a uložte";
     if (data.soubor_url) App._reportSouborUrl = data.soubor_url;
-    naplnReportFormular(data);
-    switchRTab("rucni");
+    // Při editaci existujícího reportu jen ulož fotku, nepřepisuj data
+    if (App._reportEditId) {
+      statusEl.textContent = "✅ Fotka uložena";
+      const fotoEl = document.getElementById("reportFotoNahled");
+      if (fotoEl && data.soubor_url) fotoEl.innerHTML = `<img src="${data.soubor_url}" style="max-width:100%;border-radius:6px;margin-top:.5rem">`;
+    } else {
+      statusEl.textContent = "✅ Lístek přečten – zkontrolujte a uložte";
+      naplnReportFormular(data);
+      switchRTab("rucni");
+    }
   } catch (e) {
     statusEl.textContent = "❌ Chyba: " + e.message;
   }
