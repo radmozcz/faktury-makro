@@ -301,9 +301,8 @@ class _PgConn:
         sql = sql.replace("date('now','-12 months')", "(CURRENT_DATE - INTERVAL '12 months')")
         sql = sql.replace("date('now')", "CURRENT_DATE::text")
         # datum_vystaveni a datum jsou TEXT sloupce – při porovnání s datem je nutný cast
-        sql = _re.sub(r"(?<!\w\.)datum_vystaveni(\s*)(>=|<=|>|<)", r"NULLIF(datum_vystaveni,'')::date\1\2", sql)
-        sql = _re.sub(r"(\w+)\.datum_vystaveni(\s*)(>=|<=|>|<)", r"NULLIF(\1.datum_vystaveni,'')::date\2\3", sql)
-        sql = _re.sub(r"\bdatum\b(\s*)(>=|<=|>|<)", r"datum::date\1\2", sql)
+        ssql = _re.sub(r"\bdatum_vystaveni\b(\s*)(>=|<=|>|<)", r"NULLIF(datum_vystaveni,'')::date\1\2", sql)
+        sql = _re.sub(r"\bdatum\b(\s*)(>=|<=|>|<)", r"NULLIF(datum,'')::date\1\2", sql)
         sql = _re.sub(r"strftime\('%Y',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'YYYY')", sql)
         sql = _re.sub(r"strftime\('%m',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'MM')", sql)
         sql = _re.sub(r"strftime\('%Y-%m',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'YYYY-MM')", sql)
@@ -636,7 +635,14 @@ def migrate_db():
         if "platnost_od" not in po_cols:
             try: conn.execute("ALTER TABLE pausalni_odvody ADD COLUMN platnost_od TEXT DEFAULT '2020-01-01'")
             except Exception: pass
-
+# Reset sekvencí pro SERIAL sloupce (oprava null id)
+    if _USE_PG:
+        for tbl in ["vystavene_faktury", "faktury", "reporty", "vyplaty", "vydaje", "bankovni_pohyby", "zbozi", "polozky"]:
+            try:
+                with get_db() as conn:
+                    conn.execute(f"SELECT setval(pg_get_serial_sequence('{tbl}', 'id'), COALESCE((SELECT MAX(id) FROM {tbl}), 0) + 1, false)")
+            except Exception as e:
+                print(f"⚠ Sekvence {tbl}: {e}")
     # paska_url ve vyplaty
     with get_db() as conn:
         if _USE_PG:
@@ -647,15 +653,76 @@ def migrate_db():
         if "paska_url" not in vypl_cols:
             try: conn.execute("ALTER TABLE vyplaty ADD COLUMN paska_url TEXT")
             except Exception: pass
-            try: conn.execute("UPDATE reporty SET firma_zkratka='FP' WHERE firma_zkratka IS NULL OR firma_zkratka=''")
-            except Exception: pass        
+        try: conn.execute("UPDATE reporty SET firma_zkratka='FP' WHERE firma_zkratka IS NULL OR firma_zkratka=''")
+        except Exception: pass
     print("migrate_db OK")
+
+    # Peněženka — hotovostní záznamy
+    with get_db() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS penezenka (
+            id        SERIAL PRIMARY KEY,
+            datum     TEXT NOT NULL,
+            hotovost  REAL NOT NULL DEFAULT 0,
+            rb_fp     REAL NOT NULL DEFAULT 0,
+            rb_mr     REAL NOT NULL DEFAULT 0,
+            rb_cff    REAL NOT NULL DEFAULT 0,
+            rb_radek  REAL NOT NULL DEFAULT 0,
+            air_fp    REAL NOT NULL DEFAULT 0,
+            air_mr    REAL NOT NULL DEFAULT 0,
+            air_cff   REAL NOT NULL DEFAULT 0,
+            air_radek REAL NOT NULL DEFAULT 0,
+            kb_radek  REAL NOT NULL DEFAULT 0,
+            xtb_czk   REAL NOT NULL DEFAULT 0,
+            xtb_eur   REAL NOT NULL DEFAULT 0,
+            t212      REAL NOT NULL DEFAULT 0,
+            etoro     REAL NOT NULL DEFAULT 0,
+            sporeni   REAL NOT NULL DEFAULT 0,
+            extras    TEXT DEFAULT '[]',
+            poznamka  TEXT DEFAULT '',
+            created_at TEXT DEFAULT NOW()
+        )""")
+        # Migrace — přidat sloupce pokud tabulka existuje bez nich
+        if _USE_PG:
+            cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='penezenka'")
+            pen_cols = [r["column_name"] for r in cur.fetchall()]
+        else:
+            pen_cols = [row[1] for row in conn.execute("PRAGMA table_info(penezenka)").fetchall()]
+        for col in ["hotovost","rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek","xtb_czk","xtb_eur","t212","etoro","sporeni"]:
+            if col not in pen_cols:
+                try: conn.execute(f"ALTER TABLE penezenka ADD COLUMN {col} REAL DEFAULT 0")
+                except Exception: pass
+        if "extras" not in pen_cols:
+            try: conn.execute("ALTER TABLE penezenka ADD COLUMN extras TEXT DEFAULT '[]'")
+            except Exception: pass
+        # Přejmenovat stary sloupec stav_skutecny → hotovost pokud existuje
+        if "stav_skutecny" in pen_cols and "hotovost" not in pen_cols:
+            try: conn.execute("ALTER TABLE penezenka RENAME COLUMN stav_skutecny TO hotovost")
+            except Exception: pass
+        # Přejmenovat akcie → xtb_czk pokud existuje (starý sloupec)
+        if "akcie" in pen_cols and "xtb_czk" not in pen_cols:
+            try: conn.execute("ALTER TABLE penezenka RENAME COLUMN akcie TO xtb_czk")
+            except Exception: pass
+
+    # Dluhy — půjčky kamarádům
+    with get_db() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS dluhy_osoby (
+            id         SERIAL PRIMARY KEY,
+            jmeno      TEXT NOT NULL UNIQUE,
+            poznamka   TEXT DEFAULT '',
+            created_at TEXT DEFAULT NOW()
+        )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS dluhy_transakce (
+            id         SERIAL PRIMARY KEY,
+            osoba_id   INTEGER NOT NULL REFERENCES dluhy_osoby(id) ON DELETE CASCADE,
+            datum      TEXT NOT NULL,
+            castka     REAL NOT NULL,
+            poznamka   TEXT DEFAULT '',
+            created_at TEXT DEFAULT NOW()
+        )""")
 
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXT
-
-def update_stav_po_splatnosti():
     today = date.today().isoformat()
     with get_db() as conn:
         conn.execute("""
@@ -987,12 +1054,13 @@ Odpověz POUZE platným JSON objektem, žádný jiný text, žádné backticky, 
 Formát odpovědi:
 {
   "dodavatel": "název dodavatele nebo obchodu",
-  "cislo_faktury": "číslo faktury nebo variabilní symbol nebo číslo účtenky, nebo null",
+  "cislo_faktury": "pro MAKRO faktury: číslo POUZE z pole Faktura c. / VS (10 číslic, např. 0415000291) — IGNORUJ číslo vpravo nahoře (formát 0015/0135) a IGNORUJ c. zákazníka. Pro ostatní faktury: číslo faktury nebo VS nebo null",
   "datum_vystaveni": "YYYY-MM-DD nebo null",
   "datum_splatnosti": "YYYY-MM-DD nebo null",
   "zpusob_uhrady": "hotově/kartou/převodem nebo null",
   "celkem_s_dph": číslo (celková částka včetně DPH),
   "polozky": [
+    {
     {
       "nazev": "název položky",
       "mnozstvi": číslo,
@@ -1335,20 +1403,22 @@ Formát odpovědi:
 - Pole "den" NEVYPLŇUJ — vrať vždy null, den spočítáme sami z data
 
 === ČÍSLA — ZÁMĚNY ČÍSLIC ===
-- Tečka nebo čárka uvnitř čísla = oddělovač tisíců: 9.582 = 9582, 4.900 = 4900
+- Tečka nebo čárka uvnitř čísla = oddělovač tisíců: 9.582 = 9582, 4.900 = 4900, 8.527 = 8527
 - Pomlčka nebo lomítko za číslem (9.582,-) = ignoruj
 - Výsledek rovnice: "14.521 + 5 = 14.636" → ber číslo ZA "=" = 14636
-- KRITICKÉ — při ručním psaní jsou si podobné: 3↔5, 1↔7, 0↔6, 4↔9
-- KOV je vždy malé číslo (desítky): pokud vidíš "59" zkontroluj zda není "39" nebo "39"
-- Číslo čti vždy v kontextu — KOV 39 je realističtější než KOV 59
+- KRITICKÉ — při ručním psaní jsou si podobné: 3↔5, 1↔7, 0↔6, 4↔9, 1↔4
+- Číslo vždy ověř pomocí kontrolního součtu: KARTY + KOV + PAPÍR + VÝDAJE = TRŽBA CELKEM
+- Pokud součet nesedí, zkus alternativní čtení záměnných číslic (3↔5, 1↔4) dokud součet nesedí
 
 === KARTY, KOV, PAPÍR, VÝDAJE ===
-- KARTY = platby kartou (větší číslo, typicky tisíce)
-- KOV = drobné mince (malé číslo, typicky desítky — pod 100 Kč)
-- PAPÍR = papírové bankovky (stovky až tisíce)
-- VÝDAJE = hotovost vydaná na nákupy — typicky prázdné nebo malé číslo
-- TRŽBA = karty + kov + papír — NEpatří do vydaje!
-- Pokud vidíš rovnici u TRŽBA → dej výsledek (číslo za "=") do tržby, NE do vydaje
+- KARTY = platby kartou (větší číslo, typicky 4000–15000 Kč)
+- KOV = drobné mince (malé číslo, typicky 20–200 Kč, NIKDY tisíce)
+- PAPÍR = papírové bankovky (stovky až tisíce Kč)
+- VÝDAJE = hotovost vydaná ven z kasy — typicky 0–500 Kč, NIKDY tisíce
+- TRŽBA CELKEM (bez PK) = KARTY + KOV + PAPÍR + VÝDAJE — použij tento součet pro ověření!
+- TRŽBA CELKEM vč. výdajů na lístku = KARTY + KOV + PAPÍR + VÝDAJE (to je správná kontrola)
+- KRITICKÉ pro VÝDAJE: jsou to typicky malé částky (100, 200 Kč). Pokud vidíš 400 ale součet nesedí, zkus 100 — záměna 4↔1 je velmi častá!
+- KRITICKÉ pro KARTY: číslo okolo 8000 Kč. Pokud vidíš 8327 ale součet nesedí, zkus 8527 — záměna 3↔5 je velmi častá!
 
 === POUKAZKY (PK) — VELMI DŮLEŽITÉ ===
 - Hledej na lístku "PK" nebo "POUKAZ" nebo "POUKAZKA"
@@ -1620,12 +1690,7 @@ def index():
     return render_template("index.html", config=load_config())
 
 
-@app.route("/api/admin/fix-firmy", methods=["POST"])
-def api_fix_firmy():
-    with get_db() as conn:
-        cur = conn.execute("UPDATE reporty SET firma_zkratka='FP' WHERE firma_zkratka IS NULL OR firma_zkratka=''")
-        updated = cur.rowcount
-    return jsonify({"ok": True, "updated": updated})
+
 @app.route("/api/config", methods=["GET", "POST"])
 @vyzaduj_prihlaseni
 def api_config():
@@ -1694,8 +1759,8 @@ def api_karty_stats():
                        COALESCE(SUM(hotovost),0) as h,
                        COALESCE(SUM(hotovost+karty),0) as t
                 FROM reporty
-                WHERE firma_zkratka=? AND datum>=? AND datum<=?
-            """, (firma, mesic_prvni, _dt.date.today().isoformat())).fetchone()
+                WHERE firma_zkratka=? AND datum LIKE ?
+            """, (firma, mesic_str + "%")).fetchone()
             karty_mesic = float((row4 or {}).get("k", 0))
             hot_mesic   = float((row4 or {}).get("h", 0))
             trzba_mesic = float((row4 or {}).get("t", 0))
@@ -1878,6 +1943,30 @@ def api_nastenka_check():
             "pocet": pocet_dup,
             "castka": round(castka_dup, 2),
             "stav": "ok" if pocet_dup == 0 else "error",
+        }
+
+        # Faktury blížící se splatnosti (do 7 dní)
+        blizi_cond = "AND datum_splatnosti::date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'" if _USE_PG else "AND datum_splatnosti BETWEEN date('now') AND date('now','+7 days')"
+        r_blizi = conn.execute(f"""
+            SELECT COUNT(*) as pocet, COALESCE(SUM(celkem_s_dph),0) as castka
+            FROM faktury WHERE stav='ceka'
+            AND datum_splatnosti IS NOT NULL AND datum_splatnosti != ''
+            {blizi_cond}
+        """).fetchone()
+        pocet_blizi = int(r_blizi["pocet"] if isinstance(r_blizi, dict) else r_blizi[0])
+        castka_blizi = float(r_blizi["castka"] if isinstance(r_blizi, dict) else r_blizi[1])
+        rows_blizi = conn.execute(f"""
+            SELECT id, dodavatel, cislo_faktury, datum_splatnosti, celkem_s_dph, firma_zkratka
+            FROM faktury WHERE stav='ceka'
+            AND datum_splatnosti IS NOT NULL AND datum_splatnosti != ''
+            {blizi_cond}
+            ORDER BY datum_splatnosti ASC LIMIT 5
+        """).fetchall()
+        result["faktury_blizi_splatnost"] = {
+            "pocet": pocet_blizi,
+            "castka": round(castka_blizi, 2),
+            "items": [dict(r) for r in rows_blizi],
+            "stav": "ok" if pocet_blizi == 0 else "warning",
         }
 
         # 4. Vystavené faktury po splatnosti (Bauhaus nezaplatil)
@@ -2961,7 +3050,7 @@ def api_vystavene_ulozit():
         conn.execute(
             """INSERT INTO vystavene_faktury
                (firma_zkratka, cislo_faktury, datum, datum_splatnosti, odberatel, popis, castka, stav, soubor_url, duplicita_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id""",
             (d.get("firma_zkratka",""), d.get("cislo_faktury",""),
              d.get("datum",""), d.get("datum_splatnosti",""),
              d.get("odberatel",""), d.get("popis",""),
@@ -3877,7 +3966,7 @@ def api_statistiky_prehled_pl():
                    TO_CHAR(NULLIF(datum_vystaveni,'')::date,'MM') as mesic,
                    ROUND(SUM(celkem_s_dph)::numeric,0) as castka
             FROM faktury
-            WHERE datum_vystaveni >= ? AND datum_vystaveni <= ? {ffw}
+            WHERE datum_vystaveni > '' AND datum_vystaveni >= ? AND datum_vystaveni <= ? {ffw}
             GROUP BY rok, mesic ORDER BY rok, mesic
         """, [od, do] + fp).fetchall()
 
@@ -3887,7 +3976,7 @@ def api_statistiky_prehled_pl():
                    TO_CHAR(NULLIF(datum,'')::date,'MM') as mesic,
                    ROUND(SUM(castka)::numeric,0) as castka
             FROM vydaje
-            WHERE datum >= ? AND datum <= ?
+            WHERE datum > '' AND datum >= ? AND datum <= ?
             AND COALESCE(typ,'provozni')='provozni' {ffw}
             GROUP BY rok, mesic ORDER BY rok, mesic
         """, [od, do] + fp).fetchall()
@@ -4536,12 +4625,13 @@ def api_polozky():
     od    = request.args.get("od", "")
     do_   = request.args.get("do", "")
 
-    f_cond = "AND fakt.firma_zkratka=?" if firma else ""
-    od_c   = "AND fakt.datum_vystaveni>=?" if od else ""
-    do_c   = "AND fakt.datum_vystaveni<=?" if do_ else ""
+    f_cond  = "AND fakt.firma_zkratka=?" if firma else ""
+    od_c    = "AND fakt.datum_vystaveni>=?" if od else ""
+    do_c    = "AND fakt.datum_vystaveni<=?" if do_ else ""
     params = tuple(v for v in [firma, od, do_] if v)
 
-    sql = """
+    with get_db() as conn:
+        rows = conn.execute(f"""
             SELECT
                 COALESCE(z.nazev_canonical, p.nazev) AS zbozi_nazev,
                 z.id AS zbozi_id,
@@ -4555,14 +4645,10 @@ def api_polozky():
             FROM polozky p
             JOIN faktury fakt ON fakt.id = p.faktura_id
             LEFT JOIN zbozi z ON z.id = p.zbozi_id
-            WHERE 1=1 """ + f_cond + " " + od_c + " " + do_c + """
+            WHERE 1=1 {f_cond} {od_c} {do_c}
             GROUP BY z.id, COALESCE(z.nazev_canonical, p.nazev), p.jednotka
             ORDER BY celkem_utraceno DESC
-        """
-    # Opravit f.firma_zkratka a f.datum_vystaveni na fakt.
-    sql = sql.replace("f.firma_zkratka", "fakt.firma_zkratka").replace("f.datum_vystaveni", "fakt.datum_vystaveni")
-    with get_db() as conn:
-        rows = conn.execute(sql, params).fetchall()
+        """, params).fetchall()
     return jsonify([dict(r) for r in rows])
 
 @app.route("/api/polozky/detail/<int:zbozi_id>")
@@ -4693,9 +4779,9 @@ def api_statistiky():
             SELECT COALESCE(z.nazev_canonical, p.nazev) zbozi, ROUND((SUM(p.celkem_s_dph))::numeric,2) castka,
                    ROUND((SUM(p.mnozstvi))::numeric,2) mnozstvi, MAX(p.jednotka) jednotka
             FROM polozky p
-            JOIN faktury fakt ON fakt.id=p.faktura_id
+            JOIN faktury f ON f.id=p.faktura_id
             LEFT JOIN zbozi z ON z.id=p.zbozi_id
-            WHERE fakt.datum_vystaveni>=? AND fakt.datum_vystaveni<=? {f_cond}
+            WHERE f.datum_vystaveni>=? AND f.datum_vystaveni<=? {f_cond}
             GROUP BY COALESCE(z.nazev_canonical, p.nazev) ORDER BY castka DESC LIMIT 20
         """, (od, do_) + f_params).fetchall()
 
@@ -4703,9 +4789,9 @@ def api_statistiky():
         cena_vyvoj = []
         if zbozi_id:
             cena_vyvoj = conn.execute(f"""
-                SELECT fakt.datum_vystaveni dat, ROUND(p.cena_za_jednotku_s_dph,4) cena, fakt.dodavatel
-                FROM polozky p JOIN faktury fakt ON fakt.id=p.faktura_id
-                WHERE p.zbozi_id=? AND fakt.datum_vystaveni>=? AND fakt.datum_vystaveni<=? {f_cond}
+                SELECT f.datum_vystaveni dat, ROUND(p.cena_za_jednotku_s_dph,4) cena, f.dodavatel
+                FROM polozky p JOIN faktury f ON f.id=p.faktura_id
+                WHERE p.zbozi_id=? AND f.datum_vystaveni>=? AND f.datum_vystaveni<=? {f_cond}
                 ORDER BY f.datum_vystaveni
             """, (zbozi_id, od, do_) + f_params).fetchall()
 
@@ -5043,12 +5129,15 @@ def _zpracuj_nove_faktury_z_drive():
                     duplicita_id = None
                     if cislo:
                         dup = conn.execute(
-                            "SELECT id FROM faktury WHERE cislo_faktury=? AND dodavatel LIKE ? AND (duplicita_id IS NULL OR duplicita_id=0)",
-                            (cislo, "%MAKRO%")
-                        ).fetchone()
-                        if dup:
-                            duplicita_id = dup["id"] if isinstance(dup, dict) else dup[0]
-                            print(f"⚠ Drive: duplicita č. {cislo}, ukládám s příznakem duplicita_id={duplicita_id}")
+                        "SELECT id FROM faktury WHERE cislo_faktury=? AND dodavatel LIKE ?",
+                        (cislo, "%MAKRO%")
+                    ).fetchone()
+                    if dup:
+                        print(f"⏭ Drive: přeskakuji duplicitu č. {cislo}, již existuje")
+                        conn.execute("INSERT INTO drive_zpracovane (file_id, zpracovano_at) VALUES (?,?)",
+                            (f["id"], __import__("datetime").datetime.now().isoformat()))
+                        stats["preskoceno"] += 1
+                        continue
                     conn.execute("""
                         INSERT INTO faktury (firma_zkratka, dodavatel, cislo_faktury,
                             datum_vystaveni, datum_splatnosti, celkem_s_dph,
@@ -5128,11 +5217,11 @@ def _ocr_faktura(fpath):
             messages=[{"role": "user", "content": [block, {"type": "text", "text": f"""Analyzuj tuto MAKRO fakturu (daňový doklad).
 Odpověz POUZE platným JSON, žádný jiný text.
 
-Důležité pro číslo faktury: hledej pole "Faktura č." nebo "Faktura č. / VS" — to je správné číslo faktury (např. 0466005189). IGNORUJ číslo vpravo nahoře které vypadá jako 0066/0955 — to je číslo objednávky.
+Důležité pro číslo faktury: hledej POUZE pole "Faktura č. / VS" — hodnota je číslo ve formátu 0415000291 (10 číslic, pouze číslice). IGNORUJ číslo vpravo nahoře (formát 0015/0135 — to je číslo stránky), IGNORUJ "č. zákazníka" a IGNORUJ "Technické ID".
 
 {{
   "dodavatel": "název dodavatele (obvykle MAKRO Cash & Carry ČR s.r.o.)",
-  "cislo_faktury": "číslo z pole Faktura č. nebo Faktura č. / VS",
+  "cislo_faktury": "číslo POUZE z pole Faktura č. / VS (10 číslic, např. 0415000291)",
   "datum_vystaveni": "YYYY-MM-DD nebo null",
   "datum_splatnosti": "YYYY-MM-DD nebo null",
   "celkem_s_dph": číslo (celková částka včetně DPH),
@@ -5167,25 +5256,49 @@ Známá IČO firem: {json.dumps(ico_map)}"""
 def api_zaloha_db():
     if session.get("role") != "admin":
         return jsonify({"error": "Pouze admin"}), 403
-    import subprocess, tempfile, os as _os
-    from datetime import datetime as _dt
-    db_url = _os.environ.get("DATABASE_URL", "")
-    if not db_url:
-        return jsonify({"error": "DATABASE_URL není nastavena"}), 500
-    ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+    import os as _os
+    import datetime as _dt_mod
+    ts = _dt_mod.datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"zaloha_{ts}.sql"
     try:
-        result = subprocess.run(
-            ["pg_dump", "--no-password", "--format=plain", "--encoding=UTF8", db_url],
-            capture_output=True, timeout=60
-        )
-        if result.returncode != 0:
-            return jsonify({"error": result.stderr.decode("utf-8", errors="replace")}), 500
-        sql_data = result.stdout
-    except FileNotFoundError:
-        return jsonify({"error": "pg_dump není dostupný na serveru"}), 500
-    except subprocess.TimeoutExpired:
-        return jsonify({"error": "Záloha trvá příliš dlouho"}), 500
+        import psycopg2 as _pg
+        db_url = _os.environ.get("DATABASE_URL", "")
+        if not db_url:
+            return jsonify({"error": "DATABASE_URL není nastavena"}), 500
+        conn = _pg.connect(db_url)
+        cur = conn.cursor()
+        cur.execute("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")
+        tables = [r[0] for r in cur.fetchall()]
+        lines = ["-- SQL záloha vygenerovaná aplikací", f"-- Datum: {ts}", ""]
+        for tbl in tables:
+            try:
+                cur.execute(f"SELECT * FROM {tbl}")
+                rows = cur.fetchall()
+                cols = [d[0] for d in cur.description]
+                if not rows:
+                    continue
+                lines.append(f"-- Tabulka: {tbl}")
+                for row in rows:
+                    vals = []
+                    for v in row:
+                        if v is None:
+                            vals.append("NULL")
+                        elif isinstance(v, bool):
+                            vals.append("TRUE" if v else "FALSE")
+                        elif isinstance(v, (int, float)):
+                            vals.append(str(v))
+                        else:
+                            vals.append("'" + str(v).replace("'", "''") + "'")
+                    col_str = ", ".join(cols)
+                    val_str = ", ".join(vals)
+                    lines.append(f"INSERT INTO {tbl} ({col_str}) VALUES ({val_str}) ON CONFLICT DO NOTHING;")
+                lines.append("")
+            except Exception as e:
+                lines.append(f"-- Chyba při záloze tabulky {tbl}: {e}")
+        conn.close()
+        sql_data = "\n".join(lines).encode("utf-8")
+    except Exception as e:
+        return jsonify({"error": f"Záloha selhala: {str(e)}"}), 500
 
     gcs_url = None
     try:
@@ -5279,7 +5392,14 @@ def api_zaloha_stahnout(nazev):
         headers={"Content-Disposition": f"attachment; filename={nazev}"}
     )
 
-
+@app.route("/api/reset-drive-zpracovane", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_reset_drive_zpracovane():
+    if session.get("role") != "admin":
+        return jsonify({"error": "Pouze admin"}), 403
+    with get_db() as conn:
+        conn.execute("DELETE FROM drive_zpracovane")
+    return jsonify({"ok": True})
 @app.route("/api/smazat-vse-faktury", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_smazat_vse_faktury():
@@ -5288,7 +5408,25 @@ def api_smazat_vse_faktury():
         cur = conn.execute("DELETE FROM faktury")
         smazano = cur.rowcount if hasattr(cur, 'rowcount') else 0
     return jsonify({"ok": True, "smazano": smazano})
-
+@app.route("/api/normalizuj-dodavatele", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_normalizuj_dodavatele():
+    if session.get("role") != "admin":
+        return jsonify({"error": "Pouze admin"}), 403
+    opravy = [
+        ("MAKRO Cash & Carry CR s.r.o.", "MAKRO Cash & Carry ČR s.r.o."),
+        ("MAKRO Cash&Carry ČR s.r.o.", "MAKRO Cash & Carry ČR s.r.o."),
+        ("MAKRO Cash&Carry CR s.r.o.", "MAKRO Cash & Carry ČR s.r.o."),
+    ]
+    opraveno = 0
+    with get_db() as conn:
+        for spatne, spravne in opravy:
+            cur = conn.execute(
+                "UPDATE faktury SET dodavatel=? WHERE dodavatel=?",
+                (spravne, spatne)
+            )
+            opraveno += cur.rowcount
+    return jsonify({"ok": True, "opraveno": opraveno})
 @app.route("/api/normalizuj-nazvy", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_normalizuj_nazvy():
@@ -5474,10 +5612,244 @@ def api_kalkulace_cena_polozky():
             })
     return jsonify({"cena": None, "zdroj": None})
 
-
+@app.route("/api/oprav-sekvence")
+@vyzaduj_prihlaseni
+def api_oprav_sekvence():
+    if session.get("role") != "admin":
+        return jsonify({"error": "Pouze admin"}), 403
+    if not _USE_PG:
+        return jsonify({"error": "Pouze PostgreSQL"}), 400
+    vysledky = {}
+    for tbl in ["vystavene_faktury", "faktury", "reporty", "vyplaty", "vydaje", "bankovni_pohyby", "zbozi", "polozky"]:
+        try:
+            with get_db() as conn:
+                conn.execute(f"CREATE SEQUENCE IF NOT EXISTS {tbl}_id_seq")
+                conn.execute(f"ALTER TABLE {tbl} ALTER COLUMN id SET DEFAULT nextval('{tbl}_id_seq')")
+                conn.execute(f"SELECT setval('{tbl}_id_seq', COALESCE((SELECT MAX(id) FROM {tbl}), 0) + 1, false)")
+            vysledky[tbl] = "OK"
+        except Exception as e:
+            vysledky[tbl] = str(e)
+    return jsonify(vysledky)
 @app.route("/ping")
 def ping():
     return "pong", 200
+
+
+
+# ═══════════════════════════════════════════════════════════════
+#  PENĚŽENKA — hotovostní kasa
+# ═══════════════════════════════════════════════════════════════
+
+PENEZENKA_START = "2026-03-24"
+
+@app.route("/api/eur-kurz")
+@vyzaduj_prihlaseni
+def api_eur_kurz():
+    """Vrátí aktuální kurz EUR/CZK z CNB."""
+    import urllib.request as _ur
+    try:
+        req = _ur.Request("https://api.cnb.cz/cnbapi/exrates/daily?lang=EN",
+                          headers={"User-Agent": "faktury-makro/1.0"})
+        with _ur.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+        eur = next((r for r in data.get("rates", []) if r["currencyCode"] == "EUR"), None)
+        if eur:
+            return jsonify({"kurz": round(eur["rate"] / eur["amount"], 4)})
+    except Exception as e:
+        app.logger.warning(f"CNB kurz chyba: {e}")
+    return jsonify({"kurz": 25.0})
+
+BANKY_SLOUPCE = ["rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek"]
+
+@app.route("/api/penezenka")
+@vyzaduj_prihlaseni
+def api_penezenka_list():
+    import datetime as _dt
+    dnes = _dt.date.today().isoformat()
+    with get_db() as conn:
+        zaznamy = conn.execute("SELECT * FROM penezenka ORDER BY datum DESC").fetchall()
+        r_hot = conn.execute("""
+            SELECT COALESCE(SUM(hotovost), 0) as hot, COALESCE(SUM(vydaje), 0) as vyd
+            FROM reporty WHERE datum >= ? AND datum <= ?
+        """, (PENEZENKA_START, dnes)).fetchone()
+        hot = float(r_hot["hot"] if isinstance(r_hot, dict) else r_hot[0])
+        vyd = float(r_hot["vyd"] if isinstance(r_hot, dict) else r_hot[1])
+    return jsonify({
+        "zaznamy": [dict(r) for r in zaznamy],
+        "teoreticky_stav": round(hot - vyd, 0),
+        "hotovost_celkem": round(hot, 0),
+        "vydaje_celkem": round(vyd, 0),
+        "od_data": PENEZENKA_START,
+    })
+
+@app.route("/api/penezenka", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_penezenka_ulozit():
+    data = request.json or {}
+    datum = data.get("datum", "")
+    if not datum:
+        return jsonify({"error": "Chybí datum"}), 400
+    import json as _json
+    import traceback as _tb
+    try:
+        # Zjistit aktuální sloupce v tabulce
+        with get_db() as conn:
+            if _USE_PG:
+                cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='penezenka'")
+                pen_cols = [r["column_name"] for r in cur.fetchall()]
+            else:
+                pen_cols = [row[1] for row in conn.execute("PRAGMA table_info(penezenka)").fetchall()]
+
+            # Přidat chybějící sloupce za běhu
+            for col in ["hotovost","rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek","xtb_czk","xtb_eur","t212","etoro","sporeni"]:
+                if col not in pen_cols:
+                    try:
+                        conn.execute(f"ALTER TABLE penezenka ADD COLUMN {col} REAL DEFAULT 0")
+                        pen_cols.append(col)
+                    except Exception: pass
+            if "extras" not in pen_cols:
+                try:
+                    conn.execute("ALTER TABLE penezenka ADD COLUMN extras TEXT DEFAULT '[]'")
+                    pen_cols.append("extras")
+                except Exception: pass
+
+            # INSERT pouze se sloupci které existují
+            cols = ["datum"]
+            vals = [datum]
+            for col in ["hotovost","rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek","xtb_czk","xtb_eur","t212","etoro","sporeni"]:
+                if col in pen_cols:
+                    cols.append(col)
+                    vals.append(float(data.get(col, 0) or 0))
+            if "extras" in pen_cols:
+                cols.append("extras")
+                vals.append(_json.dumps(data.get("extras", []), ensure_ascii=False))
+            if "poznamka" in pen_cols:
+                cols.append("poznamka")
+                vals.append(data.get("poznamka", ""))
+
+            placeholders = ",".join(["?"] * len(cols))
+            cur = conn.execute(
+                f"INSERT INTO penezenka ({','.join(cols)}) VALUES ({placeholders})",
+                vals
+            )
+        return jsonify({"ok": True, "id": cur.lastrowid})
+    except Exception as e:
+        app.logger.error(f"Penezenka save error: {_tb.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/penezenka/<int:pid>", methods=["PUT"])
+@vyzaduj_prihlaseni
+def api_penezenka_edit(pid):
+    import json as _json, traceback as _tb
+    data = request.json or {}
+    try:
+        with get_db() as conn:
+            if _USE_PG:
+                cur = conn.execute("SELECT column_name FROM information_schema.columns WHERE table_name='penezenka'")
+                pen_cols = [r["column_name"] for r in cur.fetchall()]
+            else:
+                pen_cols = [row[1] for row in conn.execute("PRAGMA table_info(penezenka)").fetchall()]
+            cols = ["datum"]
+            vals = [data.get("datum","")]
+            for col in ["hotovost","rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek","xtb_czk","xtb_eur","t212","etoro","sporeni"]:
+                if col in pen_cols:
+                    cols.append(col)
+                    vals.append(float(data.get(col,0) or 0))
+            if "extras" in pen_cols:
+                cols.append("extras")
+                vals.append(_json.dumps(data.get("extras",[]), ensure_ascii=False))
+            if "poznamka" in pen_cols:
+                cols.append("poznamka")
+                vals.append(data.get("poznamka",""))
+            set_clause = ", ".join(f"{c}=?" for c in cols)
+            vals.append(pid)
+            conn.execute(f"UPDATE penezenka SET {set_clause} WHERE id=?", vals)
+        return jsonify({"ok": True})
+    except Exception as e:
+        app.logger.error(f"Penezenka edit error: {_tb.format_exc()}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/penezenka/<int:pid>", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_penezenka_delete(pid):
+    with get_db() as conn:
+        conn.execute("DELETE FROM penezenka WHERE id=?", (pid,))
+    return jsonify({"ok": True})
+
+
+
+# ═══════════════════════════════════════════════════════════════
+#  DLUHY — půjčky kamarádům
+# ═══════════════════════════════════════════════════════════════
+
+@app.route("/api/dluhy")
+@vyzaduj_prihlaseni
+def api_dluhy_list():
+    with get_db() as conn:
+        osoby = conn.execute("SELECT * FROM dluhy_osoby ORDER BY jmeno").fetchall()
+        result = []
+        for o in osoby:
+            oid = o["id"] if isinstance(o, dict) else o[0]
+            jmeno = o["jmeno"] if isinstance(o, dict) else o[1]
+            poznamka = o["poznamka"] if isinstance(o, dict) else o[2]
+            transakce = conn.execute(
+                "SELECT * FROM dluhy_transakce WHERE osoba_id=? ORDER BY datum ASC, id ASC", (oid,)
+            ).fetchall()
+            trans_list = [dict(t) for t in transakce]
+            celkem = sum(float(t["castka"] if isinstance(t, dict) else t[2]) for t in transakce)
+            prvni = trans_list[0]["datum"] if trans_list else None
+            result.append({
+                "id": oid, "jmeno": jmeno, "poznamka": poznamka,
+                "celkem": round(celkem, 0),
+                "prvni_pujcka": prvni,
+                "transakce": trans_list,
+            })
+    return jsonify(result)
+
+@app.route("/api/dluhy/osoby", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_dluhy_nova_osoba():
+    data = request.json or {}
+    jmeno = (data.get("jmeno") or "").strip()
+    if not jmeno:
+        return jsonify({"error": "Chybí jméno"}), 400
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO dluhy_osoby (jmeno, poznamka) VALUES (?,?)",
+            (jmeno, data.get("poznamka",""))
+        )
+    return jsonify({"ok": True, "id": cur.lastrowid})
+
+@app.route("/api/dluhy/transakce", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_dluhy_nova_transakce():
+    data = request.json or {}
+    osoba_id = data.get("osoba_id")
+    datum    = data.get("datum","")
+    castka   = float(data.get("castka", 0) or 0)
+    if not osoba_id or not datum:
+        return jsonify({"error": "Chybí osoba nebo datum"}), 400
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO dluhy_transakce (osoba_id, datum, castka, poznamka) VALUES (?,?,?,?)",
+            (osoba_id, datum, castka, data.get("poznamka",""))
+        )
+    return jsonify({"ok": True, "id": cur.lastrowid})
+
+@app.route("/api/dluhy/transakce/<int:tid>", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_dluhy_smazat_transakci(tid):
+    with get_db() as conn:
+        conn.execute("DELETE FROM dluhy_transakce WHERE id=?", (tid,))
+    return jsonify({"ok": True})
+
+@app.route("/api/dluhy/osoby/<int:oid>", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_dluhy_smazat_osobu(oid):
+    with get_db() as conn:
+        conn.execute("DELETE FROM dluhy_transakce WHERE osoba_id=?", (oid,))
+        conn.execute("DELETE FROM dluhy_osoby WHERE id=?", (oid,))
+    return jsonify({"ok": True})
 
 
 if __name__ == "__main__":
@@ -5486,3 +5858,111 @@ if __name__ == "__main__":
     print("  Otevři prohlížeč na: http://localhost:5000")
     print("=" * 55)
     app.run(host="0.0.0.0", port=5000, debug=False)
+
+# ════════════════════════════════════════════════════════════════
+#  DOKUMENTY
+# ════════════════════════════════════════════════════════════════
+
+def init_dokumenty():
+    with get_db() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS dokumenty (
+            id          SERIAL PRIMARY KEY,
+            datum       TEXT NOT NULL,
+            nazev       TEXT NOT NULL,
+            misto       TEXT DEFAULT 'Praha',
+            soubor_cesta TEXT DEFAULT '',
+            soubor_url  TEXT DEFAULT '',
+            created_at  TEXT DEFAULT NOW()
+        )""")
+
+init_dokumenty()
+
+def upload_dokument_to_gcs(local_path, filename):
+    bucket = get_gcs_client()
+    if not bucket:
+        return None
+    try:
+        blob = bucket.blob(f"dokumenty/{filename}")
+        blob.upload_from_filename(local_path)
+        url = blob.generate_signed_url(expiration=timedelta(days=7), method="GET", version="v4")
+        return url
+    except Exception as e:
+        print(f"⚠  GCS dokumenty upload error: {e}")
+        return None
+
+def get_dokument_gcs_url(filename):
+    bucket = get_gcs_client()
+    if not bucket:
+        return None
+    try:
+        blob = bucket.blob(f"dokumenty/{filename}")
+        if not blob.exists():
+            return None
+        return blob.generate_signed_url(expiration=timedelta(days=7), method="GET", version="v4")
+    except Exception as e:
+        print(f"⚠  GCS dokumenty url error: {e}")
+        return None
+
+@app.route("/api/dokumenty")
+@vyzaduj_prihlaseni
+def api_dokumenty_list():
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM dokumenty ORDER BY datum DESC, id DESC").fetchall()
+    return jsonify([dict(r) for r in rows])
+
+@app.route("/api/dokumenty", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_dokumenty_create():
+    datum  = request.form.get("datum", "")
+    nazev  = request.form.get("nazev", "").strip()
+    misto  = request.form.get("misto", "Praha")
+    if not nazev:
+        return jsonify({"chyba": "Chybí název"}), 400
+    soubor_cesta = ""
+    soubor_url   = ""
+    if "soubor" in request.files:
+        f = request.files["soubor"]
+        if f and f.filename:
+            fname = secure_filename(f.filename)
+            ts    = datetime.now().strftime("%Y%m%d_%H%M%S")
+            fname = f"{ts}_{fname}"
+            fpath = os.path.join(UPLOAD_DIR, fname)
+            f.save(fpath)
+            url = upload_dokument_to_gcs(fpath, fname)
+            soubor_cesta = fname
+            soubor_url   = url or ""
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO dokumenty (datum, nazev, misto, soubor_cesta, soubor_url) VALUES (?,?,?,?,?)",
+            (datum, nazev, misto, soubor_cesta, soubor_url)
+        )
+    return jsonify({"ok": True, "id": cur.lastrowid})
+
+@app.route("/api/dokumenty/<int:did>", methods=["PUT"])
+@vyzaduj_prihlaseni
+def api_dokumenty_update(did):
+    d = request.json or {}
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE dokumenty SET datum=?, nazev=?, misto=? WHERE id=?",
+            (d.get("datum",""), d.get("nazev",""), d.get("misto","Praha"), did)
+        )
+    return jsonify({"ok": True})
+
+@app.route("/api/dokumenty/<int:did>", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_dokumenty_delete(did):
+    with get_db() as conn:
+        conn.execute("DELETE FROM dokumenty WHERE id=?", (did,))
+    return jsonify({"ok": True})
+
+@app.route("/api/dokumenty/<int:did>/url")
+@vyzaduj_prihlaseni
+def api_dokumenty_url(did):
+    with get_db() as conn:
+        row = conn.execute("SELECT soubor_cesta, soubor_url FROM dokumenty WHERE id=?", (did,)).fetchone()
+    if not row:
+        return jsonify({"chyba": "Nenalezeno"}), 404
+    url = get_dokument_gcs_url(row["soubor_cesta"]) or row["soubor_url"] or ""
+    return jsonify({"url": url})
+
