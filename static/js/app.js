@@ -2272,9 +2272,20 @@ async function naseptavacAlias(input) {
 }
 
 async function smazatAlias(zbozi_id, alias, el) {
-  await api(`/api/zbozi/alias/${zbozi_id}/${encodeURIComponent(alias)}`, {method:"DELETE"});
-  el.closest(".alias-tag").remove();
-  toast("Alias smazán ✓");
+  try {
+    await api(`/api/zbozi/alias/${zbozi_id}/${encodeURIComponent(alias)}`, {method:"DELETE"});
+    const tag = el.closest(".alias-tag");
+    if (tag) tag.remove();
+    const container = document.getElementById("aliasContainer");
+    if (container && !container.querySelector(".alias-tag")) {
+      container.innerHTML = '<span style="color:var(--txt2);font-size:.85rem">Žádné aliasy</span>';
+    }
+    toast("Alias smazán ✓");
+    loadPolozky();
+  } catch(e) {
+    toast("Chyba při mazání aliasu", true);
+  }
+}
 }
 
 async function addAlias(zbozi_id) {
@@ -2284,10 +2295,17 @@ async function addAlias(zbozi_id) {
     method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({ zbozi_id, alias })
   });
-  toast("Alias přidán");
-  const el = document.getElementById("aliasContainer");
-  el.innerHTML += `<span class="alias-tag">${escHtml(alias)}</span>`;
+  toast("Alias přidán ✓");
+  const container = document.getElementById("aliasContainer");
+  const prazdny = container.querySelector("span:not(.alias-tag)");
+  if (prazdny) prazdny.remove();
+  const span = document.createElement("span");
+  span.className = "alias-tag";
+  span.style.cssText = "display:inline-flex;align-items:center;gap:.3rem;background:var(--green-pale);border-radius:99px;padding:.2rem .6rem .2rem .8rem;margin:.2rem;font-size:.85rem";
+  span.innerHTML = `${escHtml(alias)} <button onclick="smazatAlias(${zbozi_id}, '${escHtml(alias)}', this)" style="background:none;border:none;cursor:pointer;color:#999;font-size:.8rem;line-height:1;padding:0 .1rem" title="Smazat alias">✕</button>`;
+  container.appendChild(span);
   document.getElementById("newAlias").value = "";
+  loadPolozky();
 }
 
 function exportPolozky(fmt) {
