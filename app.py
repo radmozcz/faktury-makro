@@ -5435,6 +5435,7 @@ def api_normalizuj_nazvy():
     prejmenovano = 0
     slouceno = 0
     with get_db() as conn:
+        # Krok 1: Odeber prefixy ARO/MC/FL
         zbozi = conn.execute("SELECT id, nazev_canonical FROM zbozi").fetchall()
         for z in zbozi:
             nazev = (z["nazev_canonical"] if isinstance(z, dict) else z[1]) or ""
@@ -5442,21 +5443,41 @@ def api_normalizuj_nazvy():
             if novy == nazev:
                 continue
             zid = z["id"] if isinstance(z, dict) else z[0]
-            # Zkontroluj jestli cílový název už existuje
             existujici = conn.execute(
                 "SELECT id FROM zbozi WHERE LOWER(nazev_canonical)=LOWER(%s) AND id!=%s",
                 (novy, zid)
             ).fetchone()
             if existujici:
-                # Slouč — přesměruj všechny položky na existující záznam
                 cil_id = existujici["id"] if isinstance(existujici, dict) else existujici[0]
                 conn.execute("UPDATE polozky SET zbozi_id=%s WHERE zbozi_id=%s", (cil_id, zid))
                 conn.execute("DELETE FROM zbozi WHERE id=%s", (zid,))
                 slouceno += 1
             else:
-                # Jen přejmenuj
                 conn.execute("UPDATE zbozi SET nazev_canonical=%s WHERE id=%s", (novy, zid))
                 prejmenovano += 1
+
+        # Krok 2: Slouč záznamy se stejným názvem (různé jednotky, různá velikost písmen)
+        # Najdi skupiny duplicit podle LOWER(nazev_canonical)
+        skupiny = conn.execute("""
+            SELECT LOWER(nazev_canonical) as nazev_low, COUNT(*) as pocet, MIN(id) as zachovat_id
+            FROM zbozi
+            GROUP BY LOWER(nazev_canonical)
+            HAVING COUNT(*) > 1
+        """).fetchall()
+        for sk in skupiny:
+            nazev_low = sk["nazev_low"] if isinstance(sk, dict) else sk[0]
+            zachovat_id = sk["zachovat_id"] if isinstance(sk, dict) else sk[2]
+            # Najdi všechny duplicity kromě toho co zachováme
+            duplikaty = conn.execute(
+                "SELECT id FROM zbozi WHERE LOWER(nazev_canonical)=%s AND id!=%s",
+                (nazev_low, zachovat_id)
+            ).fetchall()
+            for dup in duplikaty:
+                dup_id = dup["id"] if isinstance(dup, dict) else dup[0]
+                conn.execute("UPDATE polozky SET zbozi_id=%s WHERE zbozi_id=%s", (zachovat_id, dup_id))
+                conn.execute("DELETE FROM zbozi WHERE id=%s", (dup_id,))
+                slouceno += 1
+
     return jsonify({"ok": True, "prejmenovano": prejmenovano, "slouceno": slouceno})
 
 @app.route("/api/oprav-duplicity", methods=["POST"])
