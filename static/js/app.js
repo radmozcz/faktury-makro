@@ -2133,8 +2133,9 @@ function renderPolozkyTable() {
   };
   skupinyRows.sort(sortFn);
   bezSkupiny.sort(sortFn);
-  // Skupiny vždy nahoře, pak položky bez skupiny
+  // Skupiny a položky dohromady, seřazené stejně
   const allRows = [...skupinyRows, ...bezSkupiny];
+  allRows.sort(sortFn);
 
   const arrow = (c) => col === c ? (asc ? " ▲" : " ▼") : " ⇅";
   const th = (c, label) =>
@@ -2144,7 +2145,7 @@ function renderPolozkyTable() {
     if (r._skupina) {
       return `
         <tr class="zbozi-skupina" style="cursor:pointer" onclick="toggleSkupina('${escHtml(r.zbozi_nazev)}')">
-          <td><strong>📦 ${escHtml(r.zbozi_nazev)}</strong> <small style="color:var(--txt2)">(${r._pocet_polozek} položek)</small></td>
+          <td><strong>${escHtml(r.zbozi_nazev)}</strong></td>
           <td style="text-align:center">${r.pocet_nakupu}</td>
           <td>${Number(r.celkove_mnozstvi).toLocaleString("cs-CZ")}</td>
           <td>${r.jednotka}</td>
