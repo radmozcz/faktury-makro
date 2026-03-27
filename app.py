@@ -4528,13 +4528,12 @@ def api_polozky():
     od    = request.args.get("od", "")
     do_   = request.args.get("do", "")
 
-    f_cond = "AND f.firma_zkratka=?" if firma else ""
-    od_c   = "AND f.datum_vystaveni>=?" if od else ""
-    do_c   = "AND f.datum_vystaveni<=?" if do_ else ""
+    f_cond = "AND fakt.firma_zkratka=?" if firma else ""
+    od_c   = "AND fakt.datum_vystaveni>=?" if od else ""
+    do_c   = "AND fakt.datum_vystaveni<=?" if do_ else ""
     params = tuple(v for v in [firma, od, do_] if v)
 
-    with get_db() as conn:
-        rows = conn.execute(f"""
+    sql = """
             SELECT
                 COALESCE(z.nazev_canonical, p.nazev) AS zbozi_nazev,
                 z.id AS zbozi_id,
@@ -4543,15 +4542,19 @@ def api_polozky():
                 ROUND(CAST(SUM(p.celkem_s_dph) AS NUMERIC), 2)        AS celkem_utraceno,
                 ROUND(CAST(AVG(p.cena_za_jednotku_s_dph) AS NUMERIC), 4) AS prumerna_cena,
                 COUNT(DISTINCT p.faktura_id)        AS pocet_nakupu,
-                STRING_AGG(DISTINCT f.dodavatel, ', ')  AS dodavatele,
+                STRING_AGG(DISTINCT fakt.dodavatel, ', ')  AS dodavatele,
                 (SELECT a.alias FROM zbozi_aliasy a WHERE a.zbozi_id = z.id LIMIT 1) AS skupina
             FROM polozky p
-            JOIN faktury f ON f.id = p.faktura_id
+            JOIN faktury fakt ON fakt.id = p.faktura_id
             LEFT JOIN zbozi z ON z.id = p.zbozi_id
-            WHERE 1=1 {f_cond} {od_c} {do_c}
+            WHERE 1=1 """ + f_cond + " " + od_c + " " + do_c + """
             GROUP BY z.id, COALESCE(z.nazev_canonical, p.nazev), p.jednotka
             ORDER BY celkem_utraceno DESC
-        """, params).fetchall()
+        """
+    # Opravit f.firma_zkratka a f.datum_vystaveni na fakt.
+    sql = sql.replace("f.firma_zkratka", "fakt.firma_zkratka").replace("f.datum_vystaveni", "fakt.datum_vystaveni")
+    with get_db() as conn:
+        rows = conn.execute(sql, params).fetchall()
     return jsonify([dict(r) for r in rows])
 
 @app.route("/api/polozky/detail/<int:zbozi_id>")
@@ -4682,9 +4685,9 @@ def api_statistiky():
             SELECT COALESCE(z.nazev_canonical, p.nazev) zbozi, ROUND((SUM(p.celkem_s_dph))::numeric,2) castka,
                    ROUND((SUM(p.mnozstvi))::numeric,2) mnozstvi, MAX(p.jednotka) jednotka
             FROM polozky p
-            JOIN faktury f ON f.id=p.faktura_id
+            JOIN faktury fakt ON fakt.id=p.faktura_id
             LEFT JOIN zbozi z ON z.id=p.zbozi_id
-            WHERE f.datum_vystaveni>=? AND f.datum_vystaveni<=? {f_cond}
+            WHERE fakt.datum_vystaveni>=? AND fakt.datum_vystaveni<=? {f_cond}
             GROUP BY COALESCE(z.nazev_canonical, p.nazev) ORDER BY castka DESC LIMIT 20
         """, (od, do_) + f_params).fetchall()
 
@@ -4692,9 +4695,9 @@ def api_statistiky():
         cena_vyvoj = []
         if zbozi_id:
             cena_vyvoj = conn.execute(f"""
-                SELECT f.datum_vystaveni dat, ROUND(p.cena_za_jednotku_s_dph,4) cena, f.dodavatel
-                FROM polozky p JOIN faktury f ON f.id=p.faktura_id
-                WHERE p.zbozi_id=? AND f.datum_vystaveni>=? AND f.datum_vystaveni<=? {f_cond}
+                SELECT fakt.datum_vystaveni dat, ROUND(p.cena_za_jednotku_s_dph,4) cena, fakt.dodavatel
+                FROM polozky p JOIN faktury fakt ON fakt.id=p.faktura_id
+                WHERE p.zbozi_id=? AND fakt.datum_vystaveni>=? AND fakt.datum_vystaveni<=? {f_cond}
                 ORDER BY f.datum_vystaveni
             """, (zbozi_id, od, do_) + f_params).fetchall()
 
