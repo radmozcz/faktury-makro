@@ -4716,6 +4716,16 @@ def api_zbozi_list():
         rows = conn.execute("SELECT id, nazev_canonical FROM zbozi ORDER BY nazev_canonical").fetchall()
     return jsonify([dict(r) for r in rows])
 
+@app.route("/api/zbozi/aliasy-seznam")
+def api_zbozi_aliasy_seznam():
+    q = request.args.get("q", "").strip().lower()
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT alias FROM zbozi_aliasy WHERE LOWER(alias) LIKE %s ORDER BY alias LIMIT 10",
+            (f"%{q}%",)
+        ).fetchall()
+    return jsonify([r["alias"] if isinstance(r, dict) else r[0] for r in rows])
+
 @app.route("/api/zbozi/alias", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_zbozi_alias():
