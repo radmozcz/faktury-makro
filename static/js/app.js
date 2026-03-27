@@ -2137,33 +2137,20 @@ function renderPolozkyTable() {
   const allRows = [...skupinyRows, ...bezSkupiny];
   allRows.sort(sortFn);
 
-  const arrow = (c) => col === c ? (asc ? " ▲" : " ▼") : " ⇅";
-  const th = (c, label) =>
-    `<th style="cursor:pointer;user-select:none" onclick="sortPolozky('${c}')">${label}${arrow(c)}</th>`;
-
   const renderRow = (r, indent) => {
-    if (r._skupina) {
-      return `
-        <tr class="zbozi-skupina" style="cursor:pointer" onclick="toggleSkupina('${escHtml(r.zbozi_nazev)}')">
-          <td><strong>${escHtml(r.zbozi_nazev)}</strong></td>
-          <td style="text-align:center">${r.pocet_nakupu}</td>
-          <td>${Number(r.celkove_mnozstvi).toLocaleString("cs-CZ")}</td>
-          <td>${r.jednotka}</td>
-          <td>${czMoney(r.prumerna_cena)}</td>
-          <td><strong>${czMoney(r.celkem_utraceno)}</strong></td>
-          <td style="font-size:.82rem;color:var(--txt2)">${escHtml(r.dodavatele||"")}</td>
-        </tr>
-        ${r._items.map(item => `
-        <tr class="zbozi-row zbozi-child-${escHtml(r.zbozi_nazev).replace(/\s+/g,'_')}" data-id="${item.zbozi_id||""}" data-nazev="${escHtml(item.zbozi_nazev)}" style="display:none">
-          <td style="padding-left:2rem;color:var(--txt2)">↳ ${escHtml(item.zbozi_nazev)}</td>
-          <td style="text-align:center">${item.pocet_nakupu}</td>
-          <td>${Number(item.celkove_mnozstvi).toLocaleString("cs-CZ")}</td>
-          <td>${item.jednotka}</td>
-          <td>${czMoney(item.prumerna_cena)}</td>
-          <td>${czMoney(item.celkem_utraceno)}</td>
-          <td style="font-size:.82rem;color:var(--txt2)">${escHtml(item.dodavatele||"")}</td>
-        </tr>`).join("")}`;
-    }
+      if (r._skupina) {
+        const firstItem = r._items[0];
+        return `
+          <tr class="zbozi-skupina" style="cursor:pointer" onclick="openZboziDetail(${firstItem.zbozi_id||'null'}, '${escHtml(r.zbozi_nazev)}')">
+            <td><strong>${escHtml(r.zbozi_nazev)}</strong></td>
+            <td style="text-align:center">${r.pocet_nakupu}</td>
+            <td>${Number(r.celkove_mnozstvi).toLocaleString("cs-CZ")}</td>
+            <td>${r.jednotka}</td>
+            <td>${czMoney(r.prumerna_cena)}</td>
+            <td><strong>${czMoney(r.celkem_utraceno)}</strong></td>
+            <td style="font-size:.82rem;color:var(--txt2)">${escHtml(r.dodavatele||"")}</td>
+          </tr>`;
+      }
     return `
       <tr class="zbozi-row" data-id="${r.zbozi_id||""}" data-nazev="${escHtml(r.zbozi_nazev)}">
         <td><strong>${escHtml(r.zbozi_nazev)}</strong></td>
