@@ -2214,7 +2214,7 @@ async function openZboziDetail(zbozi_id, nazev) {
   const body = `
     <h4 style="margin-bottom:.5rem">${escHtml(data.zbozi.nazev_canonical)}</h4>
     <div class="alias-list" id="aliasContainer">
-      ${data.aliasy.map(a => `<span class="alias-tag">${escHtml(a)}</span>`).join("")}
+      ${data.aliasy.map(a => `<span class="alias-tag">${escHtml(a)} <span style="cursor:pointer;margin-left:.3rem;color:#999" onclick="smazatAlias(${zbozi_id},'${escHtml(a)}',this)">✕</span></span>`).join("")}
     </div>
     <div style="margin-top:1rem; display:flex; gap:.5rem; flex-wrap:wrap;">
       <div style="position:relative;max-width:250px">
@@ -2269,6 +2269,12 @@ async function naseptavacAlias(input) {
       box.style.display = "";
     } catch { box.style.display = "none"; }
   }, 200);
+}
+
+async function smazatAlias(zbozi_id, alias, el) {
+  await api(`/api/zbozi/alias/${zbozi_id}/${encodeURIComponent(alias)}`, {method:"DELETE"});
+  el.closest(".alias-tag").remove();
+  toast("Alias smazán ✓");
 }
 
 async function addAlias(zbozi_id) {
