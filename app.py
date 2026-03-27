@@ -2287,7 +2287,7 @@ def api_me():
 def api_login():
     data = request.json or {}
     heslo = data.get("heslo", "")
-    spravne_heslo = os.environ.get("APP_HESLO", "admin")
+    spravne_heslo = os.environ.get("APP_HESLO") or os.environ.get("PASSWORD_ADMIN", "admin")
     if heslo == spravne_heslo:
         token = secrets.token_hex(32)
         _sessions[token] = {"jmeno": "Admin", "role": "admin"}
