@@ -2143,7 +2143,7 @@ function renderPolozkyTable() {
   const renderRow = (r, indent) => {
     if (r._skupina) {
       return `
-        <tr class="zbozi-skupina" style="background:var(--green-pale);cursor:pointer" onclick="toggleSkupina('${escHtml(r.zbozi_nazev)}')">
+        <tr class="zbozi-skupina" style="cursor:pointer" onclick="toggleSkupina('${escHtml(r.zbozi_nazev)}')">
           <td><strong>📦 ${escHtml(r.zbozi_nazev)}</strong> <small style="color:var(--txt2)">(${r._pocet_polozek} položek)</small></td>
           <td style="text-align:center">${r.pocet_nakupu}</td>
           <td>${Number(r.celkove_mnozstvi).toLocaleString("cs-CZ")}</td>
