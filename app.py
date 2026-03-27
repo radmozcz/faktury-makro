@@ -4740,9 +4740,6 @@ def api_zbozi_alias():
             INSERT INTO zbozi_aliasy (zbozi_id, alias) VALUES (%s,%s)
             ON CONFLICT (alias) DO UPDATE SET zbozi_id=%s
         """, (zbozi_id, alias_text, zbozi_id))
-        conn.execute("UPDATE polozky SET zbozi_id=%s WHERE LOWER(nazev)=LOWER(%s)", (zbozi_id, alias_text))
-        if polozka_id:
-            conn.execute("UPDATE polozky SET zbozi_id=%s WHERE id=%s", (zbozi_id, polozka_id))
     return jsonify({"ok": True})
 
 @app.route("/api/zbozi", methods=["POST"])
