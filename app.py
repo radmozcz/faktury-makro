@@ -4744,10 +4744,13 @@ def api_zbozi_alias():
     if not zbozi_id or not alias_text:
         return jsonify({"error": "Chybí zbozi_id nebo alias"}), 400
     with get_db() as conn:
-        conn.execute("""
-            INSERT INTO zbozi_aliasy (zbozi_id, alias) VALUES (%s,%s)
-            ON CONFLICT (alias) DO UPDATE SET zbozi_id=%s
-        """, (zbozi_id, alias_text, zbozi_id))
+        # Smaž starý alias pro toto zboží
+        conn.execute("DELETE FROM zbozi_aliasy WHERE zbozi_id=%s", (zbozi_id,))
+        # Vlož nový alias (bez ON CONFLICT — více zboží může mít stejný alias)
+        conn.execute(
+            "INSERT INTO zbozi_aliasy (zbozi_id, alias) VALUES (%s,%s)",
+            (zbozi_id, alias_text)
+        )
     return jsonify({"ok": True})
 
 @app.route("/api/zbozi", methods=["POST"])
