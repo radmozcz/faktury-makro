@@ -1620,7 +1620,12 @@ def index():
     return render_template("index.html", config=load_config())
 
 
-
+@app.route("/api/admin/fix-firmy", methods=["POST"])
+def api_fix_firmy():
+    with get_db() as conn:
+        cur = conn.execute("UPDATE reporty SET firma_zkratka='FP' WHERE firma_zkratka IS NULL OR firma_zkratka=''")
+        updated = cur.rowcount
+    return jsonify({"ok": True, "updated": updated})
 @app.route("/api/config", methods=["GET", "POST"])
 @vyzaduj_prihlaseni
 def api_config():
