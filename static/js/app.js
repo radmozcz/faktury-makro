@@ -2211,24 +2211,30 @@ async function openZboziDetail(zbozi_id, nazev) {
   let data;
   try { data = await api(`/api/polozky/detail/${zbozi_id}`); } catch { return; }
 
+  const renderAliasy = (aliasy) => aliasy.map(a =>
+    `<span class="alias-tag" style="display:inline-flex;align-items:center;gap:.3rem;background:var(--green-pale);border-radius:99px;padding:.2rem .6rem .2rem .8rem;margin:.2rem;font-size:.85rem">
+       ${escHtml(a)}
+       <button onclick="smazatAlias(${zbozi_id}, '${escHtml(a)}', this)"
+         style="background:none;border:none;cursor:pointer;color:#999;font-size:.8rem;line-height:1;padding:0 .1rem"
+         title="Smazat alias">✕</button>
+     </span>`
+  ).join("");
+
   const body = `
     <h4 style="margin-bottom:.5rem">${escHtml(data.zbozi.nazev_canonical)}</h4>
-    <div class="alias-list" id="aliasContainer">
-      ${data.aliasy.map(a => `<span class="alias-tag">${escHtml(a)} <span style="cursor:pointer;margin-left:.3rem;color:#999" onclick="smazatAlias(${zbozi_id},'${escHtml(a)}',this)">✕</span></span>`).join("")}
+    <div style="margin-bottom:.5rem;font-size:.82rem;color:var(--txt2)">Aliasy (skupinové štítky):</div>
+    <div class="alias-list" id="aliasContainer" style="min-height:2rem">
+      ${data.aliasy.length ? renderAliasy(data.aliasy) : '<span style="color:var(--txt2);font-size:.85rem">Žádné aliasy</span>'}
     </div>
     <div style="margin-top:1rem; display:flex; gap:.5rem; flex-wrap:wrap;">
-      <div style="position:relative;max-width:250px">
-        <input id="newAlias" class="form-control" placeholder="Nový alias (alternativní název)"
-          oninput="naseptavacAlias(this)" autocomplete="off">
-        <div id="naseptavacAliasBox" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--card-bg,#fff);border:1px solid var(--border);border-radius:6px;z-index:200;max-height:160px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1)"></div>
-      </div>
+      <input id="newAlias" class="form-control" style="max-width:250px" placeholder="Nový alias (skupinový štítek)">
       <button class="btn btn-secondary btn-sm" onclick="addAlias(${zbozi_id})">+ Přidat alias</button>
     </div>
     <hr style="margin:1rem 0; border-color:var(--border)">
     <h4 style="font-family:var(--font-head);margin-bottom:.7rem">Historie nákupů</h4>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Datum</th><th>Dodavatel</th><th>Firma</th><th>Množství</th><th>Cena/jedn.</th><th>Celkem</th><th></th></tr></thead>
+        <thead><tr><th>Datum</th><th>Dodavatel</th><th>Firma</th><th>Množství</th><th>Cena/jedn.</th><th>Celkem</th></tr></thead>
         <tbody>
           ${data.nakupy.map(n => `
             <tr>
@@ -2238,11 +2244,7 @@ async function openZboziDetail(zbozi_id, nazev) {
               <td>${Number(n.mnozstvi).toLocaleString("cs-CZ")} ${n.jednotka}</td>
               <td>${czMoney(n.cena_za_jednotku_s_dph)}</td>
               <td><strong>${czMoney(n.celkem_s_dph)}</strong></td>
-              <td style="white-space:nowrap">
-                ${n.soubor_url ? `<a href="${n.soubor_url}" target="_blank" class="btn btn-secondary btn-sm" title="Zobrazit originál">📎</a>` : ""}
-                <button class="btn btn-secondary btn-sm" onclick="closeModal();navigujNaFakturu(${n.faktura_id})" title="Přejít na fakturu">🧾</button>
-              </td>
-            </tr>`).join("") || "<tr><td colspan='7' style='text-align:center;color:var(--txt2)'>Žádné nákupy</td></tr>"}
+            </tr>`).join("") || "<tr><td colspan='6' style='text-align:center;color:var(--txt2)'>Žádné nákupy</td></tr>"}
         </tbody>
       </table>
     </div>`;
@@ -2272,9 +2274,19 @@ async function naseptavacAlias(input) {
 }
 
 async function smazatAlias(zbozi_id, alias, el) {
-  await api(`/api/zbozi/alias/${zbozi_id}/${encodeURIComponent(alias)}`, {method:"DELETE"});
-  el.closest(".alias-tag").remove();
-  toast("Alias smazán ✓");
+  try {
+    await api(`/api/zbozi/alias/${zbozi_id}/${encodeURIComponent(alias)}`, {method:"DELETE"});
+    const tag = el.closest(".alias-tag");
+    if (tag) tag.remove();
+    const container = document.getElementById("aliasContainer");
+    if (container && !container.querySelector(".alias-tag")) {
+      container.innerHTML = '<span style="color:var(--txt2);font-size:.85rem">Žádné aliasy</span>';
+    }
+    toast("Alias smazán ✓");
+    loadPolozky();
+  } catch(e) {
+    toast("Chyba při mazání aliasu", true);
+  }
 }
 
 async function addAlias(zbozi_id) {
@@ -2284,10 +2296,17 @@ async function addAlias(zbozi_id) {
     method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({ zbozi_id, alias })
   });
-  toast("Alias přidán");
-  const el = document.getElementById("aliasContainer");
-  el.innerHTML += `<span class="alias-tag">${escHtml(alias)}</span>`;
+  toast("Alias přidán ✓");
+  const container = document.getElementById("aliasContainer");
+  const prazdny = container.querySelector("span:not(.alias-tag)");
+  if (prazdny) prazdny.remove();
+  const span = document.createElement("span");
+  span.className = "alias-tag";
+  span.style.cssText = "display:inline-flex;align-items:center;gap:.3rem;background:var(--green-pale);border-radius:99px;padding:.2rem .6rem .2rem .8rem;margin:.2rem;font-size:.85rem";
+  span.innerHTML = `${escHtml(alias)} <button onclick="smazatAlias(${zbozi_id}, '${escHtml(alias)}', this)" style="background:none;border:none;cursor:pointer;color:#999;font-size:.8rem;line-height:1;padding:0 .1rem" title="Smazat alias">✕</button>`;
+  container.appendChild(span);
   document.getElementById("newAlias").value = "";
+  loadPolozky();
 }
 
 function exportPolozky(fmt) {
