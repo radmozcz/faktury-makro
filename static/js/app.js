@@ -5849,9 +5849,9 @@ async function loadVystavene() {
     if (f.stav === "zaplaceno") zapl += f.castka; else nezapl += f.castka;
   });
   const p = document.getElementById("vyst-pocet");  if (p) p.textContent = data.length;
-  const c = document.getElementById("vyst-celkem"); if (c) c.textContent = czMoneyFull(celkem) + " Kč";
-  const n = document.getElementById("vyst-nezapl"); if (n) n.textContent = czMoneyFull(nezapl) + " Kč";
-  const z = document.getElementById("vyst-zapl");   if (z) z.textContent = czMoneyFull(zapl) + " Kč";
+  const c = document.getElementById("vyst-celkem"); if (c) c.textContent = czMoneyFull(celkem);
+  const n = document.getElementById("vyst-nezapl"); if (n) n.textContent = czMoneyFull(nezapl);
+  const z = document.getElementById("vyst-zapl");   if (z) z.textContent = czMoneyFull(zapl);
 
   if (!data.length) { el.innerHTML = "<p style='padding:1rem;color:var(--text-muted)'>Žádné vystavené faktury.</p>"; return; }
 
