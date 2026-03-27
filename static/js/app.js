@@ -2216,7 +2216,11 @@ async function openZboziDetail(zbozi_id, nazev) {
       ${data.aliasy.map(a => `<span class="alias-tag">${escHtml(a)}</span>`).join("")}
     </div>
     <div style="margin-top:1rem; display:flex; gap:.5rem; flex-wrap:wrap;">
-      <input id="newAlias" class="form-control" style="max-width:250px" placeholder="Nový alias (alternativní název)">
+      <div style="position:relative;max-width:250px">
+        <input id="newAlias" class="form-control" placeholder="Nový alias (alternativní název)"
+          oninput="naseptavacAlias(this)" autocomplete="off">
+        <div id="naseptavacAliasBox" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--card-bg,#fff);border:1px solid var(--border);border-radius:6px;z-index:200;max-height:160px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1)"></div>
+      </div>
       <button class="btn btn-secondary btn-sm" onclick="addAlias(${zbozi_id})">+ Přidat alias</button>
     </div>
     <hr style="margin:1rem 0; border-color:var(--border)">
@@ -2243,6 +2247,27 @@ async function openZboziDetail(zbozi_id, nazev) {
     </div>`;
 
   openModal(`Detail zboží: ${escHtml(nazev)}`, body);
+}
+
+let _aliasNasTimer = null;
+async function naseptavacAlias(input) {
+  clearTimeout(_aliasNasTimer);
+  const box = document.getElementById("naseptavacAliasBox");
+  const q = input.value.trim();
+  if (!box) return;
+  if (q.length < 1) { box.style.display = "none"; return; }
+  _aliasNasTimer = setTimeout(async () => {
+    try {
+      const data = await api("/api/zbozi/aliasy-seznam?q=" + encodeURIComponent(q));
+      if (!data.length) { box.style.display = "none"; return; }
+      box.innerHTML = data.map(a =>
+        `<div style="padding:.4rem .7rem;cursor:pointer;font-size:.85rem;border-bottom:0.5px solid var(--border)"
+          onmousedown="document.getElementById('newAlias').value='${escHtml(a)}';document.getElementById('naseptavacAliasBox').style.display='none'"
+          >${escHtml(a)}</div>`
+      ).join("");
+      box.style.display = "";
+    } catch { box.style.display = "none"; }
+  }, 200);
 }
 
 async function addAlias(zbozi_id) {
