@@ -656,6 +656,13 @@ def migrate_db():
         try: conn.execute("UPDATE reporty SET firma_zkratka='FP' WHERE firma_zkratka IS NULL OR firma_zkratka=''")
         except Exception: pass
     print("migrate_db OK")
+    # Zrušit UNIQUE constraint na alias v zbozi_aliasy (více zboží může mít stejný alias)
+    if _USE_PG:
+        try:
+            with get_db() as conn:
+                conn.execute("ALTER TABLE zbozi_aliasy DROP CONSTRAINT IF EXISTS zbozi_aliasy_alias_key")
+        except Exception:
+            pass
 
     # Peněženka — hotovostní záznamy
     with get_db() as conn:
