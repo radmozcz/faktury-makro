@@ -4640,13 +4640,13 @@ def api_polozky():
                 ROUND(CAST(AVG(p.cena_za_jednotku_s_dph) AS NUMERIC), 4) AS prumerna_cena,
                 COUNT(DISTINCT p.faktura_id)                              AS pocet_nakupu,
                 STRING_AGG(DISTINCT fakt.dodavatel, ', ')                 AS dodavatele,
-                NULL AS skupina
+                al.alias AS skupina
             FROM polozky p
             JOIN faktury fakt ON fakt.id = p.faktura_id
             LEFT JOIN zbozi z ON z.id = p.zbozi_id
             LEFT JOIN zbozi_aliasy al ON al.zbozi_id = z.id
             WHERE 1=1 {f_cond} {od_c} {do_c}
-            GROUP BY COALESCE(al.alias, z.nazev_canonical, p.nazev)
+            GROUP BY COALESCE(al.alias, z.nazev_canonical, p.nazev), al.alias
             ORDER BY celkem_utraceno DESC
         """, params).fetchall()
     return jsonify([dict(r) for r in rows])
