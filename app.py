@@ -4633,20 +4633,23 @@ def api_polozky():
     with get_db() as conn:
         rows = conn.execute(f"""
             SELECT
-                COALESCE(al.alias, z.nazev_canonical, p.nazev) AS zbozi_nazev,
-                MIN(z.id) AS zbozi_id,
+                COALESCE(
+                    (SELECT a.alias FROM zbozi_aliasy a WHERE a.zbozi_id = z.id ORDER BY a.id LIMIT 1),
+                    z.nazev_canonical,
+                    p.nazev
+                ) AS zbozi_nazev,
+                z.id AS zbozi_id,
                 ROUND(CAST(SUM(p.mnozstvi) AS NUMERIC), 3)               AS celkove_mnozstvi,
                 ROUND(CAST(SUM(p.celkem_s_dph) AS NUMERIC), 2)           AS celkem_utraceno,
                 ROUND(CAST(AVG(p.cena_za_jednotku_s_dph) AS NUMERIC), 4) AS prumerna_cena,
                 COUNT(DISTINCT p.faktura_id)                              AS pocet_nakupu,
                 STRING_AGG(DISTINCT fakt.dodavatel, ', ')                 AS dodavatele,
-                NULL AS skupina
+                (SELECT a.alias FROM zbozi_aliasy a WHERE a.zbozi_id = z.id ORDER BY a.id LIMIT 1) AS skupina
             FROM polozky p
             JOIN faktury fakt ON fakt.id = p.faktura_id
             LEFT JOIN zbozi z ON z.id = p.zbozi_id
-            LEFT JOIN zbozi_aliasy al ON al.zbozi_id = z.id
             WHERE 1=1 {f_cond} {od_c} {do_c}
-            GROUP BY COALESCE(al.alias, z.nazev_canonical, p.nazev)
+            GROUP BY z.id, z.nazev_canonical, p.nazev
             ORDER BY celkem_utraceno DESC
         """, params).fetchall()
     return jsonify([dict(r) for r in rows])
