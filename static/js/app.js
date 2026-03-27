@@ -4837,8 +4837,9 @@ function setupReportDropzone() {
     // Pokud uživatel upravuje ruční záložku, NENAHRAZUJ data novým OCR
     const rucniPanel = document.getElementById("rtabPanelRucni");
     if (rucniPanel && rucniPanel.style.display !== "none") return;
+    // Foto panel — při editaci existujícího reportu nemusí existovat, pak paste povolíme
     const fotaPanel = document.getElementById("rtabPanelFoto");
-    if (!fotaPanel || fotaPanel.style.display === "none") return;
+    if (fotaPanel && fotaPanel.style.display === "none") return;
     const items = (e.clipboardData || e.originalEvent.clipboardData).items;
     for (const item of items) {
       if (item.type.startsWith("image/")) {
