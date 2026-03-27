@@ -4737,12 +4737,12 @@ def api_zbozi_alias():
         return jsonify({"error": "Chybí zbozi_id nebo alias"}), 400
     with get_db() as conn:
         try:
-            conn.execute("INSERT INTO zbozi_aliasy (zbozi_id, alias) VALUES (?,?)", (zbozi_id, alias_text))
+            conn.execute("INSERT INTO zbozi_aliasy (zbozi_id, alias) VALUES (%s,%s)", (zbozi_id, alias_text))
         except Exception:
-            conn.execute("UPDATE zbozi_aliasy SET zbozi_id=? WHERE alias=?", (zbozi_id, alias_text))
-        conn.execute("UPDATE polozky SET zbozi_id=? WHERE nazev=?", (zbozi_id, alias_text))
+            conn.execute("UPDATE zbozi_aliasy SET zbozi_id=%s WHERE alias=%s", (zbozi_id, alias_text))
+        conn.execute("UPDATE polozky SET zbozi_id=%s WHERE nazev=%s", (zbozi_id, alias_text))
         if polozka_id:
-            conn.execute("UPDATE polozky SET zbozi_id=? WHERE id=?", (zbozi_id, polozka_id))
+            conn.execute("UPDATE polozky SET zbozi_id=%s WHERE id=%s", (zbozi_id, polozka_id))
     return jsonify({"ok": True})
 
 @app.route("/api/zbozi", methods=["POST"])
