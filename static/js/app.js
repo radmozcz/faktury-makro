@@ -15,6 +15,7 @@ const App = {
   role: null,               // přihlášená role: "admin" | "verunka" | "ucetni"
   jmeno: null,              // zobrazované jméno
   prava: {},                // matice oprávnění
+  history: [],              // navigační historie
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -127,6 +128,7 @@ function skryjNepovoleneMenu() {
     "polozky":    "faktury_zobrazit",
     "vyplaty":    "vyplaty_zobrazit",
     "reporty":    "reporty_zobrazit",
+    "penezenka":  "reporty_zobrazit",
     "statistiky": "statistiky",
     "nastaveni":  "nastaveni",
     "banky":      "bankovni_vypisy",
@@ -171,7 +173,14 @@ function setupNav() {
 }
 
 function navigateTo(page) {
+  if (App.currentPage && App.currentPage !== page) {
+    App.history.push(App.currentPage);
+    if (App.history.length > 20) App.history.shift();
+  }
   App.currentPage = page;
+  // Zobraz/skryj tlačítko zpět
+  const btn = document.getElementById("backBtnWrap");
+  if (btn) btn.style.display = App.history.length > 0 ? "block" : "none";
   document.querySelectorAll(".nav-item").forEach(a => {
     a.classList.toggle("active", a.dataset.page === page);
   });
@@ -183,6 +192,7 @@ function navigateTo(page) {
     polozky:    renderPolozky,
     vyplaty:    renderVyplaty,
     reporty:    renderReporty,
+    penezenka:  renderPenezenka,
     statistiky: renderStatistiky,
     kalkulace:  renderKalkulace,
     "ai-asistent": renderAiAsistent,
@@ -191,6 +201,8 @@ function navigateTo(page) {
     vydaje:          renderVydaje,
     soukrome_vydaje: () => renderVydaje("soukrome"),
     vystavene:       renderVystavene,
+    radek:           renderRadek,
+    dokumenty:       renderDokumenty,
   };
   if (pages[page]) pages[page]();
 }
@@ -198,6 +210,37 @@ function navigateTo(page) {
 // ═══════════════════════════════════════════════════════════════
 //  Téma
 // ═══════════════════════════════════════════════════════════════
+function goBack() {
+  if (App.history.length === 0) return;
+  const prev = App.history.pop();
+  App.currentPage = prev;
+  document.querySelectorAll(".nav-item").forEach(a => {
+    a.classList.toggle("active", a.dataset.page === prev);
+  });
+  const btn = document.getElementById("backBtnWrap");
+  if (btn) btn.style.display = App.history.length > 0 ? "block" : "none";
+  const pages = {
+    dashboard:  renderDashboard,
+    faktury:    renderFaktury,
+    nahrat:     renderNahrat,
+    polozky:    renderPolozky,
+    vyplaty:    renderVyplaty,
+    reporty:    renderReporty,
+    penezenka:  renderPenezenka,
+    statistiky: renderStatistiky,
+    kalkulace:  renderKalkulace,
+    "ai-asistent": renderAiAsistent,
+    nastaveni:  renderNastaveni,
+    banky:      renderBanky,
+    vydaje:          renderVydaje,
+    soukrome_vydaje: () => renderVydaje("soukrome"),
+    vystavene:       renderVystavene,
+    radek:           renderRadek,
+    dokumenty:       renderDokumenty,
+  };
+  if (pages[prev]) pages[prev]();
+}
+
 function loadTheme() {
   const t = localStorage.getItem("theme") || "light";
   document.documentElement.setAttribute("data-theme", t);
@@ -319,7 +362,8 @@ function czInt(v) {
 }
 function czDate(s) {
   if (!s) return "—";
-  const d = new Date(s);
+  // Přidat čas aby se předešlo posunu při UTC→lokální konverzi
+  const d = new Date(s.length === 10 ? s + "T12:00:00" : s);
   if (isNaN(d)) return s;
   return d.toLocaleDateString("cs-CZ");
 }
@@ -635,6 +679,19 @@ function _renderNastenkaBoxiky(c) {
     fps.pocet > 0 ? "navigateTo('faktury')" : null
   ));
 
+  // 3b. Faktury blížící se splatnosti (do 7 dní)
+  const fb = c.faktury_blizi_splatnost || {pocet:0, castka:0, stav:"ok"};
+  const fbSub = fb.pocet === 0 ? "Žádné" : fb.items && fb.items.length
+    ? fb.items.map(f => `${f.dodavatel} – ${f.datum_splatnosti}`).join(", ")
+    : czMoney(fb.castka);
+  boxiky.push(_nastenkaBoxik(
+    "Splatnost do 7 dní",
+    fb.stav,
+    fb.pocet === 0 ? "Vše OK" : `${fb.pocet} faktur`,
+    fbSub,
+    fb.pocet > 0 ? "navigateTo('faktury')" : null
+  ));
+
   // 4. Vystavené po splatnosti (nám nezaplatili)
   const fv = c.vystavene_po_splatnosti;
   boxiky.push(_nastenkaBoxik(
@@ -834,6 +891,8 @@ async function loadFaktury() {
     cislo_faktury:   (a,b) => (a.cislo_faktury||"").localeCompare(b.cislo_faktury||""),
     datum_vystaveni: (a,b) => (a.datum_vystaveni||"").localeCompare(b.datum_vystaveni||""),
     celkem_s_dph:    (a,b) => (a.celkem_s_dph||0) - (b.celkem_s_dph||0),
+    dodavatel:       (a,b) => (a.dodavatel||"").localeCompare(b.dodavatel||""),
+    firma_zkratka:   (a,b) => (a.firma_zkratka||"").localeCompare(b.firma_zkratka||""),
   };
   if (sortFns[_faktSort.col]) {
     data.faktury.sort((a,b) => {
@@ -2581,7 +2640,7 @@ function vyplataFormHtml(v = {}) {
         <input id="vJmenoF" class="form-control" value="${escHtml(v.jmeno||"")}" placeholder="Jméno zaměstnance">
       </div>
       <div class="form-group"><label class="form-label">Datum *</label>
-        <input type="date" id="vDatumF" class="form-control" value="${v.datum||new Date().toISOString().split("T")[0]}">
+        <input type="date" id="vDatumF" class="form-control" value="${v.datum||(()=>{const _x=new Date();return `${_x.getFullYear()}-${String(_x.getMonth()+1).padStart(2,"0")}-${String(_x.getDate()).padStart(2,"0")}`;})() }">
       </div>
       <div class="form-group"><label class="form-label">Částka (Kč) *</label>
         <input type="number" step="0.01" id="vCastkaF" class="form-control" value="${v.castka||""}">
@@ -3418,7 +3477,7 @@ async function renderStatistiky() {
   const rokAkt = new Date().getFullYear();
   const od = new Date(); od.setFullYear(od.getFullYear()-1);
   const odStr = od.toISOString().split("T")[0];
-  const doStr = new Date().toISOString().split("T")[0];
+  const doStr = (()=>{const _x=new Date();return `${_x.getFullYear()}-${String(_x.getMonth()+1).padStart(2,"0")}-${String(_x.getDate()).padStart(2,"0")}`;})() ;
 
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header"><h1 class="page-title">Statistiky</h1></div>
@@ -4219,10 +4278,17 @@ function _kartaSouhrn(stats) {
   const sumKartyR = firmy.reduce((s,f) => s+(stats[f].rocni||0), 0);
   const sumHotR   = firmy.reduce((s,f) => s+(stats[f].hot_rok||0), 0);
   const sumTrzbaR = firmy.reduce((s,f) => s+(stats[f].trzba_rok||0), 0);
-  const r = (lbl,m,ro) => `<div style="display:flex;justify-content:space-between;font-size:.82rem;padding:.2rem 0;border-bottom:1px solid var(--border)"><span style="color:var(--txt2)">${lbl}</span><span><strong>${czInt(m)}</strong> <span style="color:var(--txt2);font-size:.75rem">/ ${czInt(ro)}</span></span></div>`;
-  return `<div style="background:#ffffff;border:1px solid var(--border);border-radius:10px;padding:.85rem">
-    <div style="font-weight:700;font-size:.95rem;margin-bottom:.4rem">Celkem</div>
-    <div style="display:flex;justify-content:flex-end;font-size:.68rem;color:var(--txt2);margin-bottom:.15rem">měsíc / rok</div>
+  const r = (lbl, m, ro) => `
+    <div style="padding:.5rem 0;border-bottom:1px solid var(--border)">
+      <div style="font-size:.8rem;color:var(--txt2);margin-bottom:.2rem">${lbl}</div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <strong style="font-size:1.15rem">${czInt(m)}</strong>
+        <span style="font-size:.85rem;color:var(--txt2)">/ ${czInt(ro)}</span>
+      </div>
+    </div>`;
+  return `<div style="background:#ffffff;border:1px solid var(--border);border-radius:10px;padding:1rem 1.1rem">
+    <div style="font-weight:700;font-size:1rem;margin-bottom:.3rem">Celkem</div>
+    <div style="display:flex;justify-content:flex-end;font-size:.72rem;color:var(--txt2);margin-bottom:.1rem">měsíc / rok</div>
     ${r('💳 Karty', sumKartyM, sumKartyR)}
     ${r('💵 Hotovost', sumHotM, sumHotR)}
     ${r('📈 Tržba', sumTrzbaM, sumTrzbaR)}
@@ -4531,7 +4597,7 @@ function renderReportyTable(rows) {
 
 // ── Formulář reportu ────────────────────────────────────────────
 function reportFormHtml(r = {}) {
-  const dnes = r.datum || new Date().toISOString().split("T")[0];
+  const dnes = r.datum || (()=>{const _x=new Date();return `${_x.getFullYear()}-${String(_x.getMonth()+1).padStart(2,"0")}-${String(_x.getDate()).padStart(2,"0")}`;})() ;
   return `
     <div class="form-group" style="margin-bottom:.8rem">
       <label class="form-label">Firma</label>
@@ -4610,7 +4676,7 @@ function reportFormHtml(r = {}) {
           <input type="number" id="rfVydaje" class="form-control" value="${r.vydaje||0}" oninput="rfRecalc()">
         </div>
       </div>
-      <div class="grid-2" style="gap:.8rem;margin-top:.5rem">
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.8rem;margin-top:.5rem">
         <div class="form-group">
           <label class="form-label">🎟 PK 50 Kč (kusů)</label>
           <input type="number" id="rfPk50" class="form-control" value="${r.pk50_ks||0}" oninput="rfRecalc()">
@@ -4618,6 +4684,10 @@ function reportFormHtml(r = {}) {
         <div class="form-group">
           <label class="form-label">🎟 PK 100 Kč (kusů)</label>
           <input type="number" id="rfPk100" class="form-control" value="${r.pk100_ks||0}" oninput="rfRecalc()">
+        </div>
+        <div class="form-group">
+          <label class="form-label">🎟 PK Celkem (Kč)</label>
+          <div id="rfPkCelkemDisp" style="padding:.5rem .75rem;background:var(--green-pale);border-radius:6px;font-weight:600;font-size:.95rem;min-height:2.2rem;display:flex;align-items:center">${czMoney((r.pk50_ks||0)*50+(r.pk100_ks||0)*100)} Kč</div>
         </div>
       </div>
       <div id="rfVypocty" style="background:var(--green-pale);border-radius:8px;padding:.6rem 1rem;margin:.8rem 0;font-size:.9rem">
@@ -4680,6 +4750,7 @@ function rfRecalc() {
   if (el("rfHotovostDisp"))  el("rfHotovostDisp").textContent  = "Hotovost: " + czMoney(hotovost);
   if (el("rfTrzbaDisp"))     el("rfTrzbaDisp").textContent     = "Tržba: " + czMoney(trzba);
   if (el("rfPkDisp"))        el("rfPkDisp").textContent        = "PK: " + czMoney(pkKc);
+  if (el("rfPkCelkemDisp"))  el("rfPkCelkemDisp").textContent  = czMoney(pkKc) + " Kč";
   if (el("rfTrzbaVcPkDisp")) el("rfTrzbaVcPkDisp").textContent = "Tržba vč. PK: " + czMoney(trzbaVcPk);
 }
 
@@ -4759,6 +4830,9 @@ function setupReportDropzone() {
   document.addEventListener("paste", function reportPasteHandler(e) {
     const modal = document.getElementById("modalOverlay");
     if (!modal || modal.style.display === "none") return;
+    // Pokud uživatel upravuje ruční záložku, NENAHRAZUJ data novým OCR
+    const rucniPanel = document.getElementById("rtabPanelRucni");
+    if (rucniPanel && rucniPanel.style.display !== "none") return;
     const fotaPanel = document.getElementById("rtabPanelFoto");
     if (!fotaPanel || fotaPanel.style.display === "none") return;
     const items = (e.clipboardData || e.originalEvent.clipboardData).items;
@@ -6107,7 +6181,7 @@ async function saveVystavena(editId = null) {
   closeModal(); loadVystavene();
 }
 
-async function toggleVystStav(id, stavNyni) {
+async function toggleVystStav(id,  stavNyni) {
   const novy = stavNyni === "zaplaceno" ? "nezaplaceno" : "zaplaceno";
   await api(`/api/vystavene-faktury/${id}/stav`, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({stav: novy})});
   loadVystavene();
@@ -6116,6 +6190,904 @@ async function toggleVystStav(id, stavNyni) {
 async function smazatVystavenu(id) {
   if (!confirm("Opravdu smazat tuto fakturu?")) return;
   await api(`/api/vystavene-faktury/${id}`, {method:"DELETE"});
-  toast("Faktura smazána ✓"); loadVystavene();
+  toast("Faktura smazána ✓"); loadVystavene(); 
 }
 
+
+
+
+// ═══════════════════════════════════════════════════════════════
+//  PENĚŽENKA — hotovostní kasa
+// ═══════════════════════════════════════════════════════════════
+
+const PW_NOMINALY = [5000,2000,1000,500,200,100,50,20,10,5,2,1];
+
+const PW_BANKY = [
+  { key:"rb_fp",    label:"RB — FP" },
+  { key:"rb_mr",    label:"RB — MR" },
+  { key:"rb_cff",   label:"RB — CFF" },
+  { key:"rb_radek", label:"RB — Radek" },
+  { key:"air_fp",   label:"Air — FP" },
+  { key:"air_mr",   label:"Air — MR" },
+  { key:"air_cff",  label:"Air — CFF" },
+  { key:"air_radek",label:"Air — Radek" },
+  { key:"kb_radek", label:"KB — Radek" },
+];
+
+const PW_BROKERI = [
+  { key:"xtb_czk", label:"XTB — CZK" },
+  { key:"xtb_eur", label:"XTB — EUR", eur:true },
+  { key:"t212",    label:"Trading 212" },
+  { key:"etoro",   label:"eToro" },
+];
+
+let _pwEurKurz = null;
+
+async function _pwNacistKurz() {
+  if (_pwEurKurz) return _pwEurKurz;
+  try {
+    const d = await api("/api/eur-kurz");
+    _pwEurKurz = d.kurz || 25;
+  } catch {
+    _pwEurKurz = 25;
+  }
+  return _pwEurKurz;
+}
+
+async function renderPenezenka() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">💵 Peněženka</h1>
+    </div>
+    <div id="penezenkaObs"><div class="loading-center"><span class="spinner"></span></div></div>`;
+  loadPenezenka();
+}
+
+async function loadPenezenka() {
+  const el = document.getElementById("penezenkaObs");
+  if (!el) return;
+  let data;
+  try { data = await api("/api/penezenka"); } catch { return; }
+
+  const teoreticky = data.teoreticky_stav || 0;
+  const zaznamy    = data.zaznamy || [];
+  const z0 = zaznamy[0] || null;
+  const z1 = zaznamy[1] || null;
+
+  const hotovost = z0 ? (z0.hotovost||0) : null;
+  const banky    = z0 ? PW_BANKY.reduce((s,b)=>s+(z0[b.key]||0),0) : null;
+  const akcie    = z0 ? PW_BROKERI.reduce((s,b)=>s+(z0[b.key]||0),0) : null;
+  const sporeni  = z0 ? (z0.sporeni||0) : null;
+  const extras   = z0 ? (() => { try { return JSON.parse(z0.extras||"[]"); } catch { return []; } })() : [];
+  const extrasSum = extras.reduce((s,e)=>s+(e.castka||0),0);
+  const celkem   = hotovost !== null ? hotovost + banky : null;  // jen hotovost + banky
+  const celkemVse = hotovost !== null ? hotovost + banky + akcie + sporeni + extrasSum : null;
+  const rozdil   = celkem !== null ? celkem - teoreticky : null;
+
+  const zm = (klic) => {
+    if (!z0 || !z1) return null;
+    const ex0 = (() => { try { return JSON.parse(z0.extras||"[]"); } catch { return []; } })().reduce((s,e)=>s+(e.castka||0),0);
+    const ex1 = (() => { try { return JSON.parse(z1.extras||"[]"); } catch { return []; } })().reduce((s,e)=>s+(e.castka||0),0);
+    if (klic==="banky")  return PW_BANKY.reduce((s,b)=>s+(z0[b.key]||0)-(z1[b.key]||0),0);
+    if (klic==="akcie")  return PW_BROKERI.reduce((s,b)=>s+(z0[b.key]||0)-(z1[b.key]||0),0);
+    if (klic==="akcie_sporeni") return (PW_BROKERI.reduce((s,b)=>s+(z0[b.key]||0),0)+(z0.sporeni||0))
+                                      -(PW_BROKERI.reduce((s,b)=>s+(z1[b.key]||0),0)+(z1.sporeni||0));
+    if (klic==="celkem") return ((z0.hotovost||0)+PW_BANKY.reduce((s,b)=>s+(z0[b.key]||0),0))
+                               -((z1.hotovost||0)+PW_BANKY.reduce((s,b)=>s+(z1[b.key]||0),0));
+    return (z0[klic]||0)-(z1[klic]||0);
+  };
+
+  const zmHtml = (v) => {
+    if (v===null) return "";
+    const c = v>=0?"#16a34a":"#dc2626";
+    return `<div style="font-size:.75rem;font-weight:600;color:${c};margin-top:.2rem">${v>=0?"+":""}${czInt(v)} Kč</div>`;
+  };
+
+  const boxik = (ikona,nazev,hodnota,zmena,bg,border,tc,sub) => `
+    <div style="background:${bg};border:1.5px solid ${border};border-radius:10px;padding:.9rem 1rem">
+      <div style="font-size:.73rem;color:${tc};font-weight:600;opacity:.7;margin-bottom:.15rem">${ikona} ${nazev}</div>
+      <div style="font-size:1.45rem;font-weight:700;color:${tc}">${hodnota!==null?czInt(hodnota)+" Kč":"—"}</div>
+      ${sub?`<div style="font-size:.68rem;color:${tc};opacity:.6;margin-top:.1rem">${sub}</div>`:""}
+      ${zmHtml(zmena)}
+    </div>`;
+
+  // Speciální boxík Akcie / Spoření
+  const boxikAkcieSporeni = () => {
+    const tc = "#166534";
+    const akcieSporeniCelkem = akcie !== null ? akcie + sporeni : null;
+    return `<div style="background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:.9rem 1rem">
+      <div style="font-size:.73rem;color:${tc};font-weight:600;opacity:.7;margin-bottom:.4rem">📈 Akcie / Spoření</div>
+      <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:.2rem">
+        <span style="color:${tc};opacity:.8">Akcie</span>
+        <span style="font-weight:600;color:${tc}">${akcie!==null?czInt(akcie)+" Kč":"—"}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:.4rem;padding-bottom:.4rem;border-bottom:1px solid #86efac">
+        <span style="color:${tc};opacity:.8">Spoření</span>
+        <span style="font-weight:600;color:${tc}">${sporeni!==null?czInt(sporeni)+" Kč":"—"}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-size:.75rem;color:${tc};opacity:.7">Celkem</span>
+        <span style="font-size:1.2rem;font-weight:700;color:${tc}">${akcieSporeniCelkem!==null?czInt(akcieSporeniCelkem)+" Kč":"—"}</span>
+      </div>
+      ${zmHtml(zm("akcie_sporeni"))}
+    </div>`;
+  };
+
+  const datD = z0?czDate(z0.datum):"žádný záznam";
+
+  // Levá strana — boxíky, pravá strana — zadávací panel
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 340px;gap:1.25rem;align-items:start;min-width:0">
+
+      <!-- LEVÁ: boxíky + tabulka -->
+      <div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:.75rem;margin-bottom:1.25rem">
+          ${boxik("💵","Hotovost",hotovost,zm("hotovost"),"#fefce8","#fcd34d","#92400e",datD)}
+          ${boxik("🏦","Banky celkem",banky,zm("banky"),"#eff6ff","#93c5fd","#1e40af","")}          ${boxikAkcieSporeni()}
+          ${boxik("💰","Celkem (hotovost + banky)",celkem,zm("celkem"),"#faf5ff","#c084fc","#7e22ce","")}
+          ${boxik("🧮","Teoretický stav",teoreticky,null,"#f9fafb","var(--border)","var(--txt)","z Reportů od "+data.od_data)}
+          ${boxik("⚖️","Rozdíl",rozdil,null,rozdil===null?"#f9fafb":rozdil>=0?"#f0fdf4":"#fee2e2",rozdil===null?"var(--border)":rozdil>=0?"#86efac":"#fca5a5",rozdil===null?"var(--txt)":rozdil>=0?"#166534":"#991b1b","hotovost+banky − teoretický")}
+        </div>
+
+        <div id="dluhyRozbalenoPanel" style="display:none;margin-bottom:1rem">
+          <div class="card">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+              <div class="card-title" style="margin:0">💸 Náklady</div>
+              <button class="btn btn-primary btn-sm" onclick="openNovaDluhOsoba()">+ Nová osoba</button>
+            </div>
+            <div id="dluhyObs2"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem">
+            <div class="card-title" style="margin:0">Historie záznamů</div>
+          </div>
+          ${zaznamy.length ? `<div><table style="width:100%;font-size:.83rem">
+            <thead><tr style="font-size:.75rem;color:var(--txt2)">
+              <th>Datum</th>
+              <th style="text-align:right">💵 Hotovost</th>
+              <th style="text-align:right">🏦 Banky</th>
+              <th style="text-align:right">📈 Akcie</th>
+              <th style="text-align:right">Spoření</th>
+              <th style="text-align:right">Ostatní</th>
+              <th style="text-align:right;font-weight:700">Celkem</th>
+              <th></th>
+            </tr></thead>
+            <tbody>
+              ${zaznamy.map((z,idx)=>{
+                const prev = zaznamy[idx+1]||null;
+                const ex = (()=>{try{return JSON.parse(z.extras||"[]");}catch{return [];}})().reduce((s,e)=>s+(e.castka||0),0);
+                const zB = PW_BANKY.reduce((s,b)=>s+(z[b.key]||0),0);
+                const zA = PW_BROKERI.reduce((s,b)=>s+(z[b.key]||0),0);
+                const zC = (z.hotovost||0)+zB+zA+(z.sporeni||0)+ex;
+                const prevEx = prev?(()=>{try{return JSON.parse(prev.extras||"[]");}catch{return [];}})().reduce((s,e)=>s+(e.castka||0),0):0;
+                const prevC = prev?(prev.hotovost||0)+PW_BANKY.reduce((s,b)=>s+(prev[b.key]||0),0)+PW_BROKERI.reduce((s,b)=>s+(prev[b.key]||0),0)+(prev.sporeni||0)+prevEx:null;
+                const diff = prevC!==null?zC-prevC:null;
+                const dc = diff===null?"":`color:${diff>=0?"#16a34a":"#dc2626"}`;
+                return `<tr>
+                  <td style="white-space:nowrap"><strong>${czDate(z.datum)}</strong>${diff!==null?`<br><small style="${dc}">${diff>=0?"+":""}${czInt(diff)}</small>`:""}
+                  </td>
+                  <td style="text-align:right">${czInt(z.hotovost||0)}</td>
+                  <td style="text-align:right">${czInt(zB)}</td>
+                  <td style="text-align:right">${czInt(zA)}</td>
+                  <td style="text-align:right">${czInt(z.sporeni||0)}</td>
+                  <td style="text-align:right;color:var(--txt2)">${ex>0?czInt(ex):"—"}</td>
+                  <td style="text-align:right;font-weight:700">${czInt(zC)}</td>
+                  <td style="white-space:nowrap">
+                    <button class="btn btn-secondary btn-sm" onclick="editZaznamPenezenka(${z.id})">✏️</button>
+                    <button class="btn btn-danger btn-sm" onclick="smazatZaznamPenezenka(${z.id})">🗑</button>
+                  </td>
+                </tr>`;
+              }).join("")}
+            </tbody>
+          </table></div>`
+          : `<div style="color:var(--txt2);padding:1rem;text-align:center">Žádné záznamy</div>`}
+        </div>
+      </div>
+
+      <!-- PRAVÁ: zadávací panel -->
+      <div id="pwPanel" style="display:flex;flex-direction:column;gap:.65rem"></div>
+    </div>`;
+
+  // Sestavit pravý panel
+  _pwRenderPanel();
+}
+
+function _pwSekce(id, ikona, nazev, obsah, otevrena=false) {
+  return `
+    <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:.7rem 1rem;cursor:pointer;background:var(--bg2)"
+           onclick="_pwToggle('${id}')">
+        <span style="font-weight:600;font-size:.9rem">${ikona} ${nazev}</span>
+        <span id="pwArr_${id}" style="transition:transform .2s;display:inline-block;font-size:.8rem">${otevrena?"▼":"▶"}</span>
+      </div>
+      <div id="pwSek_${id}" style="display:${otevrena?"block":"none"};padding:.75rem 1rem;background:var(--card-bg,#fff)">
+        ${obsah}
+      </div>
+    </div>`;
+}
+
+function _pwToggle(id) {
+  const el = document.getElementById("pwSek_"+id);
+  const arr = document.getElementById("pwArr_"+id);
+  const open = el.style.display!=="none";
+  el.style.display = open?"none":"block";
+  arr.textContent = open?"▶":"▼";
+  if (id === "dluhy") {
+    const panel = document.getElementById("dluhyRozbalenoPanel");
+    if (panel) panel.style.display = open ? "none" : "block";
+    if (!open) loadDluhy();
+  }
+}
+
+function _pwRenderPanel() {
+  const el = document.getElementById("pwPanel");
+  if (!el) return;
+
+  const _d = new Date();
+  const dnes = `${_d.getFullYear()}-${String(_d.getMonth()+1).padStart(2,'0')}-${String(_d.getDate()).padStart(2,'0')}`;
+
+  // Sekce 1: Hotovost — kalkulačka
+  const kalkulacka = PW_NOMINALY.map(n=>`
+    <div style="display:grid;grid-template-columns:70px 1fr 80px;gap:.4rem;align-items:center;margin-bottom:.3rem">
+      <div style="font-size:.85rem;font-weight:600;text-align:right">${czInt(n)} Kč</div>
+      <input type="number" min="0" id="pw_nom_${n}" class="form-control" placeholder="0" style="font-size:.85rem"
+        oninput="_pwKalcUpdate()">
+      <div id="pw_nom_val_${n}" style="font-size:.82rem;color:var(--txt2);text-align:right">= 0</div>
+    </div>`).join("")+`
+    <div style="border-top:2px solid var(--border);margin-top:.5rem;padding-top:.5rem;display:flex;justify-content:space-between;align-items:center">
+      <span style="font-weight:600">Celkem hotovost:</span>
+      <span id="pwKalcCelkem" style="font-size:1.1rem;font-weight:700;color:#92400e">0 Kč</span>
+    </div>`;
+
+  // Sekce 2: Banky
+  const bankyForm = PW_BANKY.map(b=>`
+    <div class="form-group" style="margin-bottom:.4rem">
+      <label style="font-size:.78rem;color:var(--txt2)">${b.label}</label>
+      <input type="number" id="pw_${b.key}" class="form-control" placeholder="0" style="font-size:.85rem" oninput="_pwSouctUpdate()">
+    </div>`).join("")+`
+    <div style="border-top:2px solid var(--border);margin-top:.5rem;padding-top:.5rem;display:flex;justify-content:space-between">
+      <span style="font-weight:600">Celkem banky:</span>
+      <span id="pwBankyCelkem" style="font-weight:700;color:#1e40af">0 Kč</span>
+    </div>`;
+
+  // Sekce 3: Akcie — brokeři + EUR kurz
+  const akcieFrm = `
+    <div id="pwEurKurzInfo" style="font-size:.75rem;color:var(--txt2);margin-bottom:.5rem">⏳ Načítám kurz EUR/CZK...</div>
+    ${PW_BROKERI.map(b=>`
+    <div class="form-group" style="margin-bottom:.4rem">
+      <label style="font-size:.78rem;color:var(--txt2)">${b.label}${b.eur?' <span style="color:#2563eb">(EUR)</span>':''}</label>
+      <div style="display:flex;gap:.4rem;align-items:center">
+        <input type="number" id="pw_${b.key}" class="form-control" placeholder="0" style="font-size:.85rem" oninput="_pwSouctUpdate()">
+        ${b.eur?`<span id="pw_eur_czk" style="font-size:.75rem;color:var(--txt2);white-space:nowrap">= 0 Kč</span>`:""}
+      </div>
+    </div>`).join("")}
+    <div style="border-top:2px solid var(--border);margin-top:.5rem;padding-top:.5rem;display:flex;justify-content:space-between">
+      <span style="font-weight:600">Celkem akcie:</span>
+      <span id="pwAkcieCelkem" style="font-weight:700;color:#166534">0 Kč</span>
+    </div>`;
+
+  // Sekce 4: Shrnutí + uložit
+  const shrnuti = `
+    <div style="margin-bottom:.5rem">
+      <label style="font-size:.78rem;color:var(--txt2)">📅 Datum</label>
+      <input type="date" id="pwDatum" class="form-control" value="${dnes}" style="font-size:.85rem;max-width:180px">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.4rem;margin-bottom:.5rem">
+      <div>
+        <div style="font-size:.75rem;color:var(--txt2)">💵 Hotovost</div>
+        <div id="pwSumHotovost" style="font-weight:600">0 Kč</div>
+      </div>
+      <div>
+        <div style="font-size:.75rem;color:var(--txt2)">🏦 Banky</div>
+        <div id="pwSumBanky" style="font-weight:600">0 Kč</div>
+      </div>
+      <div>
+        <div style="font-size:.75rem;color:var(--txt2)">📈 Akcie</div>
+        <div id="pwSumAkcie" style="font-weight:600">0 Kč</div>
+      </div>
+      <div>
+        <div style="font-size:.75rem;color:var(--txt2)">💰 Spoření</div>
+        <input type="number" id="pwSporeni" class="form-control" placeholder="0" style="font-size:.85rem" oninput="_pwSouctUpdate()">
+      </div>
+    </div>
+    <div id="pwExtrasWrap" style="margin-bottom:.5rem"></div>
+    <button class="btn btn-secondary btn-sm" onclick="_pwPridatExtra()" style="margin-bottom:.75rem;width:100%">+ Přidat položku</button>
+    <div style="border-top:2px solid var(--border);padding-top:.6rem;display:flex;justify-content:space-between;align-items:center;margin-bottom:.75rem">
+      <span style="font-weight:700">Celkem vše:</span>
+      <span id="pwSumCelkem" style="font-size:1.2rem;font-weight:700;color:#7e22ce">0 Kč</span>
+    </div>
+    <div class="form-group">
+      <label style="font-size:.78rem;color:var(--txt2)">Poznámka</label>
+      <input id="pwPoznamka" class="form-control" placeholder="Volitelná poznámka" style="font-size:.85rem">
+    </div>
+    <button class="btn btn-primary" style="width:100%;margin-top:.75rem" onclick="ulozitZaznamPenezenka()">💾 Uložit záznam</button>`;
+
+  el.innerHTML =
+    _pwSekce("hotovost","💵","Hotovost — kalkulačka", kalkulacka) +
+    _pwSekce("banky","🏦","Bankovní účty", bankyForm) +
+    _pwSekce("akcie","📈","Akcie & brokeři", akcieFrm) +
+    _pwSekce("shrnuti","💰","Shrnutí & Uložit", shrnuti, true) +
+    _pwSekce("dluhy","💸","Náklady", `<div style="color:var(--txt2);font-size:.85rem">Rozbaleno vlevo ↙</div>`);
+
+  // Načíst EUR kurz
+  _pwNacistKurz().then(kurz => {
+    const el2 = document.getElementById("pwEurKurzInfo");
+    if (el2) el2.textContent = `Kurz EUR/CZK: ${kurz.toFixed(2)} Kč`;
+    _pwSouctUpdate();
+  });
+}
+
+function _pwKalcUpdate() {
+  let celkem = 0;
+  PW_NOMINALY.forEach(n => {
+    const ks = parseInt(document.getElementById(`pw_nom_${n}`)?.value || 0) || 0;
+    const val = ks * n;
+    celkem += val;
+    const el = document.getElementById(`pw_nom_val_${n}`);
+    if (el) el.textContent = val > 0 ? `= ${czInt(val)}` : "= 0";
+  });
+  const el = document.getElementById("pwKalcCelkem");
+  if (el) el.textContent = czInt(celkem) + " Kč";
+  // Propsat do shrnutí
+  const sh = document.getElementById("pwSumHotovost");
+  if (sh) sh.textContent = czInt(celkem) + " Kč";
+  _pwSouctUpdate();
+}
+
+function _pwSouctUpdate() {
+  // Hotovost z kalkulačky
+  let hotovost = 0;
+  PW_NOMINALY.forEach(n => {
+    hotovost += (parseInt(document.getElementById(`pw_nom_${n}`)?.value||0)||0) * n;
+  });
+
+  // Banky
+  let banky = 0;
+  PW_BANKY.forEach(b => { banky += parseFloat(document.getElementById(`pw_${b.key}`)?.value||0)||0; });
+
+  // Akcie (EUR přepočet)
+  let akcie = 0;
+  const kurz = _pwEurKurz || 25;
+  PW_BROKERI.forEach(b => {
+    const val = parseFloat(document.getElementById(`pw_${b.key}`)?.value||0)||0;
+    const czk = b.eur ? Math.round(val * kurz) : val;
+    akcie += czk;
+    if (b.eur) {
+      const eurEl = document.getElementById("pw_eur_czk");
+      if (eurEl) eurEl.textContent = `= ${czInt(czk)} Kč`;
+    }
+  });
+
+  // Spoření
+  const sporeni = parseFloat(document.getElementById("pwSporeni")?.value||0)||0;
+
+  // Extras
+  let extras = 0;
+  document.querySelectorAll(".pw-extra-castka").forEach(inp => { extras += parseFloat(inp.value||0)||0; });
+
+  const celkem = hotovost + banky + akcie + sporeni + extras;
+
+  const _s = (id,v) => { const e=document.getElementById(id); if(e) e.textContent=czInt(v)+" Kč"; };
+  _s("pwSumHotovost", hotovost);
+  _s("pwSumBanky", banky);
+  _s("pwSumAkcie", akcie);
+  _s("pwSumCelkem", celkem);
+  _s("pwBankyCelkem", banky);
+  _s("pwAkcieCelkem", akcie);
+  _s("pwKalcCelkem", hotovost);
+}
+
+let _pwExtraIdx = 0;
+function _pwPridatExtra() {
+  const wrap = document.getElementById("pwExtrasWrap");
+  if (!wrap) return;
+  const idx = ++_pwExtraIdx;
+  const div = document.createElement("div");
+  div.style.cssText = "display:grid;grid-template-columns:1fr 100px auto;gap:.4rem;align-items:center;margin-bottom:.4rem";
+  div.innerHTML = `
+    <input class="form-control pw-extra-nazev" placeholder="Popis položky" style="font-size:.85rem">
+    <input type="number" class="form-control pw-extra-castka" placeholder="Kč" style="font-size:.85rem" oninput="_pwSouctUpdate()">
+    <button onclick="this.closest('div').remove();_pwSouctUpdate()" style="background:none;border:none;cursor:pointer;color:#dc2626;font-size:1rem">✕</button>`;
+  wrap.appendChild(div);
+}
+
+async function ulozitZaznamPenezenka() {
+  const datum = document.getElementById("pwDatum")?.value;
+  if (!datum) { toast("Vyplň datum", true); return; }
+
+  const kurz = _pwEurKurz || 25;
+  const payload = { datum, poznamka: document.getElementById("pwPoznamka")?.value||"" };
+
+  // Hotovost z kalkulačky
+  let hotovost = 0;
+  PW_NOMINALY.forEach(n => { hotovost += (parseInt(document.getElementById(`pw_nom_${n}`)?.value||0)||0)*n; });
+  payload.hotovost = hotovost;
+
+  // Banky
+  PW_BANKY.forEach(b => { payload[b.key] = parseFloat(document.getElementById(`pw_${b.key}`)?.value||0)||0; });
+
+  // Akcie (XTB EUR → přepočteno na CZK)
+  PW_BROKERI.forEach(b => {
+    const val = parseFloat(document.getElementById(`pw_${b.key}`)?.value||0)||0;
+    payload[b.key] = b.eur ? Math.round(val * kurz) : val;
+  });
+
+  // Spoření
+  payload.sporeni = parseFloat(document.getElementById("pwSporeni")?.value||0)||0;
+
+  // Extras
+  const extras = [];
+  document.querySelectorAll("#pwExtrasWrap > div").forEach(div => {
+    const nazev = div.querySelector(".pw-extra-nazev")?.value?.trim();
+    const castka = parseFloat(div.querySelector(".pw-extra-castka")?.value||0)||0;
+    if (nazev && castka > 0) extras.push({nazev, castka});
+  });
+  payload.extras = extras;
+
+  await api("/api/penezenka", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+  toast("Záznam uložen ✓");
+  loadPenezenka();
+}
+
+async function editZaznamPenezenka(id) {
+  // Načíst data záznamu
+  let data;
+  try { data = await api("/api/penezenka"); } catch { return; }
+  const z = data.zaznamy.find(x => x.id === id);
+  if (!z) { toast("Záznam nenalezen", true); return; }
+
+  // Předvyplnit formulář
+  const extras = (() => { try { return JSON.parse(z.extras||"[]"); } catch { return []; } })();
+
+  // Otevřít modal s formulářem
+  openModal(`Upravit záznam — ${czDate(z.datum)}`, `
+    <div style="margin-bottom:.5rem">
+      <label class="form-label">Datum</label>
+      <input type="date" id="pwEditDatum" class="form-control" value="${z.datum}" style="max-width:200px">
+    </div>
+    <hr style="margin:.5rem 0;border-color:var(--border)">
+    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:.4rem">💵 Hotovost</div>
+    <input type="number" id="pwEditHotovost" class="form-control" value="${z.hotovost||0}" style="margin-bottom:.75rem">
+    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:.4rem">🏦 Bankovní účty</div>
+    <div class="grid-2" style="gap:.4rem;margin-bottom:.75rem">
+      ${PW_BANKY.map(b=>`<div>
+        <label style="font-size:.75rem;color:var(--txt2)">${b.label}</label>
+        <input type="number" id="pwEdit_${b.key}" class="form-control" value="${z[b.key]||0}" style="font-size:.85rem">
+      </div>`).join("")}
+    </div>
+    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:.4rem">📈 Akcie & brokeři</div>
+    <div class="grid-2" style="gap:.4rem;margin-bottom:.75rem">
+      ${PW_BROKERI.map(b=>`<div>
+        <label style="font-size:.75rem;color:var(--txt2)">${b.label}</label>
+        <input type="number" id="pwEdit_${b.key}" class="form-control" value="${z[b.key]||0}" style="font-size:.85rem">
+      </div>`).join("")}
+    </div>
+    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:.4rem">💰 Spoření</div>
+    <input type="number" id="pwEditSporeni" class="form-control" value="${z.sporeni||0}" style="margin-bottom:.75rem">
+    ${extras.length ? `
+    <div style="font-size:.82rem;font-weight:600;color:var(--txt2);margin-bottom:.4rem">Ostatní položky</div>
+    <div id="pwEditExtras">
+      ${extras.map(e=>`<div style="display:grid;grid-template-columns:1fr 100px auto;gap:.4rem;margin-bottom:.3rem">
+        <input class="form-control pw-edit-extra-nazev" value="${escHtml(e.nazev)}" style="font-size:.85rem">
+        <input type="number" class="form-control pw-edit-extra-castka" value="${e.castka}" style="font-size:.85rem">
+        <button onclick="this.closest('div').remove()" style="background:none;border:none;cursor:pointer;color:#dc2626">✕</button>
+      </div>`).join("")}
+    </div>` : '<div id="pwEditExtras"></div>'}
+    <button class="btn btn-secondary btn-sm" onclick="_pwEditPridatExtra()" style="margin-bottom:.75rem">+ Přidat položku</button>
+    <div class="form-group">
+      <label class="form-label">Poznámka</label>
+      <input id="pwEditPoznamka" class="form-control" value="${escHtml(z.poznamka||'')}">
+    </div>
+    <div style="text-align:right;margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitEditPenezenka(${id})">💾 Uložit změny</button>
+    </div>`);
+}
+
+function _pwEditPridatExtra() {
+  const wrap = document.getElementById("pwEditExtras");
+  if (!wrap) return;
+  const div = document.createElement("div");
+  div.style.cssText = "display:grid;grid-template-columns:1fr 100px auto;gap:.4rem;margin-bottom:.3rem";
+  div.innerHTML = `
+    <input class="form-control pw-edit-extra-nazev" placeholder="Popis" style="font-size:.85rem">
+    <input type="number" class="form-control pw-edit-extra-castka" placeholder="Kč" style="font-size:.85rem">
+    <button onclick="this.closest('div').remove()" style="background:none;border:none;cursor:pointer;color:#dc2626">✕</button>`;
+  wrap.appendChild(div);
+}
+
+async function ulozitEditPenezenka(id) {
+  const datum = document.getElementById("pwEditDatum")?.value;
+  if (!datum) { toast("Vyplň datum", true); return; }
+  const payload = {
+    datum,
+    hotovost: parseFloat(document.getElementById("pwEditHotovost")?.value||0)||0,
+    sporeni:  parseFloat(document.getElementById("pwEditSporeni")?.value||0)||0,
+    poznamka: document.getElementById("pwEditPoznamka")?.value||"",
+  };
+  PW_BANKY.forEach(b => { payload[b.key] = parseFloat(document.getElementById(`pwEdit_${b.key}`)?.value||0)||0; });
+  PW_BROKERI.forEach(b => { payload[b.key] = parseFloat(document.getElementById(`pwEdit_${b.key}`)?.value||0)||0; });
+  const extras = [];
+  document.querySelectorAll("#pwEditExtras > div").forEach(div => {
+    const nazev = div.querySelector(".pw-edit-extra-nazev")?.value?.trim();
+    const castka = parseFloat(div.querySelector(".pw-edit-extra-castka")?.value||0)||0;
+    if (nazev && castka > 0) extras.push({nazev, castka});
+  });
+  payload.extras = extras;
+  await api(`/api/penezenka/${id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+  toast("Záznam upraven ✓");
+  closeModal();
+  loadPenezenka();
+}
+
+async function smazatZaznamPenezenka(id) {
+  if (!confirm("Opravdu smazat tento záznam?")) return;
+  await api(`/api/penezenka/${id}`, { method:"DELETE" });
+  toast("Smazáno ✓");
+  loadPenezenka();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DLUHY — půjčky kamarádům
+// ═══════════════════════════════════════════════════════════════
+
+function _dluhTogglePanel() {
+  const panel = document.getElementById("dluhyPanel");
+  const arr   = document.getElementById("dluhPanelArr");
+  if (!panel) return;
+  const open = panel.style.display !== "none";
+  panel.style.display = open ? "none" : "block";
+  if (arr) arr.textContent = open ? "▶" : "▼";
+  if (!open) loadDluhy();
+}
+
+async function loadDluhy() {
+  const el = document.getElementById("dluhyObs2") || document.getElementById("dluhyObs");
+  if (!el) return;
+  let data;
+  try { data = await api("/api/dluhy"); } catch { return; }
+
+  if (!data.length) {
+    el.innerHTML = `<div style="color:var(--txt2);font-size:.88rem;padding:.5rem 0">Žádné záznamy — přidej první osobu tlačítkem výše.</div>`;
+    return;
+  }
+
+  el.innerHTML = `<table style="width:100%;font-size:.88rem">
+    <thead><tr style="font-size:.75rem;color:var(--txt2)">
+      <th>Jméno</th>
+      <th style="text-align:right">První půjčka</th>
+      <th style="text-align:right">Celkový dluh</th>
+      <th style="text-align:center">Stav</th>
+      <th></th>
+    </tr></thead>
+    <tbody>
+      ${data.map(o => {
+        const splaceno = o.celkem <= 0;
+        const stavColor = splaceno ? "#16a34a" : "#dc2626";
+        return `<tr style="cursor:pointer;border-top:1px solid var(--border)" onclick="_dluhToggle(${o.id})">
+          <td style="padding:.5rem .4rem;font-weight:600">
+            <span id="dluhArr_${o.id}" style="font-size:.7rem;margin-right:.3rem">▶</span>
+            ${escHtml(o.jmeno)}
+          </td>
+          <td style="text-align:right;color:var(--txt2);padding:.5rem .4rem">${o.prvni_pujcka ? czDate(o.prvni_pujcka) : "—"}</td>
+          <td style="text-align:right;font-weight:700;color:${stavColor};padding:.5rem .4rem">${czInt(Math.abs(o.celkem))} Kč</td>
+          <td style="text-align:center;padding:.5rem .4rem">
+            ${splaceno ? `<span style="font-size:.75rem;font-weight:600;color:#16a34a">✓ Splaceno</span>` : ""}
+          </td>
+          <td style="padding:.5rem .4rem;white-space:nowrap" onclick="event.stopPropagation()">
+            <button class="btn btn-primary btn-sm" onclick="openPridatTransakci(${o.id},'${escHtml(o.jmeno)}')">+ Splátka / půjčka</button>
+            <button class="btn btn-danger btn-sm" onclick="smazatDluhOsobu(${o.id},'${escHtml(o.jmeno)}')">🗑</button>
+          </td>
+        </tr>
+        <tr id="dluhDetail_${o.id}" style="display:none">
+          <td colspan="5" style="padding:0 0 .5rem 1.5rem;background:var(--bg2)">
+            ${_dluhHistorieHtml(o.transakce)}
+          </td>
+        </tr>`;
+      }).join("")}
+    </tbody>
+  </table>`;
+}
+
+function _dluhHistorieHtml(transakce) {
+  if (!transakce.length) return `<div style="color:var(--txt2);font-size:.82rem;padding:.5rem">Žádné transakce</div>`;
+  let zustatek = 0;
+  const radky = transakce.map(t => {
+    zustatek += t.castka;
+    const c = t.castka > 0 ? "#dc2626" : "#16a34a";
+    const sign = t.castka > 0 ? "+" : "";
+    return `<tr style="font-size:.82rem;border-top:1px solid var(--border)">
+      <td style="padding:.3rem .4rem;color:var(--txt2)">${czDate(t.datum)}</td>
+      <td style="padding:.3rem .4rem">${escHtml(t.poznamka||"—")}</td>
+      <td style="padding:.3rem .4rem;text-align:right;font-weight:600;color:${c}">${sign}${czInt(t.castka)} Kč</td>
+      <td style="padding:.3rem .4rem;text-align:right;color:var(--txt2)">${czInt(zustatek)} Kč</td>
+      <td style="padding:.3rem .4rem">
+        <button class="btn btn-danger btn-sm" onclick="smazatDluhTransakci(${t.id})" title="Smazat">🗑</button>
+      </td>
+    </tr>`;
+  }).join("");
+  return `<table style="width:100%;border-collapse:collapse">
+    <thead><tr style="font-size:.72rem;color:var(--txt2)">
+      <th style="padding:.3rem .4rem">Datum</th>
+      <th style="padding:.3rem .4rem">Poznámka</th>
+      <th style="text-align:right;padding:.3rem .4rem">Částka</th>
+      <th style="text-align:right;padding:.3rem .4rem">Zůstatek</th>
+      <th></th>
+    </tr></thead>
+    <tbody>${radky}</tbody>
+  </table>`;
+}
+
+function _dluhToggle(id) {
+  const det = document.getElementById(`dluhDetail_${id}`);
+  const arr = document.getElementById(`dluhArr_${id}`);
+  if (!det) return;
+  const open = det.style.display !== "none";
+  det.style.display = open ? "none" : "";
+  if (arr) arr.textContent = open ? "▶" : "▼";
+}
+
+function openNovaDluhOsoba() {
+  const dnes = (()=>{const _x=new Date();return `${_x.getFullYear()}-${String(_x.getMonth()+1).padStart(2,"0")}-${String(_x.getDate()).padStart(2,"0")}`;})();
+  openModal("Nová osoba + první půjčka", `
+    <div class="grid-2" style="gap:.75rem">
+      <div class="form-group">
+        <label class="form-label">Jméno *</label>
+        <input id="dluhJmeno" class="form-control" placeholder="Jméno nebo přezdívka">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Datum půjčky *</label>
+        <input type="date" id="dluhDatum" class="form-control" value="${dnes}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Půjčená částka (Kč) *</label>
+        <input type="number" id="dluhCastka" class="form-control" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Poznámka</label>
+        <input id="dluhPoznamka" class="form-control" placeholder="Na co, proč...">
+      </div>
+    </div>
+    <div style="text-align:right;margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitNovuDluhOsobu()">💾 Uložit</button>
+    </div>`);
+  setTimeout(() => document.getElementById("dluhJmeno")?.focus(), 100);
+}
+
+async function ulozitNovuDluhOsobu() {
+  const jmeno  = document.getElementById("dluhJmeno")?.value.trim();
+  const datum  = document.getElementById("dluhDatum")?.value;
+  const castka = parseFloat(document.getElementById("dluhCastka")?.value || 0);
+  const pozn   = document.getElementById("dluhPoznamka")?.value || "";
+  if (!jmeno || !datum || !castka) { toast("Vyplň jméno, datum a částku", true); return; }
+  const res = await api("/api/dluhy/osoby", { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({jmeno}) });
+  await api("/api/dluhy/transakce", { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({osoba_id: res.id, datum, castka: Math.abs(castka), poznamka: pozn}) });
+  toast("Uloženo ✓");
+  closeModal();
+  loadDluhy();
+}
+
+function openPridatTransakci(osobaId, jmeno) {
+  const dnes = (()=>{const _x=new Date();return `${_x.getFullYear()}-${String(_x.getMonth()+1).padStart(2,"0")}-${String(_x.getDate()).padStart(2,"0")}`;})();
+  openModal(`${escHtml(jmeno)} — přidat záznam`, `
+    <div class="grid-2" style="gap:.75rem">
+      <div class="form-group">
+        <label class="form-label">Typ</label>
+        <select id="dluhTyp" class="form-control">
+          <option value="pujcka">💸 Půjčuji (+ dluh)</option>
+          <option value="splatka">✅ Splátka (− dluh)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Datum *</label>
+        <input type="date" id="dluhTDatum" class="form-control" value="${dnes}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Částka (Kč) *</label>
+        <input type="number" id="dluhTCastka" class="form-control" placeholder="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Poznámka</label>
+        <input id="dluhTPoznamka" class="form-control" placeholder="Volitelná poznámka">
+      </div>
+    </div>
+    <div style="text-align:right;margin-top:1rem">
+      <button class="btn btn-primary" onclick="ulozitTransakciDluhu(${osobaId})">💾 Uložit</button>
+    </div>`);
+  setTimeout(() => document.getElementById("dluhTCastka")?.focus(), 100);
+}
+
+async function ulozitTransakciDluhu(osobaId) {
+  const typ    = document.getElementById("dluhTyp")?.value;
+  const datum  = document.getElementById("dluhTDatum")?.value;
+  const castka = parseFloat(document.getElementById("dluhTCastka")?.value || 0);
+  const pozn   = document.getElementById("dluhTPoznamka")?.value || "";
+  if (!datum || !castka) { toast("Vyplň datum a částku", true); return; }
+  const finalCastka = typ === "splatka" ? -Math.abs(castka) : Math.abs(castka);
+  await api("/api/dluhy/transakce", { method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({osoba_id: osobaId, datum, castka: finalCastka, poznamka: pozn}) });
+  toast("Uloženo ✓");
+  closeModal();
+  loadDluhy();
+}
+
+async function smazatDluhTransakci(tid) {
+  if (!confirm("Opravdu smazat tento záznam?")) return;
+  await api(`/api/dluhy/transakce/${tid}`, { method:"DELETE" });
+  toast("Smazáno ✓");
+  loadDluhy();
+}
+
+async function smazatDluhOsobu(oid, jmeno) {
+  if (!confirm(`Smazat ${jmeno} a všechny záznamy?`)) return;
+  await api(`/api/dluhy/osoby/${oid}`, { method:"DELETE" });
+  toast("Smazáno ✓");
+  loadDluhy();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  RADEK — rozcestník
+// ═══════════════════════════════════════════════════════════════
+function renderRadek() {
+  document.getElementById("mainContent").innerHTML = `
+    <h2>👤 Radek</h2>
+    <div class="radek-grid">
+      <div class="radek-box" onclick="navigateTo('soukrome_vydaje')">
+        <div class="radek-box-icon">🏠</div>
+        Soukromé výdaje
+      </div>
+      <div class="radek-box" onclick="navigateTo('penezenka')">
+        <div class="radek-box-icon">💵</div>
+        Peněženka
+      </div>
+      <div class="radek-box" onclick="navigateTo('dokumenty')">
+        <div class="radek-box-icon">🗂️</div>
+        Dokumenty
+      </div>
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DOKUMENTY
+// ═══════════════════════════════════════════════════════════════
+let _dokData = [];
+
+async function renderDokumenty() {
+  document.getElementById("mainContent").innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.8rem">
+      <h2>🗂️ Dokumenty</h2>
+      <button class="btn btn-primary" onclick="dokModalNovy()">＋ Přidat dokument</button>
+    </div>
+    <div id="dok-list" style="margin-top:1rem">Načítám…</div>
+
+    <!-- Modal nový/edit -->
+    <div id="dok-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:900;align-items:center;justify-content:center">
+      <div style="background:var(--card-bg);border-radius:14px;padding:1.8rem 2rem;width:min(480px,95vw);position:relative">
+        <h3 id="dok-modal-title" style="margin-bottom:1.2rem">Nový dokument</h3>
+        <input type="hidden" id="dok-id">
+        <div style="display:flex;flex-direction:column;gap:.8rem">
+          <label>Datum
+            <input type="date" id="dok-datum" class="form-control" style="margin-top:.3rem">
+          </label>
+          <label>Název
+            <input type="text" id="dok-nazev" class="form-control" placeholder="např. Pojistná smlouva auto" style="margin-top:.3rem">
+          </label>
+          <label>Místo
+            <select id="dok-misto" class="form-control" style="margin-top:.3rem">
+              <option value="Praha">Praha</option>
+              <option value="Třebovle">Třebovle</option>
+              <option value="Oboje">Oboje</option>
+            </select>
+          </label>
+          <label id="dok-soubor-wrap">Soubor (PDF nebo JPG)
+            <input type="file" id="dok-soubor" accept=".pdf,.jpg,.jpeg,.png" style="margin-top:.3rem">
+          </label>
+        </div>
+        <div style="display:flex;gap:.7rem;justify-content:flex-end;margin-top:1.4rem">
+          <button class="btn btn-secondary" onclick="dokModalZavrit()">Zrušit</button>
+          <button class="btn btn-primary" onclick="dokUlozit()">Uložit</button>
+        </div>
+      </div>
+    </div>
+  `;
+  // Nastav dnešní datum
+  document.getElementById("dok-datum").value = new Date().toISOString().slice(0,10);
+  await dokNacist();
+}
+
+async function dokNacist() {
+  const res = await fetch("/api/dokumenty");
+  _dokData = await res.json();
+  dokRenderList();
+}
+
+function dokRenderList() {
+  const el = document.getElementById("dok-list");
+  if (!el) return;
+  if (!_dokData.length) {
+    el.innerHTML = `<p style="color:var(--text-muted)">Žádné dokumenty.</p>`;
+    return;
+  }
+  el.innerHTML = `<div class="dokumenty-grid">${_dokData.map(d => `
+    <div class="dok-card">
+      <div class="dok-card-title">${d.nazev}</div>
+      <div class="dok-card-meta">${d.datum} &nbsp;·&nbsp; ${d.misto}</div>
+      <div class="dok-card-actions">
+        ${d.soubor_cesta ? `<button class="btn btn-sm btn-secondary" onclick="dokNahled(${d.id})">👁 Náhled</button>` : ''}
+        <button class="btn btn-sm btn-secondary" onclick="dokEditModal(${d.id})">✏️ Upravit</button>
+        <button class="btn btn-sm btn-danger" onclick="dokSmazat(${d.id})">🗑</button>
+      </div>
+    </div>
+  `).join("")}</div>`;
+}
+
+function dokModalNovy() {
+  document.getElementById("dok-id").value = "";
+  document.getElementById("dok-modal-title").textContent = "Nový dokument";
+  document.getElementById("dok-nazev").value = "";
+  document.getElementById("dok-datum").value = new Date().toISOString().slice(0,10);
+  document.getElementById("dok-misto").value = "Praha";
+  document.getElementById("dok-soubor-wrap").style.display = "";
+  document.getElementById("dok-modal").style.display = "flex";
+}
+
+function dokEditModal(id) {
+  const d = _dokData.find(x => x.id === id);
+  if (!d) return;
+  document.getElementById("dok-id").value = id;
+  document.getElementById("dok-modal-title").textContent = "Upravit dokument";
+  document.getElementById("dok-nazev").value = d.nazev;
+  document.getElementById("dok-datum").value = d.datum;
+  document.getElementById("dok-misto").value = d.misto || "Praha";
+  document.getElementById("dok-soubor-wrap").style.display = "none";
+  document.getElementById("dok-modal").style.display = "flex";
+}
+
+function dokModalZavrit() {
+  document.getElementById("dok-modal").style.display = "none";
+}
+
+async function dokUlozit() {
+  const id    = document.getElementById("dok-id").value;
+  const nazev = document.getElementById("dok-nazev").value.trim();
+  const datum = document.getElementById("dok-datum").value;
+  const misto = document.getElementById("dok-misto").value;
+  if (!nazev) { alert("Zadej název dokumentu"); return; }
+
+  if (id) {
+    // Úprava
+    await fetch(`/api/dokumenty/${id}`, {
+      method: "PUT",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({datum, nazev, misto})
+    });
+  } else {
+    // Nový
+    const fd = new FormData();
+    fd.append("datum", datum);
+    fd.append("nazev", nazev);
+    fd.append("misto", misto);
+    const soubor = document.getElementById("dok-soubor").files[0];
+    if (soubor) fd.append("soubor", soubor);
+    await fetch("/api/dokumenty", {method:"POST", body:fd});
+  }
+  dokModalZavrit();
+  await dokNacist();
+}
+
+async function dokSmazat(id) {
+  if (!confirm("Smazat dokument?")) return;
+  await fetch(`/api/dokumenty/${id}`, {method:"DELETE"});
+  await dokNacist();
+}
+
+async function dokNahled(id) {
+  const res = await fetch(`/api/dokumenty/${id}/url`);
+  const data = await res.json();
+  if (data.url) window.open(data.url, "_blank");
+  else alert("Soubor není dostupný");
+}
