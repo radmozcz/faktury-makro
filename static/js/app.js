@@ -3654,7 +3654,8 @@ async function renderNastaveni() {
         <button class="btn" style="background:var(--accent);color:#1a1a1a" onclick="opravDuplicity()">🔍 Najít duplicity</button>
         <button class="btn" style="background:#6c757d;color:#fff" onclick="normalizujNazvy()">🧹 Odstranit ARO/MC/FL prefixy</button>
         <button class="btn" style="background:#2563eb;color:#fff" onclick="stahnoutZalohu()">📦 Záloha do GCS</button>
-        <button class="btn btn-secondary btn-sm" onclick="stahnoutSqlDump()">💾 SQL záloha → GCS</button>
+        <button class="btn btn-secondary btn-sm" onclick="stahnoutSqlDump()" id="btnSqlZaloha">💾 SQL záloha → GCS</button>
+        <span id="zalohaStatus" style="margin-left:.75rem;font-size:.9rem;color:var(--txt2)"></span>
       </div>
 
       <div style="margin-top:1rem">
@@ -3890,12 +3891,15 @@ async function stahnoutSqlDump() {
 }
 
 async function stahnoutZalohu() {
+  const btn = document.querySelector('[onclick="stahnoutZalohu()"]');
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Zálohuje se..."; }
   toast("Vytvářím zálohu...");
   try {
     const r = await api("/api/admin/zaloha-export", {method:"POST"});
     if (r.ok) {
       toast(`Záloha uložena do GCS: ${r.soubor} ✓`);
       loadZalohy();
+      if (btn) { btn.disabled = false; btn.textContent = '📦 Záloha do GCS'; }
     }
   } catch { toast("Chyba při záloze", true); }
 }
