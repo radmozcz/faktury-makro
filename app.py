@@ -4625,27 +4625,39 @@ def api_polozky():
     od    = request.args.get("od", "")
     do_   = request.args.get("do", "")
 
-    f_cond  = "AND fakt.firma_zkratka=?" if firma else ""
-    od_c    = "AND fakt.datum_vystaveni>=?" if od else ""
-    do_c    = "AND fakt.datum_vystaveni<=?" if do_ else ""
+    f_cond  = "AND fakt.firma_zkratka=%s" if firma else ""
+    od_c    = "AND fakt.datum_vystaveni>=%s" if od else ""
+    do_c    = "AND fakt.datum_vystaveni<=%s" if do_ else ""
     params = tuple(v for v in [firma, od, do_] if v)
 
     with get_db() as conn:
         rows = conn.execute(f"""
             SELECT
-                COALESCE(z.nazev_canonical, p.nazev) AS zbozi_nazev,
-                z.id AS zbozi_id,
-                ROUND(CAST(SUM(p.mnozstvi) AS NUMERIC), 3)            AS celkove_mnozstvi,
-                ROUND(CAST(SUM(p.celkem_s_dph) AS NUMERIC), 2)        AS celkem_utraceno,
+                COALESCE(
+                    (SELECT a.alias FROM zbozi_aliasy a WHERE a.zbozi_id = z.id LIMIT 1),
+                    z.nazev_canonical,
+                    p.nazev
+                ) AS zbozi_nazev,
+                COALESCE(
+                    (SELECT MIN(a2.zbozi_id) FROM zbozi_aliasy a2
+                     WHERE a2.alias = (SELECT a.alias FROM zbozi_aliasy a WHERE a.zbozi_id = z.id LIMIT 1)),
+                    z.id
+                ) AS zbozi_id,
+                ROUND(CAST(SUM(p.mnozstvi) AS NUMERIC), 3)               AS celkove_mnozstvi,
+                ROUND(CAST(SUM(p.celkem_s_dph) AS NUMERIC), 2)           AS celkem_utraceno,
                 ROUND(CAST(AVG(p.cena_za_jednotku_s_dph) AS NUMERIC), 4) AS prumerna_cena,
-                COUNT(DISTINCT p.faktura_id)        AS pocet_nakupu,
-                STRING_AGG(DISTINCT fakt.dodavatel, ', ')  AS dodavatele,
-                (SELECT a.alias FROM zbozi_aliasy a WHERE a.zbozi_id = z.id LIMIT 1) AS skupina
+                COUNT(DISTINCT p.faktura_id)                              AS pocet_nakupu,
+                STRING_AGG(DISTINCT fakt.dodavatel, ', ')                 AS dodavatele,
+                NULL AS skupina
             FROM polozky p
             JOIN faktury fakt ON fakt.id = p.faktura_id
             LEFT JOIN zbozi z ON z.id = p.zbozi_id
             WHERE 1=1 {f_cond} {od_c} {do_c}
-            GROUP BY z.id, COALESCE(z.nazev_canonical, p.nazev)
+            GROUP BY COALESCE(
+                (SELECT a.alias FROM zbozi_aliasy a WHERE a.zbozi_id = z.id LIMIT 1),
+                z.nazev_canonical,
+                p.nazev
+            )
             ORDER BY celkem_utraceno DESC
         """, params).fetchall()
     return jsonify([dict(r) for r in rows])
