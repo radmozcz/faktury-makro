@@ -7153,3 +7153,4 @@ async function dokNahled(id) {
   if (data.url) window.open(data.url, "_blank");
   else alert("Soubor není dostupný");
 }
+
