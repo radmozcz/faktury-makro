@@ -4736,11 +4736,11 @@ def api_zbozi_alias():
     if not zbozi_id or not alias_text:
         return jsonify({"error": "Chybí zbozi_id nebo alias"}), 400
     with get_db() as conn:
-        try:
-            conn.execute("INSERT INTO zbozi_aliasy (zbozi_id, alias) VALUES (%s,%s)", (zbozi_id, alias_text))
-        except Exception:
-            conn.execute("UPDATE zbozi_aliasy SET zbozi_id=%s WHERE alias=%s", (zbozi_id, alias_text))
-        conn.execute("UPDATE polozky SET zbozi_id=%s WHERE nazev=%s", (zbozi_id, alias_text))
+        conn.execute("""
+            INSERT INTO zbozi_aliasy (zbozi_id, alias) VALUES (%s,%s)
+            ON CONFLICT (alias) DO UPDATE SET zbozi_id=%s
+        """, (zbozi_id, alias_text, zbozi_id))
+        conn.execute("UPDATE polozky SET zbozi_id=%s WHERE LOWER(nazev)=LOWER(%s)", (zbozi_id, alias_text))
         if polozka_id:
             conn.execute("UPDATE polozky SET zbozi_id=%s WHERE id=%s", (zbozi_id, polozka_id))
     return jsonify({"ok": True})
