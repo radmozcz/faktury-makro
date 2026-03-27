@@ -2263,6 +2263,48 @@ def api_reporty_karty_stats():
     return jsonify(result)
 
 
+# ── AUTH / LOGIN ──────────────────────────────────────────────────────────────
+import hashlib
+import secrets
+from functools import wraps
+
+_sessions = {}  # token -> {"jmeno": ..., "role": ...}
+
+def _get_token():
+    return request.cookies.get("session_token", "")
+
+def _session():
+    return _sessions.get(_get_token())
+
+@app.route("/api/me")
+def api_me():
+    s = _session()
+    if s:
+        return jsonify({"prihlasen": True, "jmeno": s["jmeno"], "role": s["role"], "prava": "vse"})
+    return jsonify({"prihlasen": False})
+
+@app.route("/api/login", methods=["POST"])
+def api_login():
+    data = request.json or {}
+    heslo = data.get("heslo", "")
+    spravne_heslo = os.environ.get("APP_HESLO", "admin")
+    if heslo == spravne_heslo:
+        token = secrets.token_hex(32)
+        _sessions[token] = {"jmeno": "Admin", "role": "admin"}
+        resp = jsonify({"ok": True, "jmeno": "Admin", "role": "admin", "prava": "vse"})
+        resp.set_cookie("session_token", token, httponly=True, samesite="Lax", max_age=86400*30)
+        return resp
+    return jsonify({"ok": False, "error": "Špatné heslo"}), 401
+
+@app.route("/api/logout", methods=["POST"])
+def api_logout():
+    token = _get_token()
+    _sessions.pop(token, None)
+    resp = jsonify({"ok": True})
+    resp.delete_cookie("session_token")
+    return resp
+
+
 init_db()
 migrate_db()
 
