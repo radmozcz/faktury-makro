@@ -6011,4 +6011,5 @@ def api_dokumenty_url(did):
         return jsonify({"chyba": "Nenalezeno"}), 404
     url = get_dokument_gcs_url(row["soubor_cesta"]) or row["soubor_url"] or ""
     return jsonify({"url": url})
+    
 
