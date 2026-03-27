@@ -647,6 +647,8 @@ def migrate_db():
         if "paska_url" not in vypl_cols:
             try: conn.execute("ALTER TABLE vyplaty ADD COLUMN paska_url TEXT")
             except Exception: pass
+            try: conn.execute("UPDATE reporty SET firma_zkratka='FP' WHERE firma_zkratka IS NULL OR firma_zkratka=''")
+            except Exception: pass        
     print("migrate_db OK")
 
 
