@@ -5431,22 +5431,22 @@ def api_normalizuj_dodavatele():
 @vyzaduj_prihlaseni
 def api_normalizuj_nazvy():
     import re as _re
-    import traceback
     prefix_re = _re.compile(r'^(ARO|MC|FL)\s+', _re.IGNORECASE)
-    try:
-        with get_db() as conn:
-            zbozi = conn.execute("SELECT id, nazev_canonical FROM zbozi").fetchall()
-            opraveno = 0
-            for z in zbozi:
-                nazev = (z["nazev_canonical"] if isinstance(z, dict) else z[1]) or ""
-                novy = prefix_re.sub("", nazev).strip()
-                if novy != nazev:
-                    zid = z["id"] if isinstance(z, dict) else z[0]
+    with get_db() as conn:
+        zbozi = conn.execute("SELECT id, nazev_canonical FROM zbozi").fetchall()
+        opraveno = 0
+        preskoceno = 0
+        for z in zbozi:
+            nazev = (z["nazev_canonical"] if isinstance(z, dict) else z[1]) or ""
+            novy = prefix_re.sub("", nazev).strip()
+            if novy != nazev:
+                zid = z["id"] if isinstance(z, dict) else z[0]
+                try:
                     conn.execute("UPDATE zbozi SET nazev_canonical=%s WHERE id=%s", (novy, zid))
                     opraveno += 1
-        return jsonify({"ok": True, "opraveno": opraveno})
-    except Exception as e:
-        return jsonify({"ok": False, "chyba": str(e), "trace": traceback.format_exc()}), 500
+                except Exception:
+                    preskoceno += 1
+    return jsonify({"ok": True, "opraveno": opraveno, "preskoceno": preskoceno})
 
 @app.route("/api/oprav-duplicity", methods=["POST"])
 @vyzaduj_prihlaseni
