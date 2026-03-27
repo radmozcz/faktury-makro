@@ -5436,10 +5436,11 @@ def api_normalizuj_nazvy():
         zbozi = conn.execute("SELECT id, nazev_canonical FROM zbozi").fetchall()
         opraveno = 0
         for z in zbozi:
-            nazev = z["nazev_canonical"] or ""
+            nazev = (z["nazev_canonical"] if isinstance(z, dict) else z[1]) or ""
             novy = prefix_re.sub("", nazev).strip()
             if novy != nazev:
-                conn.execute("UPDATE zbozi SET nazev_canonical=? WHERE id=?", (novy, z["id"]))
+                zid = z["id"] if isinstance(z, dict) else z[0]
+                conn.execute("UPDATE zbozi SET nazev_canonical=%s WHERE id=%s", (novy, zid))
                 opraveno += 1
     return jsonify({"ok": True, "opraveno": opraveno})
 
