@@ -1686,8 +1686,8 @@ def api_karty_stats():
                        COALESCE(SUM(hotovost),0) as h,
                        COALESCE(SUM(hotovost+karty),0) as t
                 FROM reporty
-                WHERE firma_zkratka=? AND datum LIKE ?
-            """, (firma, mesic_str + "%")).fetchone()
+                WHERE firma_zkratka=? AND datum>=? AND datum<=?
+            """, (firma, mesic_prvni, _dt.date.today().isoformat())).fetchone()
             karty_mesic = float((row4 or {}).get("k", 0))
             hot_mesic   = float((row4 or {}).get("h", 0))
             trzba_mesic = float((row4 or {}).get("t", 0))
