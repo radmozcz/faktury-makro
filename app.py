@@ -4717,6 +4717,13 @@ def api_zbozi_list():
         rows = conn.execute("SELECT id, nazev_canonical FROM zbozi ORDER BY nazev_canonical").fetchall()
     return jsonify([dict(r) for r in rows])
 
+@app.route("/api/zbozi/alias/<int:zbozi_id>/<path:alias>", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_zbozi_alias_delete(zbozi_id, alias):
+    with get_db() as conn:
+        conn.execute("DELETE FROM zbozi_aliasy WHERE zbozi_id=%s AND alias=%s", (zbozi_id, alias))
+    return jsonify({"ok": True})
+
 @app.route("/api/zbozi/aliasy-seznam")
 def api_zbozi_aliasy_seznam():
     q = request.args.get("q", "").strip().lower()
