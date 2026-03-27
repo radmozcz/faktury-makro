@@ -4862,10 +4862,15 @@ async function uploadReportFoto(file) {
       statusEl.textContent = "❌ " + data.error;
       return;
     }
-    statusEl.textContent = "✅ Lístek přečten – zkontrolujte a uložte";
     if (data.soubor_url) App._reportSouborUrl = data.soubor_url;
-    naplnReportFormular(data);
-    switchRTab("rucni");
+    // V režimu editace existujícího reportu - jen fotka, bez přepisu políček
+    if (App._reportEditId) {
+      statusEl.textContent = "✅ Fotka nahrána – políčka zachována";
+    } else {
+      statusEl.textContent = "✅ Lístek přečten – zkontrolujte a uložte";
+      naplnReportFormular(data);
+      switchRTab("rucni");
+    }
   } catch (e) {
     statusEl.textContent = "❌ Chyba: " + e.message;
   }
