@@ -5432,21 +5432,32 @@ def api_normalizuj_dodavatele():
 def api_normalizuj_nazvy():
     import re as _re
     prefix_re = _re.compile(r'^(ARO|MC|FL)\s+', _re.IGNORECASE)
+    prejmenovano = 0
+    slouceno = 0
     with get_db() as conn:
         zbozi = conn.execute("SELECT id, nazev_canonical FROM zbozi").fetchall()
-        opraveno = 0
-        preskoceno = 0
         for z in zbozi:
             nazev = (z["nazev_canonical"] if isinstance(z, dict) else z[1]) or ""
             novy = prefix_re.sub("", nazev).strip()
-            if novy != nazev:
-                zid = z["id"] if isinstance(z, dict) else z[0]
-                try:
-                    conn.execute("UPDATE zbozi SET nazev_canonical=%s WHERE id=%s", (novy, zid))
-                    opraveno += 1
-                except Exception:
-                    preskoceno += 1
-    return jsonify({"ok": True, "opraveno": opraveno, "preskoceno": preskoceno})
+            if novy == nazev:
+                continue
+            zid = z["id"] if isinstance(z, dict) else z[0]
+            # Zkontroluj jestli cílový název už existuje
+            existujici = conn.execute(
+                "SELECT id FROM zbozi WHERE LOWER(nazev_canonical)=LOWER(%s) AND id!=%s",
+                (novy, zid)
+            ).fetchone()
+            if existujici:
+                # Slouč — přesměruj všechny položky na existující záznam
+                cil_id = existujici["id"] if isinstance(existujici, dict) else existujici[0]
+                conn.execute("UPDATE polozky SET zbozi_id=%s WHERE zbozi_id=%s", (cil_id, zid))
+                conn.execute("DELETE FROM zbozi WHERE id=%s", (zid,))
+                slouceno += 1
+            else:
+                # Jen přejmenuj
+                conn.execute("UPDATE zbozi SET nazev_canonical=%s WHERE id=%s", (novy, zid))
+                prejmenovano += 1
+    return jsonify({"ok": True, "prejmenovano": prejmenovano, "slouceno": slouceno})
 
 @app.route("/api/oprav-duplicity", methods=["POST"])
 @vyzaduj_prihlaseni
