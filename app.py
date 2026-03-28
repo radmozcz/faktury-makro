@@ -1699,7 +1699,7 @@ def api_prava_set():
                     conn.execute("""
     INSERT INTO prava (role, sekce, povoleno)
     VALUES (%s, %s, %s)
-    ON CONFLICT ON CONSTRAINT prava_role_sekce_unique DO UPDATE SET povoleno = excluded.povoleno
+    ON CONFLICT (role, sekce) DO UPDATE SET povoleno = excluded.povoleno
 """, (role, sekce, 1 if povoleno else 0))
         return jsonify({"ok": True})
     except Exception as e:
