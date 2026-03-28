@@ -2141,7 +2141,7 @@ function renderPolozkyTable() {
       if (r._skupina) {
         const firstItem = r._items[0];
         return `
-          <tr class="zbozi-skupina" style="cursor:pointer" onclick="openZboziDetail(${firstItem.zbozi_id||'null'}, '${escHtml(r.zbozi_nazev)}')">
+          <tr class="zbozi-skupina" style="cursor:pointer" onclick="openSkupinaDetail('${escHtml(r.zbozi_nazev)}')">
             <td><strong>${escHtml(r.zbozi_nazev)}</strong></td>
             <td style="text-align:center">${r.pocet_nakupu}</td>
             <td>${Number(r.celkove_mnozstvi).toLocaleString("cs-CZ")}</td>
@@ -2193,7 +2193,33 @@ function toggleSkupina(nazev) {
     tr.style.display = tr.style.display === "none" ? "" : "none";
   });
 }
+async function openSkupinaDetail(alias) {
+  let data;
+  try { data = await api(`/api/zbozi/alias-detail/${encodeURIComponent(alias)}`); } catch { return; }
 
+  const body = `
+    <h4 style="margin-bottom:.5rem">${escHtml(alias)}</h4>
+    <div style="margin-bottom:1rem;font-size:.82rem;color:var(--txt2)">Všechny nákupy pod tímto aliasem</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Datum</th><th>Položka</th><th>Dodavatel</th><th>Firma</th><th>Množství</th><th>Cena/jedn.</th><th>Celkem</th></tr></thead>
+        <tbody>
+          ${data.nakupy.map(n => `
+            <tr>
+              <td>${czDate(n.datum_vystaveni)}</td>
+              <td style="font-size:.85rem;color:var(--txt2)">${escHtml(n.nazev_canonical||n.nazev||"")}</td>
+              <td>${escHtml(n.dodavatel)}</td>
+              <td>${n.firma_zkratka}</td>
+              <td>${Number(n.mnozstvi).toLocaleString("cs-CZ")} ${n.jednotka}</td>
+              <td>${czMoney(n.cena_za_jednotku_s_dph)}</td>
+              <td><strong>${czMoney(n.celkem_s_dph)}</strong></td>
+            </tr>`).join("") || "<tr><td colspan='7' style='text-align:center;color:var(--txt2)'>Žádné nákupy</td></tr>"}
+        </tbody>
+      </table>
+    </div>`;
+
+  openModal(`Skupina: ${escHtml(alias)}`, body);
+}
 async function openZboziDetail(zbozi_id, nazev) {
   let data;
   try { data = await api(`/api/polozky/detail/${zbozi_id}`); } catch { return; }
