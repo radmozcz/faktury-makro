@@ -4662,14 +4662,14 @@ def api_polozky():
 def api_alias_detail(alias):
     with get_db() as conn:
         nakupy = conn.execute("""
-            SELECT p.*, f.dodavatel, f.datum_vystaveni, f.firma_zkratka, f.id as faktura_id,
-                   f.soubor_url, f.cislo_faktury, z.nazev_canonical
+            SELECT DISTINCT ON (p.id) p.*, f.dodavatel, f.datum_vystaveni, f.firma_zkratka, f.id as faktura_id,
+                   f.soubor_url, f.cislo_faktury, z.nazev_canonical, z.id as zbozi_id_orig
             FROM polozky p
             JOIN faktury f ON f.id = p.faktura_id
             JOIN zbozi z ON z.id = p.zbozi_id
             JOIN zbozi_aliasy al ON al.zbozi_id = z.id
             WHERE LOWER(al.alias) = LOWER(%s)
-            ORDER BY f.datum_vystaveni DESC
+            ORDER BY p.id, f.datum_vystaveni DESC
         """, (alias,)).fetchall()
     return jsonify({
         "alias": alias,
