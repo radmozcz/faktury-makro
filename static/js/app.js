@@ -2136,7 +2136,9 @@ function renderPolozkyTable() {
   // Skupiny a položky dohromady, seřazené stejně
   const allRows = [...skupinyRows, ...bezSkupiny];
   allRows.sort(sortFn);
-
+const arrow = (c) => col === c ? (asc ? " ▲" : " ▼") : " ↕";
+    const th = (c, label) =>
+      `<th style="cursor:pointer;user-select:none" onclick="sortPolozky('${c}')">${label}${arrow(c)}</th>`;
   const renderRow = (r, indent) => {
       if (r._skupina) {
         const firstItem = r._items[0];
