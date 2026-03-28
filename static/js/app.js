@@ -4960,6 +4960,28 @@ function setupReportDropzone() {
 
 async function uploadReportFoto(file) {
   const statusEl = document.getElementById("reportFotoStatus");
+  const jeEditace = !!App._reportEditId;
+
+  if (jeEditace) {
+    // Při editaci — jen nahrát fotku, bez OCR
+    statusEl.innerHTML = `<span class="spinner"></span> Nahrávám fotku…`;
+    const fd = new FormData();
+    fd.append("soubor", file);
+    try {
+      const r = await fetch("/api/reporty/nahrat-foto-pouze", { method: "POST", body: fd });
+      const data = await r.json();
+      if (data.error) { statusEl.textContent = "❌ " + data.error; return; }
+      if (data.soubor_url) App._reportSouborUrl = data.soubor_url;
+      statusEl.textContent = "✅ Fotka uložena";
+      const fotoEl = document.getElementById("reportFotoNahled");
+      if (fotoEl && data.soubor_url) fotoEl.innerHTML = `<img src="${data.soubor_url}" style="max-width:100%;border-radius:6px;margin-top:.5rem">`;
+    } catch (e) {
+      statusEl.textContent = "❌ Chyba: " + e.message;
+    }
+    return;
+  }
+
+  // Nový report — OCR
   statusEl.innerHTML = `<span class="spinner"></span> Čtu lístek přes AI...`;
   const fd = new FormData();
   fd.append("soubor", file);
@@ -4971,19 +4993,12 @@ async function uploadReportFoto(file) {
       return;
     }
     if (data.soubor_url) App._reportSouborUrl = data.soubor_url;
-    // Při editaci existujícího reportu jen ulož fotku, nepřepisuj data
-    if (App._reportEditId) {
-      statusEl.textContent = "✅ Fotka uložena";
-      const fotoEl = document.getElementById("reportFotoNahled");
-      if (fotoEl && data.soubor_url) fotoEl.innerHTML = `<img src="${data.soubor_url}" style="max-width:100%;border-radius:6px;margin-top:.5rem">`;
+    if (App._reportFormularDotcen) {
+      statusEl.textContent = "✅ OCR hotovo, formulář již upraven — data nezměněna";
     } else {
-      if (App._reportFormularDotcen) {
-        statusEl.textContent = "✅ OCR hotovo, formulář již upraven — data nezměněna";
-      } else {
-        statusEl.textContent = "✅ Lístek přečten – zkontrolujte a uložte";
-        naplnReportFormular(data);
-        switchRTab("rucni");
-      }
+      statusEl.textContent = "✅ Lístek přečten – zkontrolujte a uložte";
+      naplnReportFormular(data);
+      switchRTab("rucni");
     }
   } catch (e) {
     statusEl.textContent = "❌ Chyba: " + e.message;
