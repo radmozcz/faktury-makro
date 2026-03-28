@@ -3626,7 +3626,7 @@ def api_reporty_list():
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     with get_db() as conn:
         rows = conn.execute(f"""
-            SELECT * FROM reporty {where} ORDER BY datum DESC
+            SELECT * FROM reporty {where} ORDER BY datum DESC LIMIT 200
         """, params).fetchall()
     return jsonify([dict(r) for r in rows])
 
