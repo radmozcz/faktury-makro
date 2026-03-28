@@ -5724,18 +5724,18 @@ def api_oprav_sekvence():
         except Exception as e:
             vysledky[tbl] = str(e)
     return jsonify(vysledky)
-    @app.route("/fix-prava-seq")
+@app.route("/fix-prava-seq")
 def fix_prava_seq():
-    if not _USE_PG:
-        return "Pouze pro PostgreSQL"
-    try:
-        with get_db() as conn:
-            conn.execute("CREATE SEQUENCE IF NOT EXISTS prava_id_seq")
-            conn.execute("ALTER TABLE prava ALTER COLUMN id SET DEFAULT nextval('prava_id_seq')")
-            conn.execute("SELECT setval('prava_id_seq', COALESCE((SELECT MAX(id) FROM prava), 0) + 1)")
-        return "OK - sekvence opravena"
-    except Exception as e:
-        return f"Chyba: {e}"
+if not _USE_PG:
+    return "Pouze pro PostgreSQL"
+try:
+    with get_db() as conn:
+        conn.execute("CREATE SEQUENCE IF NOT EXISTS prava_id_seq")
+        conn.execute("ALTER TABLE prava ALTER COLUMN id SET DEFAULT nextval('prava_id_seq')")
+        conn.execute("SELECT setval('prava_id_seq', COALESCE((SELECT MAX(id) FROM prava), 0) + 1)")
+    return "OK - sekvence opravena"
+except Exception as e:
+    return f"Chyba: {e}"
 @app.route("/ping")
 def ping():
     return "pong", 200
