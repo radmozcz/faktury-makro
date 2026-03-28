@@ -4868,6 +4868,7 @@ function naplnReportFormular(data) {
 }
 
 function openNovyReport() {
+  App._reportFormularDotcen = false;
   openModal("Nový denní report", reportFormHtml());
   setupReportDropzone();
   rfRecalc();
@@ -4888,6 +4889,7 @@ async function editReport(id) {
   try { r = await api("/api/reporty/" + id); } catch { return; }
   if (!r || r.error) { toast("Report nenalezen", true); return; }
   App._reportEditId = id;
+  App._reportFormularDotcen = false;
   App._reportSouborUrl = null;
   App._reportSouborUrlExisting = r.soubor_url || null;
   openModal("Upravit report – " + czDate(r.datum), reportFormHtml(r));
@@ -4923,6 +4925,13 @@ function setupReportDropzone() {
   dz.addEventListener("drop", e => {
     e.preventDefault(); dz.classList.remove("drag-over");
     if (e.dataTransfer.files[0]) uploadReportFoto(e.dataTransfer.files[0]);
+  });
+
+  // Sleduj zásahy uživatele do formulářových polí
+  const rfPoleIds = ["rfDatum","rfDen","rfSmena","rfKarty","rfKov","rfPapir","rfVydaje","rfPk50","rfPk100","rfPizzaCela","rfPizzaCtvrt","rfBurger","rfTalire","rfBurtgulas"];
+  rfPoleIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("input", () => { App._reportFormularDotcen = true; });
   });
 
   document.addEventListener("paste", function reportPasteHandler(e) {
@@ -4968,9 +4977,13 @@ async function uploadReportFoto(file) {
       const fotoEl = document.getElementById("reportFotoNahled");
       if (fotoEl && data.soubor_url) fotoEl.innerHTML = `<img src="${data.soubor_url}" style="max-width:100%;border-radius:6px;margin-top:.5rem">`;
     } else {
-      statusEl.textContent = "✅ Lístek přečten – zkontrolujte a uložte";
-      naplnReportFormular(data);
-      switchRTab("rucni");
+      if (App._reportFormularDotcen) {
+        statusEl.textContent = "✅ OCR hotovo, formulář již upraven — data nezměněna";
+      } else {
+        statusEl.textContent = "✅ Lístek přečten – zkontrolujte a uložte";
+        naplnReportFormular(data);
+        switchRTab("rucni");
+      }
     }
   } catch (e) {
     statusEl.textContent = "❌ Chyba: " + e.message;
@@ -4991,8 +5004,12 @@ async function zpracovatReportText() {
     const data = await r.json();
     if (data.error) { statusEl.textContent = "❌ " + data.error; return; }
     statusEl.textContent = "✅ Zpracováno";
-    naplnReportFormular(data);
-    switchRTab("rucni");
+    if (App._reportFormularDotcen) {
+      statusEl.textContent = "✅ OCR hotovo, formulář již upraven — data nezměněna";
+    } else {
+      naplnReportFormular(data);
+      switchRTab("rucni");
+    }
   } catch(e) {
     statusEl.textContent = "❌ " + e.message;
   }
