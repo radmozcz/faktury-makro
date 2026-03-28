@@ -5431,8 +5431,7 @@ def api_zalohy_seznam():
                 "datum": b.updated.isoformat() if b.updated else "",
                 "url": b.generate_signed_url(expiration=3600) if hasattr(b, 'generate_signed_url') else ""
             })
-    return jsonify({"zalohy": result})
-
+    return jsonify({"zalohy": result[:3]})
 @app.route("/api/admin/zaloha-stahnout/<nazev>")
 @vyzaduj_prihlaseni
 def api_zaloha_stahnout(nazev):
