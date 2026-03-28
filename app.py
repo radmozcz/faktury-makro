@@ -305,8 +305,9 @@ class _PgConn:
         sql = sql.replace("date('now','-12 months')", "(CURRENT_DATE - INTERVAL '12 months')")
         sql = sql.replace("date('now')", "CURRENT_DATE::text")
         # datum_vystaveni a datum jsou TEXT sloupce – při porovnání s datem je nutný cast
-        ssql = _re.sub(r"\bdatum_vystaveni\b(\s*)(>=|<=|>|<)", r"NULLIF(datum_vystaveni,'')::date\1\2", sql)
-        sql = _re.sub(r"\bdatum\b(\s*)(>=|<=|>|<)", r"NULLIF(datum,'')::date\1\2", sql)
+        # Ale nenahrazujeme porovnání s prázdným stringem (datum > '')
+        ssql = _re.sub(r"\bdatum_vystaveni\b(\s*)(>=|<=|>|<)(?!\s*'')", r"NULLIF(datum_vystaveni,'')::date\1\2", sql)
+        sql = _re.sub(r"\bdatum\b(\s*)(>=|<=|>|<)(?!\s*'')", r"NULLIF(datum,'')::date\1\2", sql)
         sql = _re.sub(r"strftime\('%Y',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'YYYY')", sql)
         sql = _re.sub(r"strftime\('%m',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'MM')", sql)
         sql = _re.sub(r"strftime\('%Y-%m',\s*([^,)]+)\)", r"TO_CHAR(NULLIF(\1,'')::date, 'YYYY-MM')", sql)
@@ -3995,44 +3996,48 @@ def api_statistiky_prehled_pl():
     with get_db() as conn:
         # 1. Tržby po měsících (pro průměry a P&L)
         trzby = conn.execute(f"""
-            SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY') as rok,
-                   TO_CHAR(NULLIF(datum,'')::date,'MM') as mesic,
+            SELECT TO_CHAR(datum::date,'YYYY') as rok,
+                   TO_CHAR(datum::date,'MM') as mesic,
                    COUNT(*) as dni,
                    ROUND(SUM(trzba_vcpk)::numeric,0) as trzba_vcpk,
                    ROUND(SUM(karty+hotovost+vydaje)::numeric,0) as trzba
             FROM reporty
-            WHERE datum >= ? AND datum <= ? {fw} AND trzba_vcpk > 0
+            WHERE datum IS NOT NULL AND datum != ''
+              AND datum >= ? AND datum <= ? {fw} AND trzba_vcpk > 0
             GROUP BY rok, mesic ORDER BY rok, mesic
         """, [od, do] + fp).fetchall()
 
         # 2. Faktury po měsících
         faktury = conn.execute(f"""
-            SELECT TO_CHAR(NULLIF(datum_vystaveni,'')::date,'YYYY') as rok,
-                   TO_CHAR(NULLIF(datum_vystaveni,'')::date,'MM') as mesic,
+            SELECT TO_CHAR(datum_vystaveni::date,'YYYY') as rok,
+                   TO_CHAR(datum_vystaveni::date,'MM') as mesic,
                    ROUND(SUM(celkem_s_dph)::numeric,0) as castka
             FROM faktury
-            WHERE datum_vystaveni > '' AND datum_vystaveni >= ? AND datum_vystaveni <= ? {ffw}
+            WHERE datum_vystaveni IS NOT NULL AND datum_vystaveni != ''
+              AND datum_vystaveni >= ? AND datum_vystaveni <= ? {ffw}
             GROUP BY rok, mesic ORDER BY rok, mesic
         """, [od, do] + fp).fetchall()
 
         # 3. Ruční výdaje po měsících (provozní)
         vydaje = conn.execute(f"""
-            SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY') as rok,
-                   TO_CHAR(NULLIF(datum,'')::date,'MM') as mesic,
+            SELECT TO_CHAR(datum::date,'YYYY') as rok,
+                   TO_CHAR(datum::date,'MM') as mesic,
                    ROUND(SUM(castka)::numeric,0) as castka
             FROM vydaje
-            WHERE datum > '' AND datum >= ? AND datum <= ?
-            AND COALESCE(typ,'provozni')='provozni' {ffw}
+            WHERE datum IS NOT NULL AND datum != ''
+              AND datum >= ? AND datum <= ?
+              AND COALESCE(typ,'provozni')='provozni' {ffw}
             GROUP BY rok, mesic ORDER BY rok, mesic
         """, [od, do] + fp).fetchall()
 
         # 4. Výplaty po měsících
         vyplaty = conn.execute(f"""
-            SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY') as rok,
-                   TO_CHAR(NULLIF(datum,'')::date,'MM') as mesic,
+            SELECT TO_CHAR(datum::date,'YYYY') as rok,
+                   TO_CHAR(datum::date,'MM') as mesic,
                    ROUND(SUM(castka)::numeric,0) as castka
             FROM vyplaty
-            WHERE datum >= ? AND datum <= ? {ffw}
+            WHERE datum IS NOT NULL AND datum != ''
+              AND datum >= ? AND datum <= ? {ffw}
             GROUP BY rok, mesic ORDER BY rok, mesic
         """, [od, do] + fp).fetchall()
 
