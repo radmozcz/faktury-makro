@@ -136,6 +136,7 @@ function skryjNepovoleneMenu() {
     "vydaje":          "vydaje_zobrazit",
     "soukrome_vydaje": "soukrome_vydaje_zobrazit",
     "vystavene":       "vystavene_zobrazit",
+    "radek":           "radek_sekce",
   };
   document.querySelectorAll(".nav-item[data-page]").forEach(el => {
     const page = el.dataset.page;
