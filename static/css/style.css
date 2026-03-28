@@ -204,7 +204,7 @@ a { color: var(--green); text-decoration: none; }
 .stat-card.warning .stat-value { color: #C0892B; }
 
 /* ── Tabulky ───────────────────────────────────────────────── */
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 220px); }
 table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 thead th {
   background: var(--bg2);
