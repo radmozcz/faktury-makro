@@ -152,6 +152,8 @@ DEFAULT_PRAVA = {
         "vystavene_upravit":            False,
         "kalkulace":                    False,
         "upozorneni":                   False,
+        "nastenka":                     False,
+        "radek_sekce":                  False,
     },
     "ucetni": {
         "faktury_zobrazit":  True,
@@ -178,6 +180,8 @@ DEFAULT_PRAVA = {
         "vystavene_upravit":            False,
         "kalkulace":                    False,
         "upozorneni":                   False,
+        "nastenka":                     False,
+        "radek_sekce":                  False,
     },
 }
 
