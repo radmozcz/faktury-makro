@@ -2209,7 +2209,7 @@ async function openSkupinaDetail(alias) {
           ${data.nakupy.map(n => `
             <tr>
               <td>${czDate(n.datum_vystaveni)}</td>
-              <td style="font-size:.85rem;color:var(--txt2)">${escHtml(n.nazev_canonical||n.nazev||"")}</td>
+              <td style="font-size:.85rem;color:var(--accent);cursor:pointer;text-decoration:underline" onclick="openZboziDetail(${n.zbozi_id}, '${escHtml(n.nazev_canonical||"").replace(/'/g, String.fromCharCode(39))}')">  ${escHtml(n.nazev_canonical||n.nazev||"")}</td>
               <td>${escHtml(n.dodavatel)}</td>
               <td>${n.firma_zkratka}</td>
               <td>${Number(n.mnozstvi).toLocaleString("cs-CZ")} ${n.jednotka}</td>
