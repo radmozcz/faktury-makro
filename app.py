@@ -667,6 +667,15 @@ def migrate_db():
                 conn.execute("ALTER TABLE zbozi_aliasy DROP CONSTRAINT IF EXISTS zbozi_aliasy_alias_key")
         except Exception:
             pass
+            # Přidat UNIQUE constraint na prava tabulku pokud chybí
+    if _USE_PG:
+        try:
+            with get_db() as conn:
+                conn.execute("""
+                    ALTER TABLE prava ADD CONSTRAINT prava_role_sekce_unique UNIQUE (role, sekce)
+                """)
+        except Exception:
+            pass
 
     # Peněženka — hotovostní záznamy
     with get_db() as conn:
