@@ -201,7 +201,7 @@ function navigateTo(page) {
     vydaje:          renderVydaje,
     soukrome_vydaje: () => renderVydaje("soukrome"),
     vystavene:       renderVystavene,
-    radek:           renderRadek,
+    radek:           () => maPravo("radek_sekce") || App.userRole === "admin" ? renderRadek() : navigateTo("dashboard"),
     dokumenty:       renderDokumenty,
   };
   if (pages[page]) pages[page]();
@@ -235,7 +235,7 @@ function goBack() {
     vydaje:          renderVydaje,
     soukrome_vydaje: () => renderVydaje("soukrome"),
     vystavene:       renderVystavene,
-    radek:           renderRadek,
+    radek:           () => maPravo("radek_sekce") || App.userRole === "admin" ? renderRadek() : navigateTo("dashboard"),
     dokumenty:       renderDokumenty,
   };
   if (pages[prev]) pages[prev]();
