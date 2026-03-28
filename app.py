@@ -641,7 +641,7 @@ def migrate_db():
             except Exception: pass
 # Reset sekvencí pro SERIAL sloupce (oprava null id)
     if _USE_PG:
-        for tbl in ["vystavene_faktury", "faktury", "reporty", "vyplaty", "vydaje", "bankovni_pohyby", "zbozi", "polozky"]:
+        for tbl in ["vystavene_faktury", "faktury", "reporty", "vyplaty", "vydaje", "bankovni_pohyby", "zbozi", "polozky", "prava"]:
             try:
                 with get_db() as conn:
                     conn.execute(f"SELECT setval(pg_get_serial_sequence('{tbl}', 'id'), COALESCE((SELECT MAX(id) FROM {tbl}), 0) + 1, false)")
