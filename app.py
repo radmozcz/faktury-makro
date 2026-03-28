@@ -4901,6 +4901,42 @@ def export_faktury():
         buf = io.BytesIO(); wb_out.save(buf); buf.seek(0)
         return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                          download_name="faktury.xlsx", as_attachment=True)
+                         @app.route("/api/export/vydaje")
+@vyzaduj_prihlaseni
+def export_vydaje():
+    fmt   = request.args.get("format", "xlsx")
+    firma = request.args.get("firma", "")
+    od    = request.args.get("od", "")
+    do_   = request.args.get("do", "")
+    stav  = request.args.get("stav", "")
+    clauses, params = [], []
+    if firma: clauses.append("firma_zkratka=?"); params.append(firma)
+    if od:    clauses.append("datum>=?"); params.append(od)
+    if do_:   clauses.append("datum<=?"); params.append(do_)
+    if stav:  clauses.append("stav=?"); params.append(stav)
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    with get_db() as conn:
+        rows = conn.execute(f"""
+            SELECT firma_zkratka, datum, dodavatel, popis, castka, zpusob_uhrady, stav
+            FROM vydaje {where} ORDER BY datum DESC
+        """, params).fetchall()
+    headers = ["Firma", "Datum", "Dodavatel", "Popis/účel", "Částka", "Způsob úhrady", "Stav"]
+    if fmt == "csv":
+        buf = io.StringIO()
+        w = csv.writer(buf, delimiter=";")
+        w.writerow(headers)
+        for r in rows: w.writerow(list(r))
+        buf.seek(0)
+        return send_file(io.BytesIO(buf.getvalue().encode("utf-8-sig")),
+                         mimetype="text/csv", download_name="vydaje.csv", as_attachment=True)
+    else:
+        wb_out = openpyxl.Workbook()
+        ws_out = wb_out.active; ws_out.title = "Výdaje"
+        _xlsx_header(ws_out, headers)
+        for r in rows: ws_out.append(list(r))
+        buf = io.BytesIO(); wb_out.save(buf); buf.seek(0)
+        return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                         download_name="vydaje.xlsx", as_attachment=True)
 
 @app.route("/api/export/polozky")
 @vyzaduj_prihlaseni
