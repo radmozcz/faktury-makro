@@ -2199,30 +2199,48 @@ async function openSkupinaDetail(alias) {
   let data;
   try { data = await api(`/api/zbozi/alias-detail/${encodeURIComponent(alias)}`); } catch { return; }
 
+  // Seskupit nákupy podle nazev_canonical
+  const skupiny = {};
+  data.nakupy.forEach(n => {
+    const klic = n.nazev_canonical || n.nazev || "?";
+    if (!skupiny[klic]) skupiny[klic] = { zbozi_id: n.zbozi_id_orig || n.zbozi_id, nakupy: [] };
+    skupiny[klic].nakupy.push(n);
+  });
+
+  const sekce = Object.entries(skupiny).map(([nazev, s]) => `
+    <div style="margin-bottom:1.2rem">
+      <div style="display:flex;align-items:center;gap:.7rem;margin-bottom:.4rem">
+        <strong style="font-size:.95rem">${escHtml(nazev)}</strong>
+        <button class="btn btn-secondary btn-sm" onclick="openZboziDetail(${s.zbozi_id}, '${escHtml(nazev).replace(/'/g,"\\'")}')" title="Spravovat alias">⚙ alias</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Datum</th><th>Dodavatel</th><th>Firma</th><th>Množství</th><th>Cena/jedn.</th><th>Celkem</th><th></th></tr></thead>
+          <tbody>
+            ${s.nakupy.map(n => `
+              <tr>
+                <td>${czDate(n.datum_vystaveni)}</td>
+                <td>${escHtml(n.dodavatel)}</td>
+                <td>${n.firma_zkratka}</td>
+                <td>${Number(n.mnozstvi).toLocaleString("cs-CZ")} ${n.jednotka||""}</td>
+                <td>${czMoney(n.cena_za_jednotku_s_dph)}</td>
+                <td><strong>${czMoney(n.celkem_s_dph)}</strong></td>
+                <td style="white-space:nowrap">
+                  ${n.soubor_url ? `<a href="${n.soubor_url}" target="_blank" class="btn btn-secondary btn-sm" title="Zobrazit originál">🧾</a>` : ""}
+                  <button class="btn btn-secondary btn-sm" onclick="closeModal();navigujNaFakturu(${n.faktura_id})" title="Přejít na fakturu">≡</button>
+                </td>
+              </tr>`).join("")}
+          </tbody>
+        </table>
+      </div>
+    </div>`).join('<hr style="margin:.8rem 0;border-color:var(--border)">');
+
   const body = `
-    <h4 style="margin-bottom:.5rem">${escHtml(alias)}</h4>
-    <div style="margin-bottom:1rem;font-size:.82rem;color:var(--txt2)">Všechny nákupy pod tímto aliasem</div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Datum</th><th>Položka</th><th>Dodavatel</th><th>Firma</th><th>Množství</th><th>Cena/jedn.</th><th>Celkem</th><th></th></tr></thead>
-        <tbody>
-          ${data.nakupy.map(n => `
-            <tr>
-              <td>${czDate(n.datum_vystaveni)}</td>
-              <td style="font-size:.85rem;color:var(--accent);cursor:pointer;text-decoration:underline" onclick="openZboziDetail(${n.zbozi_id}, '${escHtml(n.nazev_canonical||"").replace(/'/g, String.fromCharCode(39))}')">  ${escHtml(n.nazev_canonical||n.nazev||"")}</td>
-              <td>${escHtml(n.dodavatel)}</td>
-              <td>${n.firma_zkratka}</td>
-              <td>${Number(n.mnozstvi).toLocaleString("cs-CZ")} ${n.jednotka}</td>
-              <td>${czMoney(n.cena_za_jednotku_s_dph)}</td>
-              <td><strong>${czMoney(n.celkem_s_dph)}</strong></td>
-              <td style="white-space:nowrap">
-                ${n.soubor_url ? `<a href="${n.soubor_url}" target="_blank" class="btn btn-secondary btn-sm" title="Zobrazit originál">🧾</a>` : ""}
-                <button class="btn btn-secondary btn-sm" onclick="closeModal();navigujNaFakturu(${n.faktura_id})" title="Přejít na fakturu">≡</button>
-              </td>
-            </tr>`).join("") || "<tr><td colspan='8' style='text-align:center;color:var(--txt2)'>Žádné nákupy</td></tr>"}
-        </tbody>
-      </table>
-    </div>`;
+    <div style="display:flex;align-items:center;gap:1rem;margin-bottom:1rem">
+      <h4 style="margin:0">${escHtml(alias)}</h4>
+      <span style="font-size:.82rem;color:var(--txt2)">${data.nakupy.length} nákupů celkem</span>
+    </div>
+    ${sekce || "<p style='color:var(--txt2)'>Žádné nákupy</p>"}`;
 
   openModal(`Skupina: ${escHtml(alias)}`, body);
 }
