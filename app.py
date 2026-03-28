@@ -4657,7 +4657,24 @@ def api_polozky():
             ORDER BY celkem_utraceno DESC
         """, params).fetchall()
     return jsonify([dict(r) for r in rows])
-
+@app.route("/api/zbozi/alias-detail/<path:alias>")
+@vyzaduj_prihlaseni
+def api_alias_detail(alias):
+    with get_db() as conn:
+        nakupy = conn.execute("""
+            SELECT p.*, f.dodavatel, f.datum_vystaveni, f.firma_zkratka, f.id as faktura_id,
+                   f.soubor_url, f.cislo_faktury, z.nazev_canonical
+            FROM polozky p
+            JOIN faktury f ON f.id = p.faktura_id
+            JOIN zbozi z ON z.id = p.zbozi_id
+            JOIN zbozi_aliasy al ON al.zbozi_id = z.id
+            WHERE LOWER(al.alias) = LOWER(%s)
+            ORDER BY f.datum_vystaveni DESC
+        """, (alias,)).fetchall()
+    return jsonify({
+        "alias": alias,
+        "nakupy": [dict(r) for r in nakupy]
+    })
 @app.route("/api/polozky/detail/<int:zbozi_id>")
 @vyzaduj_prihlaseni
 def api_zbozi_detail(zbozi_id):
