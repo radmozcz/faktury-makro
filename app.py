@@ -4646,8 +4646,11 @@ def api_polozky():
                 ROUND(CAST(SUM(p.celkem_s_dph) AS NUMERIC), 2)           AS celkem_utraceno,
                 ROUND(CAST(AVG(p.cena_za_jednotku_s_dph) AS NUMERIC), 4) AS prumerna_cena,
                 COUNT(DISTINCT p.faktura_id)                              AS pocet_nakupu,
-                STRING_AGG(DISTINCT fakt.dodavatel, ', ')                 AS dodavatele,
-                al.alias AS skupina
+                STRING_AGG(DISTINCT
+                    REPLACE(REPLACE(fakt.dodavatel, ' CR s', ' ČR s'), ' cr s', ' ČR s'),
+                ', ')                                                     AS dodavatele,
+                MIN(p.jednotka)                                           AS jednotka,
+                al.alias                                                  AS skupina
             FROM polozky p
             JOIN faktury fakt ON fakt.id = p.faktura_id
             LEFT JOIN zbozi z ON z.id = p.zbozi_id
