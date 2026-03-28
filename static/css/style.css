@@ -216,6 +216,9 @@ thead th {
   text-transform: uppercase;
   letter-spacing: .04em;
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 2;
 }
 tbody tr { border-bottom: 1px solid var(--border); transition: background .15s; }
 tbody tr:hover { background: var(--bg); cursor: pointer; }
