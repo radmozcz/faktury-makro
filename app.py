@@ -3598,6 +3598,31 @@ def api_report_nahrat_foto():
     return jsonify(report)
 
 
+@app.route("/api/reporty/nahrat-foto-pouze", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_report_nahrat_foto_pouze():
+    """Nahraje fotku na GCS bez OCR — používá se při editaci existujícího reportu."""
+    if "soubor" not in request.files:
+        return jsonify({"error": "Žádný soubor"}), 400
+    f = request.files["soubor"]
+    if not f.filename:
+        return jsonify({"error": "Prázdný soubor"}), 400
+
+    fname = secure_filename(f.filename)
+    ts    = datetime.now().strftime("%Y%m%d_%H%M%S_")
+    fname = "report_" + ts + fname
+    fpath = os.path.join(UPLOAD_DIR, fname)
+    f.save(fpath)
+
+    gcs_url = None
+    try:
+        gcs_url = upload_to_gcs(fpath, f"reporty/{fname}")
+    except Exception as e:
+        app.logger.warning(f"GCS upload reportu selhal: {e}")
+
+    return jsonify({"ok": True, "soubor_url": gcs_url})
+
+
 @app.route("/api/reporty/nahrat-text", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_report_nahrat_text():
