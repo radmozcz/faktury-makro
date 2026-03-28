@@ -3684,6 +3684,8 @@ async function renderNastaveni() {
     { klic: "naklady_zobrazit",  label: "Náklady — zobrazit" },
     { klic: "bankovni_vypisy",   label: "Bankovní výpisy" },
     { klic: "banky_soukrome",    label: "Banky — Radek osobní" },
+    { klic: "nastenka",          label: "Nástěnka — zobrazit" },
+    { klic: "radek_sekce",       label: "Radek — soukromá sekce" },
     { klic: "statistiky",        label: "Statistiky" },
     { klic: "nastaveni",         label: "Nastavení" },
     { klic: "kalkulace",         label: "Kalkulace" },
