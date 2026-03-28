@@ -205,6 +205,8 @@ a { color: var(--green); text-decoration: none; }
 
 /* ── Tabulky ───────────────────────────────────────────────── */
 .table-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 220px); }
+#reportyList { max-height: calc(100vh - 480px); }
+#fakturyTable { max-height: calc(100vh - 280px); }
 table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 thead th {
   background: var(--bg2);
