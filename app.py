@@ -1689,7 +1689,7 @@ def api_prava_set():
                 for sekce, povoleno in sekce_dict.items():
                     conn.execute("""
                         INSERT INTO prava (role, sekce, povoleno)
-                        VALUES (?, ?, ?)
+                        VALUES (%s, %s, %s)
                         ON CONFLICT (role, sekce) DO UPDATE SET povoleno = excluded.povoleno
                     """, (role, sekce, 1 if povoleno else 0))
         return jsonify({"ok": True})
