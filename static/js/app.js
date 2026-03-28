@@ -5480,13 +5480,13 @@ async function renderVydaje(typ = "provozni") {
   const jeSoukrome = typ === "soukrome";
   const nazev = jeSoukrome ? "Soukromé výdaje" : "Výdaje";
   const pravoUpravit = jeSoukrome ? "soukrome_vydaje_upravit" : "vydaje_upravit";
-  const tlacitka = maPravo(pravoUpravit)
-    ? jeSoukrome
-      ? `<button class="btn btn-primary btn-sm" onclick="renderSoukromeNahrat()">📷 Nahrát doklad</button>
-         <button class="btn btn-sm" onclick="openVydajRucni()">✏️ Ruční zadání</button>`
-      : `<button class="btn btn-primary btn-sm" onclick="openVydajNahrat('${typ}')">📷 Nahrát doklad</button>
-         <button class="btn btn-sm" onclick="openVydajRucni()">✏️ Ruční zadání</button>`
-    : "";
+  const exportButtons = `
+  <button class="btn btn-secondary btn-sm" onclick="exportVydaje('xlsx')">⬇ Excel</button>
+  <button class="btn btn-secondary btn-sm" onclick="exportVydaje('csv')">⬇ CSV</button>`;
+const tlacitka = (maPravo(pravoUpravit)
+  ? `<button class="btn btn-primary btn-sm" onclick="${jeSoukrome ? 'renderSoukromeNahrat()' : `openVydajNahrat('${typ}')`}">📋 Nahrát doklad</button>
+     <button class="btn btn-sm" onclick="openVydajRucni()">✏ Ruční zadání</button>`
+  : "") + exportButtons;
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
       <h1 class="page-title">${nazev}</h1>
@@ -5944,7 +5944,16 @@ async function ulozitVydajZDokladu(soubor_cesta, soubor_url) {
   toast("Výdaj uložen ✓");
   if (jeSoukrome) { renderVydaje("soukrome"); } else { closeModal(); loadVydaje(); loadVydajeNezaplacene(); }
 }
-
+function exportVydaje(fmt) {
+  const params = new URLSearchParams({
+    format: fmt,
+    firma: document.getElementById("vFirma")?.value || "",
+    stav:  document.getElementById("vStav")?.value  || "",
+    od:    document.getElementById("vOd")?.value    || "",
+    do:    document.getElementById("vDo")?.value    || "",
+  });
+  window.location.href = `/api/export/vydaje?${params}`;
+}
 async function smazatVydaj(id) {
   if (!confirm("Opravdu smazat tento výdaj?")) return;
   await api(`/api/vydaje/${id}`, { method:"DELETE" });
