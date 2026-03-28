@@ -5072,7 +5072,7 @@ async function ulozitReport() {
     }
   }
   closeModal();
-  renderReporty();
+  loadReporty();
 }
 
 // ── Import xlsx ─────────────────────────────────────────────────
