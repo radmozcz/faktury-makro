@@ -204,9 +204,7 @@ a { color: var(--green); text-decoration: none; }
 .stat-card.warning .stat-value { color: #C0892B; }
 
 /* ── Tabulky ───────────────────────────────────────────────── */
-.table-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 220px); }
-#reportyList { max-height: calc(100vh - 480px); }
-#fakturyTable { max-height: calc(100vh - 280px); }
+.table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 thead th {
   background: var(--bg2);
@@ -218,9 +216,6 @@ thead th {
   text-transform: uppercase;
   letter-spacing: .04em;
   white-space: nowrap;
-  position: sticky;
-  top: 0;
-  z-index: 2;
 }
 tbody tr { border-bottom: 1px solid var(--border); transition: background .15s; }
 tbody tr:hover { background: var(--bg); cursor: pointer; }
