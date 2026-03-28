@@ -5018,6 +5018,9 @@ async function zpracovatReportText() {
 async function ulozitReport() {
   const datum = document.getElementById("rfDatum")?.value;
   if (!datum) { toast("Vyplňte datum", true); return; }
+
+  const btn = document.querySelector("#modalBody .btn-primary");
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Ukládám…"; }
   const payload = {
     datum,
     den:         document.getElementById("rfDen")?.value || "",
