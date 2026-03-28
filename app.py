@@ -4901,7 +4901,7 @@ def export_faktury():
         buf = io.BytesIO(); wb_out.save(buf); buf.seek(0)
         return send_file(buf, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                          download_name="faktury.xlsx", as_attachment=True)
-                         @app.route("/api/export/vydaje")
+@app.route("/api/export/vydaje")
 @vyzaduj_prihlaseni
 def export_vydaje():
     fmt   = request.args.get("format", "xlsx")
