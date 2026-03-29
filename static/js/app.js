@@ -3746,6 +3746,7 @@ async function renderNastaveni() {
       <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-top:.5rem">
         <button class="btn btn-primary" onclick="saveConfig()">💾 Uložit nastavení</button>
         <button class="btn" style="background:var(--accent);color:#1a1a1a" onclick="opravDuplicity()">🔍 Najít duplicity</button>
+        <button class="btn" style="background:#b45309;color:#fff" onclick="oznacObsahDuplicity()">🔍 Obsahové duplicity (datum+částka+položky)</button>
         <button class="btn" style="background:#6c757d;color:#fff" onclick="normalizujNazvy()">🧹 Odstranit ARO/MC/FL prefixy</button>
         <button class="btn" style="background:#2563eb;color:#fff" onclick="stahnoutZalohu()">📦 Záloha do GCS</button>
         <button class="btn btn-secondary btn-sm" onclick="stahnoutSqlDump()" id="btnSqlZaloha">💾 SQL záloha → GCS</button>
@@ -4013,6 +4014,28 @@ async function loadZalohy() {
         <a href="/api/admin/zaloha-stahnout/${encodeURIComponent(z.nazev)}" class="btn btn-secondary btn-sm">⬇ Stáhnout</a>
       </div>`).join("");
   } catch { el.innerHTML = `<div style="color:var(--txt2);font-size:.85rem">Nepodařilo se načíst</div>`; }
+}
+
+async function oznacObsahDuplicity() {
+  const btn = document.querySelector('[onclick="oznacObsahDuplicity()"]');
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Hledám…"; }
+  try {
+    const res = await api("/api/oznac-obsahove-duplicity", { method: "POST" });
+    if (res.ok) {
+      const poc = res.oznaceno;
+      const zprava = poc === 0
+        ? "Žádné obsahové duplicity nenalezeny ✓"
+        : `Nalezeno a označeno ${poc} obsahových duplikát${poc === 1 ? "a" : poc < 5 ? "y" : "ů"} — zkontroluj sekci Faktury`;
+      toast(zprava, poc === 0 ? false : false);
+      if (poc > 0) navigateTo("faktury");
+    } else {
+      toast("Chyba: " + (res.chyba || "neznámá"), true);
+    }
+  } catch (e) {
+    toast("Chyba při hledání duplicit: " + e.message, true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "🔍 Obsahové duplicity (datum+částka+položky)"; }
+  }
 }
 
 async function opravDuplicity() {
