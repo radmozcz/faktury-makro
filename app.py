@@ -5962,6 +5962,24 @@ def api_eur_kurz():
         app.logger.warning(f"CNB kurz chyba: {e}")
     return jsonify({"kurz": 25.0})
 
+
+@app.route("/api/usd-kurz")
+@vyzaduj_prihlaseni
+def api_usd_kurz():
+    """Vrátí aktuální kurz USD/CZK z CNB."""
+    import urllib.request as _ur
+    try:
+        req = _ur.Request("https://api.cnb.cz/cnbapi/exrates/daily?lang=EN",
+                          headers={"User-Agent": "faktury-makro/1.0"})
+        with _ur.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+        usd = next((r for r in data.get("rates", []) if r["currencyCode"] == "USD"), None)
+        if usd:
+            return jsonify({"kurz": round(usd["rate"] / usd["amount"], 4)})
+    except Exception as e:
+        app.logger.warning(f"CNB USD kurz chyba: {e}")
+    return jsonify({"kurz": 23.0})
+
 BANKY_SLOUPCE = ["rb_fp","rb_mr","rb_cff","rb_radek","air_fp","air_mr","air_cff","air_radek","kb_radek"]
 
 @app.route("/api/penezenka")
