@@ -5697,6 +5697,75 @@ def api_oprav_duplicity():
         return jsonify({"ok": False, "chyba": str(e)}), 500
 
 
+@app.route("/api/oznac-obsahove-duplicity", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_oznac_obsahove_duplicity():
+    """Projde všechny faktury a označí obsahové duplicity (stejné datum + částka + položky, ignoruje číslo FA)."""
+    try:
+        oznaceno = 0
+        with get_db() as conn:
+            # Načti všechny faktury seřazené od nejstarší
+            faktury = conn.execute(
+                "SELECT id, datum_vystaveni, celkem_s_dph FROM faktury ORDER BY id ASC"
+            ).fetchall()
+
+            for f in faktury:
+                fid = f["id"] if isinstance(f, dict) else f[0]
+                datum = f["datum_vystaveni"] if isinstance(f, dict) else f[1]
+                castka = float(f["celkem_s_dph"] if isinstance(f, dict) else f[2])
+
+                # Přeskočit pokud již označena
+                existujici_dup = conn.execute(
+                    "SELECT duplicita_id FROM faktury WHERE id=?", (fid,)
+                ).fetchone()
+                dup_id = existujici_dup["duplicita_id"] if isinstance(existujici_dup, dict) else existujici_dup[0]
+                if dup_id:
+                    continue
+
+                # Načti položky této faktury
+                polozky = conn.execute(
+                    "SELECT nazev, mnozstvi FROM polozky WHERE faktura_id=? ORDER BY nazev", (fid,)
+                ).fetchall()
+                if not polozky:
+                    continue
+
+                # Hledej starší fakturu se stejným datem, částkou a položkami
+                kandidati = conn.execute("""
+                    SELECT id FROM faktury
+                    WHERE datum_vystaveni = ? AND ABS(celkem_s_dph - ?) < 0.01
+                    AND id < ?
+                """, (datum, castka, fid)).fetchall()
+
+                for k in kandidati:
+                    kid = k["id"] if isinstance(k, dict) else k[0]
+                    kpol = conn.execute(
+                        "SELECT nazev, mnozstvi FROM polozky WHERE faktura_id=? ORDER BY nazev", (kid,)
+                    ).fetchall()
+                    if len(kpol) != len(polozky):
+                        continue
+                    nove = sorted([(
+                        (p["nazev"] if isinstance(p, dict) else p[0]).strip(),
+                        float(p["mnozstvi"] if isinstance(p, dict) else p[1])
+                    ) for p in polozky])
+                    existujici = sorted([(
+                        (p["nazev"] if isinstance(p, dict) else p[0]).strip(),
+                        float(p["mnozstvi"] if isinstance(p, dict) else p[1])
+                    ) for p in kpol])
+                    if nove == existujici:
+                        conn.execute(
+                            "UPDATE faktury SET duplicita_id=? WHERE id=? AND duplicita_id IS NULL",
+                            (kid, fid)
+                        )
+                        oznaceno += 1
+                        break
+
+        return jsonify({"ok": True, "oznaceno": oznaceno})
+    except Exception as e:
+        return jsonify({"ok": False, "chyba": str(e)}), 500
+    except Exception as e:
+        return jsonify({"ok": False, "chyba": str(e)}), 500
+
+
 # ═══════════════════════════════════════════════════════════════
 #  KALKULACE
 # ═══════════════════════════════════════════════════════════════
