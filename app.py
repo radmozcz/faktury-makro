@@ -5733,105 +5733,85 @@ def api_debug_duplicita(fid1, fid2):
 @app.route("/api/oznac-obsahove-duplicity", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_oznac_obsahove_duplicity():
-    """Projde všechny faktury a označí obsahové duplicity.
-    Průchod 1: stejné datum + částka + položky.
-    Průchod 2: stejné datum + položky (ignoruje částku — zachytí fejkové FA bez celkové částky).
+    """Označí duplicitní faktury. Stačí splnit jedno z kritérií:
+    A) datum + VS (číslo faktury)
+    B) datum + částka (tol. 1 Kč) + položky
+    C) datum + položky (bez ohledu na částku)
+    D) datum + VS + částka
     """
+    import re as _re
+
+    def _norm_nazev(n):
+        n = str(n).strip().upper()
+        n = _re.sub(r'^(ARO|MC|FL|CBA)\s+', '', n)
+        n = _re.sub(r'\s+(KG|G|L|ML|KS|PC|BG|SW|CA)$', '', n)
+        return n
+
+    def _norm_polozky(rows):
+        result = []
+        for p in rows:
+            nazev = p["nazev"] if isinstance(p, dict) else p[0]
+            mnozstvi = float(p["mnozstvi"] if isinstance(p, dict) else p[1])
+            if _re.search(r'KUP\s+V[IÍ]CE|PLA[TŤ]\s+M[EÉ]N[EĚ]', nazev.upper()):
+                continue
+            result.append((_norm_nazev(nazev), mnozstvi))
+        return sorted(result)
+
     try:
         oznaceno = 0
         with get_db() as conn:
             faktury = conn.execute(
-                "SELECT id, datum_vystaveni, celkem_s_dph FROM faktury ORDER BY id ASC"
+                "SELECT id, datum_vystaveni, celkem_s_dph, cislo_faktury FROM faktury ORDER BY id ASC"
             ).fetchall()
 
-            def _porovnej_polozky(fid, kid):
-                """Vrátí True pokud mají obě faktury stejné položky (název + množství).
-                Porovnává case-insensitive a ignoruje přípony jako ' KG', ' kg' na konci názvu."""
-                pol_f = conn.execute(
-                    "SELECT nazev, mnozstvi FROM polozky WHERE faktura_id=? ORDER BY nazev", (fid,)
-                ).fetchall()
-                pol_k = conn.execute(
-                    "SELECT nazev, mnozstvi FROM polozky WHERE faktura_id=? ORDER BY nazev", (kid,)
-                ).fetchall()
-                if not pol_f or not pol_k:
-                    return False
-                if len(pol_f) != len(pol_k):
-                    return False
-                import re as _re
-                def _norm_nazev(n):
-                    n = n.strip().upper()
-                    n = _re.sub(r'^(ARO|MC|FL|CBA)\s+', '', n)  # odstranit prefix
-                    n = _re.sub(r'\s+(KG|G|L|ML|KS|PC|BG|SW|CA)$', '', n)  # odstranit příponu
-                    return n
-                def _norm(rows):
-                    return sorted([
-                        (_norm_nazev(p["nazev"] if isinstance(p, dict) else p[0]),
-                         float(p["mnozstvi"] if isinstance(p, dict) else p[1]))
-                        for p in rows
-                    ])
-                return _norm(pol_f) == _norm(pol_k)
+            _pol_cache = {}
+            def _get_polozky(fid):
+                if fid not in _pol_cache:
+                    rows = conn.execute(
+                        "SELECT nazev, mnozstvi FROM polozky WHERE faktura_id=?", (fid,)
+                    ).fetchall()
+                    _pol_cache[fid] = _norm_polozky(rows)
+                return _pol_cache[fid]
+
+            def _oznac(fid, kid):
+                conn.execute(
+                    "UPDATE faktury SET duplicita_id=? WHERE id=? AND duplicita_id IS NULL",
+                    (kid, fid)
+                )
 
             for f in faktury:
-                fid   = f["id"] if isinstance(f, dict) else f[0]
-                datum = f["datum_vystaveni"] if isinstance(f, dict) else f[1]
+                fid    = f["id"] if isinstance(f, dict) else f[0]
+                datum  = f["datum_vystaveni"] if isinstance(f, dict) else f[1]
                 castka = float(f["celkem_s_dph"] if isinstance(f, dict) else f[2])
+                vs     = (f["cislo_faktury"] if isinstance(f, dict) else f[3] or "").strip()
 
-                # Přeskočit pokud již označena
                 dup_row = conn.execute("SELECT duplicita_id FROM faktury WHERE id=?", (fid,)).fetchone()
                 if dup_row and (dup_row["duplicita_id"] if isinstance(dup_row, dict) else dup_row[0]):
                     continue
 
-                polozky = conn.execute(
-                    "SELECT nazev, mnozstvi FROM polozky WHERE faktura_id=?", (fid,)
-                ).fetchall()
-                if not polozky:
-                    continue
-
-                # Průchod 1: stejné datum + částka + položky
                 kandidati = conn.execute("""
-                    SELECT id FROM faktury
-                    WHERE datum_vystaveni = ? AND ABS(celkem_s_dph - ?) < 1.0
-                    AND id < ?
-                """, (datum, castka, fid)).fetchall()
-
-                nalezeno = False
-                for k in kandidati:
-                    kid = k["id"] if isinstance(k, dict) else k[0]
-                    if _porovnej_polozky(fid, kid):
-                        conn.execute(
-                            "UPDATE faktury SET duplicita_id=? WHERE id=? AND duplicita_id IS NULL",
-                            (kid, fid)
-                        )
-                        oznaceno += 1
-                        nalezeno = True
-                        break
-
-                if nalezeno:
-                    continue
-
-                # Průchod 2: stejné datum + položky (bez ohledu na částku)
-                kandidati2 = conn.execute("""
-                    SELECT id FROM faktury
-                    WHERE datum_vystaveni = ? AND id < ?
+                    SELECT id, celkem_s_dph, cislo_faktury FROM faktury
+                    WHERE datum_vystaveni = ? AND id != ? AND duplicita_id IS NULL
+                    ORDER BY id ASC
                 """, (datum, fid)).fetchall()
 
-                for k in kandidati2:
-                    kid = k["id"] if isinstance(k, dict) else k[0]
-                    if _porovnej_polozky(fid, kid):
-                        conn.execute(
-                            "UPDATE faktury SET duplicita_id=? WHERE id=? AND duplicita_id IS NULL",
-                            (kid, fid)
-                        )
+                for k in kandidati:
+                    kid     = k["id"] if isinstance(k, dict) else k[0]
+                    kcastka = float(k["celkem_s_dph"] if isinstance(k, dict) else k[1])
+                    kvs     = (k["cislo_faktury"] if isinstance(k, dict) else k[2] or "").strip()
+
+                    castka_ok  = abs(castka - kcastka) < 1.0
+                    vs_ok      = bool(vs and kvs and vs == kvs)
+                    pol_f      = _get_polozky(fid)
+                    pol_k      = _get_polozky(kid)
+                    polozky_ok = bool(pol_f and pol_k and pol_f == pol_k)
+
+                    if vs_ok or (castka_ok and polozky_ok) or polozky_ok or (vs_ok and castka_ok):
+                        _oznac(fid, kid)
                         oznaceno += 1
                         break
 
         return jsonify({"ok": True, "oznaceno": oznaceno})
-    except Exception as e:
-        return jsonify({"ok": False, "chyba": str(e)}), 500
-
-        return jsonify({"ok": True, "oznaceno": oznaceno})
-    except Exception as e:
-        return jsonify({"ok": False, "chyba": str(e)}), 500
     except Exception as e:
         return jsonify({"ok": False, "chyba": str(e)}), 500
 
