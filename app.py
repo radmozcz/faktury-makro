@@ -4605,6 +4605,18 @@ def api_nahrat():
                     "celkem": row["celkem_s_dph"]
                 }
 
+    # Obsahová duplicita (stejné datum + částka + položky, ignoruje číslo faktury)
+    if not data.get("duplicita") and data.get("datum_vystaveni") and data.get("polozky"):
+        with get_db() as conn:
+            obs_dup = _najdi_obsahovou_duplicitu(
+                conn, data.get("datum_vystaveni",""),
+                float(data.get("celkem_s_dph", 0)),
+                data.get("polozky", [])
+            )
+            if obs_dup:
+                data["duplicita"] = obs_dup
+                data["duplicita"]["typ"] = "obsahova"
+
     return jsonify(data)
 
 @app.route("/api/faktury", methods=["POST"])
@@ -4617,6 +4629,17 @@ def api_faktura_ulozit():
             return jsonify({"error": f"Chybí pole: {r}"}), 400
 
     polozky = data.pop("polozky", [])
+
+    # Detekce obsahové duplicity před uložením
+    obsahova_duplicita_id = None
+    with get_db() as conn:
+        obs_dup = _najdi_obsahovou_duplicitu(
+            conn, data.get("datum_vystaveni",""),
+            float(data.get("celkem_s_dph", 0)),
+            polozky
+        )
+        if obs_dup:
+            obsahova_duplicita_id = obs_dup["id"]
 
     with get_db() as conn:
         cur = conn.execute("""
@@ -4635,7 +4658,7 @@ def api_faktura_ulozit():
             data.get("soubor_cesta",""),
             data.get("soubor_url",""),
             data.get("zdroj","rucni"),
-            data.get("duplicita_id", None)
+            obsahova_duplicita_id or data.get("duplicita_id", None)
         ))
         faktura_id = cur.lastrowid
 
@@ -4658,6 +4681,46 @@ def api_faktura_ulozit():
         recalc_faktura_total(conn, faktura_id)
 
     return jsonify({"ok": True, "id": faktura_id})
+
+
+def _najdi_obsahovou_duplicitu(conn, datum, celkem_s_dph, polozky, vynechat_id=None):
+    """Hledá fakturu se stejným datem, celkovou částkou a stejnými položkami (bez ohledu na číslo faktury).
+    Vrátí dict s info o duplicitě nebo None."""
+    if not datum or not polozky:
+        return None
+    kandidati = conn.execute("""
+        SELECT id, firma_zkratka, datum_vystaveni, celkem_s_dph, cislo_faktury
+        FROM faktury
+        WHERE datum_vystaveni = ? AND ABS(celkem_s_dph - ?) < 0.01
+    """, (datum, float(celkem_s_dph))).fetchall()
+
+    for k in kandidati:
+        kid = k["id"] if isinstance(k, dict) else k[0]
+        if vynechat_id and kid == vynechat_id:
+            continue
+        # Načíst položky kandidáta
+        kpol = conn.execute("""
+            SELECT nazev, mnozstvi FROM polozky WHERE faktura_id = ? ORDER BY nazev
+        """, (kid,)).fetchall()
+        # Porovnat počet položek
+        if len(kpol) != len(polozky):
+            continue
+        # Seřadit nové položky stejně
+        nove = sorted([(p.get("nazev","").strip(), float(p.get("mnozstvi",1) or 1)) for p in polozky])
+        existujici = sorted([
+            ((p["nazev"] if isinstance(p, dict) else p[0]).strip(),
+             float(p["mnozstvi"] if isinstance(p, dict) else p[1]))
+            for p in kpol
+        ])
+        if nove == existujici:
+            return {
+                "id": kid,
+                "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
+                "datum": k["datum_vystaveni"] if isinstance(k, dict) else k[2],
+                "celkem": k["celkem_s_dph"] if isinstance(k, dict) else k[3],
+                "cislo_faktury": k["cislo_faktury"] if isinstance(k, dict) else k[4],
+            }
+    return None
 
 
 def _get_or_create_zbozi(conn, nazev):
