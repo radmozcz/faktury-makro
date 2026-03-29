@@ -4686,8 +4686,15 @@ def api_faktura_ulozit():
 def _najdi_obsahovou_duplicitu(conn, datum, celkem_s_dph, polozky, vynechat_id=None):
     """Hledá fakturu se stejným datem, celkovou částkou a stejnými položkami (bez ohledu na číslo faktury).
     Vrátí dict s info o duplicitě nebo None."""
+    import re as _re
     if not datum or not polozky:
         return None
+
+    def _norm_nazev(n):
+        n = str(n).strip().upper()
+        n = _re.sub(r'\s+(KG|G|L|ML|KS|PC|BG|SW|CA)$', '', n)
+        return n
+
     kandidati = conn.execute("""
         SELECT id, firma_zkratka, datum_vystaveni, celkem_s_dph, cislo_faktury
         FROM faktury
@@ -4698,17 +4705,14 @@ def _najdi_obsahovou_duplicitu(conn, datum, celkem_s_dph, polozky, vynechat_id=N
         kid = k["id"] if isinstance(k, dict) else k[0]
         if vynechat_id and kid == vynechat_id:
             continue
-        # Načíst položky kandidáta
-        kpol = conn.execute("""
-            SELECT nazev, mnozstvi FROM polozky WHERE faktura_id = ? ORDER BY nazev
-        """, (kid,)).fetchall()
-        # Porovnat počet položek
+        kpol = conn.execute(
+            "SELECT nazev, mnozstvi FROM polozky WHERE faktura_id = ? ORDER BY nazev", (kid,)
+        ).fetchall()
         if len(kpol) != len(polozky):
             continue
-        # Seřadit nové položky stejně
-        nove = sorted([(p.get("nazev","").strip(), float(p.get("mnozstvi",1) or 1)) for p in polozky])
+        nove = sorted([(_norm_nazev(p.get("nazev","")), float(p.get("mnozstvi",1) or 1)) for p in polozky])
         existujici = sorted([
-            ((p["nazev"] if isinstance(p, dict) else p[0]).strip(),
+            (_norm_nazev(p["nazev"] if isinstance(p, dict) else p[0]),
              float(p["mnozstvi"] if isinstance(p, dict) else p[1]))
             for p in kpol
         ])
@@ -5712,7 +5716,8 @@ def api_oznac_obsahove_duplicity():
             ).fetchall()
 
             def _porovnej_polozky(fid, kid):
-                """Vrátí True pokud mají obě faktury stejné položky (název + množství)."""
+                """Vrátí True pokud mají obě faktury stejné položky (název + množství).
+                Porovnává case-insensitive a ignoruje přípony jako ' KG', ' kg' na konci názvu."""
                 pol_f = conn.execute(
                     "SELECT nazev, mnozstvi FROM polozky WHERE faktura_id=? ORDER BY nazev", (fid,)
                 ).fetchall()
@@ -5723,9 +5728,15 @@ def api_oznac_obsahove_duplicity():
                     return False
                 if len(pol_f) != len(pol_k):
                     return False
+                import re as _re
+                def _norm_nazev(n):
+                    n = n.strip().upper()
+                    # Odstraň přípony jako " KG", " G", " L", " ML", " KS" na konci
+                    n = _re.sub(r'\s+(KG|G|L|ML|KS|PC|BG|SW|CA)$', '', n)
+                    return n
                 def _norm(rows):
                     return sorted([
-                        ((p["nazev"] if isinstance(p, dict) else p[0]).strip(),
+                        (_norm_nazev(p["nazev"] if isinstance(p, dict) else p[0]),
                          float(p["mnozstvi"] if isinstance(p, dict) else p[1]))
                         for p in rows
                     ])
