@@ -4692,7 +4692,8 @@ def _najdi_obsahovou_duplicitu(conn, datum, celkem_s_dph, polozky, vynechat_id=N
 
     def _norm_nazev(n):
         n = str(n).strip().upper()
-        n = _re.sub(r'\s+(KG|G|L|ML|KS|PC|BG|SW|CA)$', '', n)
+        n = _re.sub(r'^(ARO|MC|FL|CBA)\s+', '', n)  # odstranit prefix
+        n = _re.sub(r'\s+(KG|G|L|ML|KS|PC|BG|SW|CA)$', '', n)  # odstranit příponu
         return n
 
     kandidati = conn.execute("""
@@ -5731,8 +5732,8 @@ def api_oznac_obsahove_duplicity():
                 import re as _re
                 def _norm_nazev(n):
                     n = n.strip().upper()
-                    # Odstraň přípony jako " KG", " G", " L", " ML", " KS" na konci
-                    n = _re.sub(r'\s+(KG|G|L|ML|KS|PC|BG|SW|CA)$', '', n)
+                    n = _re.sub(r'^(ARO|MC|FL|CBA)\s+', '', n)  # odstranit prefix
+                    n = _re.sub(r'\s+(KG|G|L|ML|KS|PC|BG|SW|CA)$', '', n)  # odstranit příponu
                     return n
                 def _norm(rows):
                     return sorted([
