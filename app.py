@@ -5702,6 +5702,34 @@ def api_oprav_duplicity():
         return jsonify({"ok": False, "chyba": str(e)}), 500
 
 
+@app.route("/api/debug-duplicita/<int:fid1>/<int:fid2>")
+@vyzaduj_prihlaseni
+def api_debug_duplicita(fid1, fid2):
+    import re as _re
+    def _norm_nazev(n):
+        n = str(n).strip().upper()
+        n = _re.sub(r'^(ARO|MC|FL|CBA)\s+', '', n)
+        n = _re.sub(r'\s+(KG|G|L|ML|KS|PC|BG|SW|CA)$', '', n)
+        return n
+    with get_db() as conn:
+        f1 = dict(conn.execute("SELECT id, datum_vystaveni, celkem_s_dph FROM faktury WHERE id=?", (fid1,)).fetchone())
+        f2 = dict(conn.execute("SELECT id, datum_vystaveni, celkem_s_dph FROM faktury WHERE id=?", (fid2,)).fetchone())
+        pol1 = conn.execute("SELECT nazev, mnozstvi FROM polozky WHERE faktura_id=? ORDER BY nazev", (fid1,)).fetchall()
+        pol2 = conn.execute("SELECT nazev, mnozstvi FROM polozky WHERE faktura_id=? ORDER BY nazev", (fid2,)).fetchall()
+    norm1 = sorted([(_norm_nazev(p["nazev"] if isinstance(p,dict) else p[0]), float(p["mnozstvi"] if isinstance(p,dict) else p[1])) for p in pol1])
+    norm2 = sorted([(_norm_nazev(p["nazev"] if isinstance(p,dict) else p[0]), float(p["mnozstvi"] if isinstance(p,dict) else p[1])) for p in pol2])
+    return jsonify({
+        "f1": f1, "f2": f2,
+        "pocet1": len(pol1), "pocet2": len(pol2),
+        "datum_ok": f1["datum_vystaveni"] == f2["datum_vystaveni"],
+        "castka_ok": abs(float(f1["celkem_s_dph"]) - float(f2["celkem_s_dph"])) < 0.01,
+        "polozky_ok": norm1 == norm2,
+        "norm1": norm1, "norm2": norm2,
+        "rozdily_1_nema_2": [x for x in norm1 if x not in norm2],
+        "rozdily_2_nema_1": [x for x in norm2 if x not in norm1],
+    })
+
+
 @app.route("/api/oznac-obsahove-duplicity", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_oznac_obsahove_duplicity():
