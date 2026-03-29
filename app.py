@@ -4595,7 +4595,7 @@ def api_nahrat():
                 FROM faktury
                 WHERE cislo_faktury = ?
                 AND datum_vystaveni = ?
-                AND ABS(celkem_s_dph - ?) < 0.01
+                AND ABS(celkem_s_dph - ?) < 1.0
             """, (data["cislo_faktury"], data.get("datum_vystaveni",""), float(data.get("celkem_s_dph", 0)))).fetchone()
             if row:
                 data["duplicita"] = {
@@ -4699,7 +4699,7 @@ def _najdi_obsahovou_duplicitu(conn, datum, celkem_s_dph, polozky, vynechat_id=N
     kandidati = conn.execute("""
         SELECT id, firma_zkratka, datum_vystaveni, celkem_s_dph, cislo_faktury
         FROM faktury
-        WHERE datum_vystaveni = ? AND ABS(celkem_s_dph - ?) < 0.01
+        WHERE datum_vystaveni = ? AND ABS(celkem_s_dph - ?) < 1.0
     """, (datum, float(celkem_s_dph))).fetchall()
 
     for k in kandidati:
@@ -5790,7 +5790,7 @@ def api_oznac_obsahove_duplicity():
                 # Průchod 1: stejné datum + částka + položky
                 kandidati = conn.execute("""
                     SELECT id FROM faktury
-                    WHERE datum_vystaveni = ? AND ABS(celkem_s_dph - ?) < 0.01
+                    WHERE datum_vystaveni = ? AND ABS(celkem_s_dph - ?) < 1.0
                     AND id < ?
                 """, (datum, castka, fid)).fetchall()
 
