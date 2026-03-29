@@ -6391,10 +6391,11 @@ const PW_BROKERI = [
   { key:"xtb_czk", label:"XTB — CZK" },
   { key:"xtb_eur", label:"XTB — EUR", eur:true },
   { key:"t212",    label:"Trading 212" },
-  { key:"etoro",   label:"eToro" },
+  { key:"etoro",   label:"eToro", usd:true },
 ];
 
 let _pwEurKurz = null;
+let _pwUsdKurz = null;
 
 async function _pwNacistKurz() {
   if (_pwEurKurz) return _pwEurKurz;
@@ -6405,6 +6406,17 @@ async function _pwNacistKurz() {
     _pwEurKurz = 25;
   }
   return _pwEurKurz;
+}
+
+async function _pwNacistUsdKurz() {
+  if (_pwUsdKurz) return _pwUsdKurz;
+  try {
+    const d = await api("/api/usd-kurz");
+    _pwUsdKurz = d.kurz || 23;
+  } catch {
+    _pwUsdKurz = 23;
+  }
+  return _pwUsdKurz;
 }
 
 async function renderPenezenka() {
@@ -6538,7 +6550,39 @@ async function loadPenezenka() {
                 const prevC = prev?(prev.hotovost||0)+PW_BANKY.reduce((s,b)=>s+(prev[b.key]||0),0)+PW_BROKERI.reduce((s,b)=>s+(prev[b.key]||0),0)+(prev.sporeni||0)+prevEx:null;
                 const diff = prevC!==null?zC-prevC:null;
                 const dc = diff===null?"":`color:${diff>=0?"#16a34a":"#dc2626"}`;
-                return `<tr>
+                const exList = (()=>{try{return JSON.parse(z.extras||"[]");}catch{return [];}})();
+                const detailId = `pwDetail_${z.id}`;
+                const detailHtml = `<tr id="${detailId}" style="display:none;background:var(--bg)">
+                  <td colspan="8" style="padding:.75rem 1rem">
+                    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:.5rem">
+                      <div style="background:var(--bg2);border-radius:6px;padding:.5rem .75rem">
+                        <div style="font-size:.72rem;color:var(--txt2)">💵 Hotovost</div>
+                        <div style="font-weight:600">${czInt(z.hotovost||0)} Kč</div>
+                      </div>
+                      ${PW_BANKY.map(b=>`<div style="background:var(--bg2);border-radius:6px;padding:.5rem .75rem">
+                        <div style="font-size:.72rem;color:var(--txt2)">🏦 ${b.label}</div>
+                        <div style="font-weight:600">${czInt(z[b.key]||0)} Kč</div>
+                      </div>`).join("")}
+                      ${PW_BROKERI.map(b=>`<div style="background:var(--bg2);border-radius:6px;padding:.5rem .75rem">
+                        <div style="font-size:.72rem;color:var(--txt2)">📈 ${b.label}</div>
+                        <div style="font-weight:600">${czInt(z[b.key]||0)} Kč</div>
+                      </div>`).join("")}
+                      <div style="background:var(--bg2);border-radius:6px;padding:.5rem .75rem">
+                        <div style="font-size:.72rem;color:var(--txt2)">💰 Spoření</div>
+                        <div style="font-weight:600">${czInt(z.sporeni||0)} Kč</div>
+                      </div>
+                      ${exList.map(e=>`<div style="background:var(--bg2);border-radius:6px;padding:.5rem .75rem">
+                        <div style="font-size:.72rem;color:var(--txt2)">${escHtml(e.nazev||"Ostatní")}</div>
+                        <div style="font-weight:600">${czInt(e.castka||0)} Kč</div>
+                      </div>`).join("")}
+                      ${z.poznamka?`<div style="background:var(--bg2);border-radius:6px;padding:.5rem .75rem;grid-column:1/-1">
+                        <div style="font-size:.72rem;color:var(--txt2)">📝 Poznámka</div>
+                        <div style="font-size:.85rem">${escHtml(z.poznamka)}</div>
+                      </div>`:""}
+                    </div>
+                  </td>
+                </tr>`;
+                return `<tr style="cursor:pointer" onclick="pwToggleDetail(${z.id})">
                   <td style="white-space:nowrap"><strong>${czDate(z.datum)}</strong>${diff!==null?`<br><small style="${dc}">${diff>=0?"+":""}${czInt(diff)}</small>`:""}
                   </td>
                   <td style="text-align:right">${czInt(z.hotovost||0)}</td>
@@ -6547,11 +6591,11 @@ async function loadPenezenka() {
                   <td style="text-align:right">${czInt(z.sporeni||0)}</td>
                   <td style="text-align:right;color:var(--txt2)">${ex>0?czInt(ex):"—"}</td>
                   <td style="text-align:right;font-weight:700">${czInt(zC)}</td>
-                  <td style="white-space:nowrap">
+                  <td style="white-space:nowrap" onclick="event.stopPropagation()">
                     <button class="btn btn-secondary btn-sm" onclick="editZaznamPenezenka(${z.id})">✏️</button>
                     <button class="btn btn-danger btn-sm" onclick="smazatZaznamPenezenka(${z.id})">🗑</button>
                   </td>
-                </tr>`;
+                </tr>${detailHtml}`;
               }).join("")}
             </tbody>
           </table></div>`
@@ -6625,15 +6669,16 @@ function _pwRenderPanel() {
       <span id="pwBankyCelkem" style="font-weight:700;color:#1e40af">0 Kč</span>
     </div>`;
 
-  // Sekce 3: Akcie — brokeři + EUR kurz
+  // Sekce 3: Akcie — brokeři + EUR/USD kurz
   const akcieFrm = `
-    <div id="pwEurKurzInfo" style="font-size:.75rem;color:var(--txt2);margin-bottom:.5rem">⏳ Načítám kurz EUR/CZK...</div>
+    <div id="pwEurKurzInfo" style="font-size:.75rem;color:var(--txt2);margin-bottom:.5rem">⏳ Načítám kurzy...</div>
     ${PW_BROKERI.map(b=>`
     <div class="form-group" style="margin-bottom:.4rem">
-      <label style="font-size:.78rem;color:var(--txt2)">${b.label}${b.eur?' <span style="color:#2563eb">(EUR)</span>':''}</label>
+      <label style="font-size:.78rem;color:var(--txt2)">${b.label}${b.eur?' <span style="color:#2563eb">(EUR)</span>':''}${b.usd?' <span style="color:#16a34a">(USD)</span>':''}</label>
       <div style="display:flex;gap:.4rem;align-items:center">
         <input type="number" id="pw_${b.key}" class="form-control" placeholder="0" style="font-size:.85rem" oninput="_pwSouctUpdate()">
         ${b.eur?`<span id="pw_eur_czk" style="font-size:.75rem;color:var(--txt2);white-space:nowrap">= 0 Kč</span>`:""}
+        ${b.usd?`<span id="pw_usd_czk" style="font-size:.75rem;color:var(--txt2);white-space:nowrap">= 0 Kč</span>`:""}
       </div>
     </div>`).join("")}
     <div style="border-top:2px solid var(--border);margin-top:.5rem;padding-top:.5rem;display:flex;justify-content:space-between">
@@ -6684,10 +6729,10 @@ function _pwRenderPanel() {
     _pwSekce("shrnuti","💰","Shrnutí & Uložit", shrnuti, true) +
     _pwSekce("dluhy","💸","Náklady", `<div style="color:var(--txt2);font-size:.85rem">Rozbaleno vlevo ↙</div>`);
 
-  // Načíst EUR kurz
-  _pwNacistKurz().then(kurz => {
+  // Načíst EUR a USD kurz
+  Promise.all([_pwNacistKurz(), _pwNacistUsdKurz()]).then(([eurKurz, usdKurz]) => {
     const el2 = document.getElementById("pwEurKurzInfo");
-    if (el2) el2.textContent = `Kurz EUR/CZK: ${kurz.toFixed(2)} Kč`;
+    if (el2) el2.textContent = `Kurz EUR/CZK: ${eurKurz.toFixed(2)} Kč | USD/CZK: ${usdKurz.toFixed(2)} Kč`;
     _pwSouctUpdate();
   });
 }
@@ -6720,17 +6765,24 @@ function _pwSouctUpdate() {
   let banky = 0;
   PW_BANKY.forEach(b => { banky += parseFloat(document.getElementById(`pw_${b.key}`)?.value||0)||0; });
 
-  // Akcie (EUR přepočet)
+  // Akcie (EUR a USD přepočet)
   let akcie = 0;
   const kurz = _pwEurKurz || 25;
+  const usdKurz = _pwUsdKurz || 23;
   PW_BROKERI.forEach(b => {
     const val = parseFloat(document.getElementById(`pw_${b.key}`)?.value||0)||0;
-    const czk = b.eur ? Math.round(val * kurz) : val;
-    akcie += czk;
+    let czk = val;
     if (b.eur) {
+      czk = Math.round(val * kurz);
       const eurEl = document.getElementById("pw_eur_czk");
       if (eurEl) eurEl.textContent = `= ${czInt(czk)} Kč`;
     }
+    if (b.usd) {
+      czk = Math.round(val * usdKurz);
+      const usdEl = document.getElementById("pw_usd_czk");
+      if (usdEl) usdEl.textContent = `= ${czInt(czk)} Kč`;
+    }
+    akcie += czk;
   });
 
   // Spoření
@@ -6771,6 +6823,7 @@ async function ulozitZaznamPenezenka() {
   if (!datum) { toast("Vyplň datum", true); return; }
 
   const kurz = _pwEurKurz || 25;
+  const usdKurz = _pwUsdKurz || 23;
   const payload = { datum, poznamka: document.getElementById("pwPoznamka")?.value||"" };
 
   // Hotovost z kalkulačky
@@ -6781,10 +6834,12 @@ async function ulozitZaznamPenezenka() {
   // Banky
   PW_BANKY.forEach(b => { payload[b.key] = parseFloat(document.getElementById(`pw_${b.key}`)?.value||0)||0; });
 
-  // Akcie (XTB EUR → přepočteno na CZK)
+  // Akcie (EUR/USD → přepočteno na CZK)
   PW_BROKERI.forEach(b => {
     const val = parseFloat(document.getElementById(`pw_${b.key}`)?.value||0)||0;
-    payload[b.key] = b.eur ? Math.round(val * kurz) : val;
+    if (b.eur) payload[b.key] = Math.round(val * kurz);
+    else if (b.usd) payload[b.key] = Math.round(val * usdKurz);
+    else payload[b.key] = val;
   });
 
   // Spoření
@@ -6892,6 +6947,12 @@ async function ulozitEditPenezenka(id) {
   toast("Záznam upraven ✓");
   closeModal();
   loadPenezenka();
+}
+
+function pwToggleDetail(id) {
+  const row = document.getElementById(`pwDetail_${id}`);
+  if (!row) return;
+  row.style.display = row.style.display === "none" ? "table-row" : "none";
 }
 
 async function smazatZaznamPenezenka(id) {
