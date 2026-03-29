@@ -5700,64 +5700,94 @@ def api_oprav_duplicity():
 @app.route("/api/oznac-obsahove-duplicity", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_oznac_obsahove_duplicity():
-    """Projde všechny faktury a označí obsahové duplicity (stejné datum + částka + položky, ignoruje číslo FA)."""
+    """Projde všechny faktury a označí obsahové duplicity.
+    Průchod 1: stejné datum + částka + položky.
+    Průchod 2: stejné datum + položky (ignoruje částku — zachytí fejkové FA bez celkové částky).
+    """
     try:
         oznaceno = 0
         with get_db() as conn:
-            # Načti všechny faktury seřazené od nejstarší
             faktury = conn.execute(
                 "SELECT id, datum_vystaveni, celkem_s_dph FROM faktury ORDER BY id ASC"
             ).fetchall()
 
+            def _porovnej_polozky(fid, kid):
+                """Vrátí True pokud mají obě faktury stejné položky (název + množství)."""
+                pol_f = conn.execute(
+                    "SELECT nazev, mnozstvi FROM polozky WHERE faktura_id=? ORDER BY nazev", (fid,)
+                ).fetchall()
+                pol_k = conn.execute(
+                    "SELECT nazev, mnozstvi FROM polozky WHERE faktura_id=? ORDER BY nazev", (kid,)
+                ).fetchall()
+                if not pol_f or not pol_k:
+                    return False
+                if len(pol_f) != len(pol_k):
+                    return False
+                def _norm(rows):
+                    return sorted([
+                        ((p["nazev"] if isinstance(p, dict) else p[0]).strip(),
+                         float(p["mnozstvi"] if isinstance(p, dict) else p[1]))
+                        for p in rows
+                    ])
+                return _norm(pol_f) == _norm(pol_k)
+
             for f in faktury:
-                fid = f["id"] if isinstance(f, dict) else f[0]
+                fid   = f["id"] if isinstance(f, dict) else f[0]
                 datum = f["datum_vystaveni"] if isinstance(f, dict) else f[1]
                 castka = float(f["celkem_s_dph"] if isinstance(f, dict) else f[2])
 
                 # Přeskočit pokud již označena
-                existujici_dup = conn.execute(
-                    "SELECT duplicita_id FROM faktury WHERE id=?", (fid,)
-                ).fetchone()
-                dup_id = existujici_dup["duplicita_id"] if isinstance(existujici_dup, dict) else existujici_dup[0]
-                if dup_id:
+                dup_row = conn.execute("SELECT duplicita_id FROM faktury WHERE id=?", (fid,)).fetchone()
+                if dup_row and (dup_row["duplicita_id"] if isinstance(dup_row, dict) else dup_row[0]):
                     continue
 
-                # Načti položky této faktury
                 polozky = conn.execute(
-                    "SELECT nazev, mnozstvi FROM polozky WHERE faktura_id=? ORDER BY nazev", (fid,)
+                    "SELECT nazev, mnozstvi FROM polozky WHERE faktura_id=?", (fid,)
                 ).fetchall()
                 if not polozky:
                     continue
 
-                # Hledej starší fakturu se stejným datem, částkou a položkami
+                # Průchod 1: stejné datum + částka + položky
                 kandidati = conn.execute("""
                     SELECT id FROM faktury
                     WHERE datum_vystaveni = ? AND ABS(celkem_s_dph - ?) < 0.01
                     AND id < ?
                 """, (datum, castka, fid)).fetchall()
 
+                nalezeno = False
                 for k in kandidati:
                     kid = k["id"] if isinstance(k, dict) else k[0]
-                    kpol = conn.execute(
-                        "SELECT nazev, mnozstvi FROM polozky WHERE faktura_id=? ORDER BY nazev", (kid,)
-                    ).fetchall()
-                    if len(kpol) != len(polozky):
-                        continue
-                    nove = sorted([(
-                        (p["nazev"] if isinstance(p, dict) else p[0]).strip(),
-                        float(p["mnozstvi"] if isinstance(p, dict) else p[1])
-                    ) for p in polozky])
-                    existujici = sorted([(
-                        (p["nazev"] if isinstance(p, dict) else p[0]).strip(),
-                        float(p["mnozstvi"] if isinstance(p, dict) else p[1])
-                    ) for p in kpol])
-                    if nove == existujici:
+                    if _porovnej_polozky(fid, kid):
+                        conn.execute(
+                            "UPDATE faktury SET duplicita_id=? WHERE id=? AND duplicita_id IS NULL",
+                            (kid, fid)
+                        )
+                        oznaceno += 1
+                        nalezeno = True
+                        break
+
+                if nalezeno:
+                    continue
+
+                # Průchod 2: stejné datum + položky (bez ohledu na částku)
+                kandidati2 = conn.execute("""
+                    SELECT id FROM faktury
+                    WHERE datum_vystaveni = ? AND id < ?
+                """, (datum, fid)).fetchall()
+
+                for k in kandidati2:
+                    kid = k["id"] if isinstance(k, dict) else k[0]
+                    if _porovnej_polozky(fid, kid):
                         conn.execute(
                             "UPDATE faktury SET duplicita_id=? WHERE id=? AND duplicita_id IS NULL",
                             (kid, fid)
                         )
                         oznaceno += 1
                         break
+
+        return jsonify({"ok": True, "oznaceno": oznaceno})
+    except Exception as e:
+        return jsonify({"ok": False, "chyba": str(e)}), 500
 
         return jsonify({"ok": True, "oznaceno": oznaceno})
     except Exception as e:
