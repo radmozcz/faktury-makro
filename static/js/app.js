@@ -919,10 +919,10 @@ async function loadFaktury() {
       </tr></thead>
       <tbody>
        ${data.faktury.map(f => `
-            <tr class="faktura-row" data-id="${f.id}" style="${f.duplicita_id ? 'background:#fff7ed;border-left:3px solid #f59e0b' : f.stav==='ke_zpracovani' ? 'background:#fffbeb' : ''}">
+            <tr class="faktura-row" data-id="${f.id}" style="${f.duplicita_id ? 'background:#fff7ed;border-left:3px solid #f59e0b' : f.ma_duplikat ? 'background:#f0fdf4;border-left:3px solid #22c55e' : f.stav==='ke_zpracovani' ? 'background:#fffbeb' : ''}">
               <td><span class="badge badge-zaplaceno" style="background:var(--green-pale)">${f.firma_zkratka}</span></td>
               <td>${escHtml(f.dodavatel)}</td>
-              <td>${escHtml(f.cislo_faktury||"–")}${f.duplicita_id ? " <small style='color:orange'>⚠️ dup #" + f.duplicita_id + "</small>" : ""}</td>
+              <td>${escHtml(f.cislo_faktury||"–")}${f.duplicita_id ? " <small style='color:orange'>⚠️ dup #" + f.duplicita_id + "</small>" : ""}${f.ma_duplikat ? " <small style='color:#16a34a'>📎 originál</small>" : ""}</td>
               <td>${czDate(f.datum_vystaveni)}</td>
               <td><strong>${czMoneyFull(f.celkem_s_dph)}</strong></td>
               <td>${f.duplicita_id ? '<span class="badge" style="background:#0d6efd;color:#fff;cursor:pointer" onclick="event.stopPropagation();openFakturaDetail(' + f.duplicita_id + ')">🔗 Duplikát</span>' : stavBadge(f.stav)}</td>
