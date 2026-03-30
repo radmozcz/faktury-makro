@@ -283,6 +283,17 @@ def _row_to_dict(row):
     return result
 
 
+def _safe_json(rows):
+    """Serializuje seznam DB řádků do JSON bezpečně."""
+    import json as _json
+    from decimal import Decimal
+    class _Enc(_json.JSONEncoder):
+        def default(self, o):
+            if isinstance(o, Decimal): return float(o)
+            return super().default(o)
+    return _json.dumps([_row_to_dict(r) for r in rows], ensure_ascii=False, indent=2, cls=_Enc)
+
+
 class _PgCursor:
     def __init__(self, cur, is_insert=False):
         self._cur = cur
@@ -4436,8 +4447,8 @@ def api_ai_dotaz():
                     WHERE datum >= ? {fw}
                     ORDER BY datum DESC LIMIT 90
                 """, [(_dt.date.today() - _dt.timedelta(days=90)).isoformat()] + fp).fetchall()
-                kontext_casti.append(f"\nMĚSÍČNÍ PŘEHLED REPORTŮ (tržby v Kč):\n{json.dumps([{k: float(v) if hasattr(v,'__float__') else v for k,v in dict(r).items()} for r in rep], ensure_ascii=False, indent=2)}")
-                kontext_casti.append(f"\nDENNÍ DATA (posledních 90 dní):\n{json.dumps([{k: float(v) if hasattr(v,'__float__') else v for k,v in dict(r).items()} for r in dny], ensure_ascii=False, indent=2)}")
+                kontext_casti.append(f"\nMĚSÍČNÍ PŘEHLED REPORTŮ (tržby v Kč):\n{_safe_json(rep)}")
+                kontext_casti.append(f"\nDENNÍ DATA (posledních 90 dní):\n{_safe_json(dny)}")
             else:
                 kontext_casti.append("\n[Tržby a reporty: nemáš oprávnění]")
 
@@ -4450,7 +4461,7 @@ def api_ai_dotaz():
                     {"AND firma_zkratka=?" if firma else ""}
                     GROUP BY mesic, dodavatel ORDER BY mesic, castka DESC
                 """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
-                kontext_casti.append(f"\nFAKTURY (náklady podle dodavatele):\n{json.dumps([{k: float(v) if hasattr(v,'__float__') else v for k,v in dict(r).items()} for r in fakt], ensure_ascii=False, indent=2)}")
+                kontext_casti.append(f"\nFAKTURY (náklady podle dodavatele):\n{_safe_json(fakt)}")
             else:
                 kontext_casti.append("\n[Faktury: nemáš oprávnění]")
 
@@ -4463,7 +4474,7 @@ def api_ai_dotaz():
                     {"AND firma_zkratka=?" if firma else ""}
                     GROUP BY mesic, jmeno ORDER BY mesic, jmeno
                 """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
-                kontext_casti.append(f"\nVÝPLATY:\n{json.dumps([{k: float(v) if hasattr(v,'__float__') else v for k,v in dict(r).items()} for r in vypl], ensure_ascii=False, indent=2)}")
+                kontext_casti.append(f"\nVÝPLATY:\n{_safe_json(vypl)}")
             else:
                 kontext_casti.append("\n[Výplaty: nemáš oprávnění]")
 
@@ -4475,7 +4486,7 @@ def api_ai_dotaz():
                     AND datum >= ? AND datum <= ? {fw}
                     ORDER BY datum DESC LIMIT 200
                 """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
-                kontext_casti.append(f"\nPROVOZNÍ VÝDAJE:\n{json.dumps([_row_to_dict(r) for r in vyd], ensure_ascii=False, indent=2)}")
+                kontext_casti.append(f"\nPROVOZNÍ VÝDAJE:\n{_safe_json(vyd)}")
 
             # Soukromé výdaje (jen admin)
             if je_admin:
@@ -4484,21 +4495,21 @@ def api_ai_dotaz():
                     FROM vydaje WHERE typ='soukrome'
                     ORDER BY datum DESC LIMIT 100
                 """).fetchall()
-                kontext_casti.append(f"\nSOUKROMÉ VÝDAJE (Radek):\n{json.dumps([_row_to_dict(r) for r in svyd], ensure_ascii=False, indent=2)}")
+                kontext_casti.append(f"\nSOUKROMÉ VÝDAJE (Radek):\n{_safe_json(svyd)}")
 
                 # Peněženka
                 pw = conn.execute("""
                     SELECT datum, hotovost, sporeni, poznamka
                     FROM penezenka ORDER BY datum DESC LIMIT 24
                 """).fetchall()
-                kontext_casti.append(f"\nPENĚŽENKA (stav majetku):\n{json.dumps([_row_to_dict(r) for r in pw], ensure_ascii=False, indent=2)}")
+                kontext_casti.append(f"\nPENĚŽENKA (stav majetku):\n{_safe_json(pw)}")
 
                 # Dokumenty
                 dok = conn.execute("""
                     SELECT datum, nazev, misto, kategorie
                     FROM dokumenty ORDER BY datum DESC
                 """).fetchall()
-                kontext_casti.append(f"\nDOKUMENTY:\n{json.dumps([_row_to_dict(r) for r in dok], ensure_ascii=False, indent=2)}")
+                kontext_casti.append(f"\nDOKUMENTY:\n{_safe_json(dok)}")
 
             # Vystavené faktury
             if ma_pravo("faktury_zobrazit"):
@@ -4508,7 +4519,7 @@ def api_ai_dotaz():
                     WHERE datum >= ? AND datum <= ?
                     ORDER BY datum DESC
                 """, [f"{rok}-01-01", f"{rok}-12-31"]).fetchall()
-                kontext_casti.append(f"\nVYSTAVENÉ FAKTURY:\n{json.dumps([_row_to_dict(r) for r in vf], ensure_ascii=False, indent=2)}")
+                kontext_casti.append(f"\nVYSTAVENÉ FAKTURY:\n{_safe_json(vf)}")
 
             # Zboží – top 50 nejnakupovanějších
             if ma_pravo("zbozi_zobrazit"):
@@ -4522,7 +4533,7 @@ def api_ai_dotaz():
                     GROUP BY z.nazev_canonical
                     ORDER BY utraceno DESC LIMIT 50
                 """).fetchall()
-                kontext_casti.append(f"\nZBOŽÍ (top 50 podle útraty):\n{json.dumps([_row_to_dict(r) for r in zbz], ensure_ascii=False, indent=2)}")
+                kontext_casti.append(f"\nZBOŽÍ (top 50 podle útraty):\n{_safe_json(zbz)}")
 
         kontext_casti.append("\nOdpovídej stručně a konkrétně v češtině.\nPokud uživatel žádá export dat (CSV, tabulka, seznam), vrať odpověď ve formátu:\nEXPORT_CSV:nazev_souboru.csv\ndatum,hodnota1,hodnota2\nřádek1...\n\nJinak odpovídej normálně jako text.")
         kontext = "\n".join(kontext_casti)
