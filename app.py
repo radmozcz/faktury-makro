@@ -6241,10 +6241,16 @@ def init_dokumenty():
             datum       TEXT NOT NULL,
             nazev       TEXT NOT NULL,
             misto       TEXT DEFAULT 'Praha',
+            kategorie   TEXT DEFAULT '',
             soubor_cesta TEXT DEFAULT '',
             soubor_url  TEXT DEFAULT '',
             created_at  TEXT DEFAULT NOW()
         )""")
+        # Přidat sloupec kategorie pokud ještě neexistuje (migrace)
+        try:
+            conn.execute("ALTER TABLE dokumenty ADD COLUMN kategorie TEXT DEFAULT ''")
+        except Exception:
+            pass
 
 init_dokumenty()
 
@@ -6284,9 +6290,10 @@ def api_dokumenty_list():
 @app.route("/api/dokumenty", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_dokumenty_create():
-    datum  = request.form.get("datum", "")
-    nazev  = request.form.get("nazev", "").strip()
-    misto  = request.form.get("misto", "Praha")
+    datum     = request.form.get("datum", "")
+    nazev     = request.form.get("nazev", "").strip()
+    misto     = request.form.get("misto", "Praha")
+    kategorie = request.form.get("kategorie", "").strip()
     if not nazev:
         return jsonify({"chyba": "Chybí název"}), 400
     soubor_cesta = ""
@@ -6304,8 +6311,8 @@ def api_dokumenty_create():
             soubor_url   = url or ""
     with get_db() as conn:
         cur = conn.execute(
-            "INSERT INTO dokumenty (datum, nazev, misto, soubor_cesta, soubor_url) VALUES (?,?,?,?,?)",
-            (datum, nazev, misto, soubor_cesta, soubor_url)
+            "INSERT INTO dokumenty (datum, nazev, misto, kategorie, soubor_cesta, soubor_url) VALUES (?,?,?,?,?,?)",
+            (datum, nazev, misto, kategorie, soubor_cesta, soubor_url)
         )
     return jsonify({"ok": True, "id": cur.lastrowid})
 
@@ -6315,8 +6322,8 @@ def api_dokumenty_update(did):
     d = request.json or {}
     with get_db() as conn:
         conn.execute(
-            "UPDATE dokumenty SET datum=?, nazev=?, misto=? WHERE id=?",
-            (d.get("datum",""), d.get("nazev",""), d.get("misto","Praha"), did)
+            "UPDATE dokumenty SET datum=?, nazev=?, misto=?, kategorie=? WHERE id=?",
+            (d.get("datum",""), d.get("nazev",""), d.get("misto","Praha"), d.get("kategorie",""), did)
         )
     return jsonify({"ok": True})
 
