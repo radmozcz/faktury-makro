@@ -2981,6 +2981,51 @@ def api_vydaje_delete(vid):
         conn.execute("DELETE FROM vydaje WHERE id=?", (vid,))
     return jsonify({"ok": True})
 
+
+@app.route("/api/vydaje/oznac-duplicity", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_vydaje_oznac_duplicity():
+    """Zpětně označí duplicitní výdaje — alespoň 2 ze 3: datum, částka, dodavatel."""
+    try:
+        oznaceno = 0
+        with get_db() as conn:
+            vydaje = conn.execute(
+                "SELECT id, datum, dodavatel, castka FROM vydaje ORDER BY id ASC"
+            ).fetchall()
+            for v in vydaje:
+                vid    = v["id"] if isinstance(v, dict) else v[0]
+                datum  = (v["datum"] if isinstance(v, dict) else v[1]) or ""
+                dodav  = ((v["dodavatel"] if isinstance(v, dict) else v[2]) or "").strip().lower()
+                castka = float(v["castka"] if isinstance(v, dict) else v[3])
+                # Přeskočit pokud již označen
+                dup = conn.execute("SELECT duplicita_id FROM vydaje WHERE id=?", (vid,)).fetchone()
+                if dup and (dup["duplicita_id"] if isinstance(dup, dict) else dup[0]):
+                    continue
+                # Hledej starší záznam s alespoň 2 shodnými kritérii
+                kandidati = conn.execute(
+                    "SELECT id, datum, dodavatel, castka FROM vydaje WHERE id < ?", (vid,)
+                ).fetchall()
+                for k in kandidati:
+                    kid    = k["id"] if isinstance(k, dict) else k[0]
+                    kdatum = (k["datum"] if isinstance(k, dict) else k[1]) or ""
+                    kdodav = ((k["dodavatel"] if isinstance(k, dict) else k[2]) or "").strip().lower()
+                    kcastka = float(k["castka"] if isinstance(k, dict) else k[3])
+                    skore = sum([
+                        datum and kdatum and datum == kdatum,
+                        abs(castka - kcastka) < 1.0,
+                        bool(dodav and kdodav and dodav == kdodav),
+                    ])
+                    if skore >= 2:
+                        conn.execute(
+                            "UPDATE vydaje SET duplicita_id=? WHERE id=? AND duplicita_id IS NULL",
+                            (kid, vid)
+                        )
+                        oznaceno += 1
+                        break
+        return jsonify({"ok": True, "oznaceno": oznaceno})
+    except Exception as e:
+        return jsonify({"ok": False, "chyba": str(e)}), 500
+
 @app.route("/api/vydaje/nahrat", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_vydaje_nahrat():
