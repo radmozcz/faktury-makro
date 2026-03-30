@@ -5701,7 +5701,28 @@ async function loadVydaje() {
   const jeSoukrome = typ === "soukrome";
   const mozeUpravit = maPravo(jeSoukrome ? "soukrome_vydaje_upravit" : "vydaje_upravit");
   const mozeSmazat  = maPravo(jeSoukrome ? "soukrome_vydaje_smazat"  : "vydaje_smazat");
-  el.innerHTML = `
+
+  // Filtr štítků pro soukromé výdaje
+  if (!window._vydajAktivniStitky) window._vydajAktivniStitky = new Set();
+  const vsechnyStitky = [...new Set(
+    data.vydaje.flatMap(v => (v.stitky||"").split(",").map(s=>s.trim()).filter(Boolean))
+  )].sort();
+  const filtrovaneVydaje = window._vydajAktivniStitky.size === 0 ? data.vydaje : data.vydaje.filter(v => {
+    const stitky = (v.stitky||"").split(",").map(s=>s.trim()).filter(Boolean);
+    return [...window._vydajAktivniStitky].every(a => stitky.includes(a));
+  });
+
+  const filtryHtml = (jeSoukrome && vsechnyStitky.length) ? `
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.75rem;align-items:center">
+      <span style="font-size:.8rem;color:var(--txt2)">Filtr štítků:</span>
+      ${vsechnyStitky.map(s => {
+        const aktivni = window._vydajAktivniStitky.has(s);
+        return `<span onclick="vydajToggleStitky('${escHtml(s)}')" style="cursor:pointer;display:inline-block;background:${aktivni?'var(--green)':'var(--green-pale)'};color:${aktivni?'#fff':'var(--green)'};border-radius:20px;padding:.2rem .7rem;font-size:.78rem;font-weight:600;user-select:none">${escHtml(s)}</span>`;
+      }).join("")}
+      ${window._vydajAktivniStitky.size > 0 ? `<span onclick="vydajResetStitky()" style="cursor:pointer;color:var(--txt2);font-size:.78rem;text-decoration:underline">× zrušit filtr</span>` : ""}
+    </div>` : "";
+
+  el.innerHTML = filtryHtml + `
     <table>
       <thead><tr>
         <th>Stav</th><th>Datum</th><th>${jeSoukrome ? "Lokace" : "Firma"}</th><th>Dodavatel</th>
@@ -5709,7 +5730,12 @@ async function loadVydaje() {
         <th>Způsob úhrady</th><th>Uhrazeno</th><th style="text-align:right">Částka</th><th>Doklad</th><th></th>
       </tr></thead>
       <tbody>
-        ${data.vydaje.length ? data.vydaje.map(v=>`
+        ${filtrovaneVydaje.length ? filtrovaneVydaje.map(v=>{
+          const stitky = (v.stitky||"").split(",").map(s=>s.trim()).filter(Boolean);
+          const stitkyHtml = stitky.map(s =>
+            `<span onclick="event.stopPropagation();vydajToggleStitky('${escHtml(s)}')" style="cursor:pointer;display:inline-block;background:var(--green-pale);color:var(--green);border-radius:20px;padding:.1rem .5rem;font-size:.72rem;font-weight:600">${escHtml(s)}</span>`
+          ).join(" ");
+          return `
         <tr style="cursor:${mozeUpravit?'pointer':'default'};opacity:${v.stav==='zaplaceno'?'.7':'1'}"
             onclick="${mozeUpravit?`openVydajEdit(${v.id})`:''}">
           <td onclick="event.stopPropagation()">
@@ -5722,6 +5748,7 @@ async function loadVydaje() {
           <td style="font-size:.9rem">
             ${v.popis?`<strong>${escHtml(v.popis)}</strong>`:""} 
             ${v.poznamka?`<small style="color:var(--txt2)">${escHtml(v.poznamka)}</small>`:""}
+            ${stitkyHtml ? `<div style="margin-top:.2rem">${stitkyHtml}</div>` : ""}
           </td>
           <td style="font-size:.82rem;color:var(--txt2)">
             ${(v.polozky||[]).map(p=>`${escHtml(p.nazev)} ${czMoneyFull(p.castka)}`).join("<br>")||"—"}
@@ -5735,16 +5762,31 @@ async function loadVydaje() {
           <td onclick="event.stopPropagation()">
             ${mozeSmazat?`<button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:.2rem .4rem;border-radius:4px" onclick="smazatVydaj(${v.id})">🗑</button>`:""}
           </td>
-        </tr>`).join("")
-        : "<tr><td colspan='10' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné výdaje</td></tr>"}
+        </tr>`;}).join("")
+        : "<tr><td colspan='11' style='text-align:center;color:var(--txt2);padding:2rem'>Žádné výdaje</td></tr>"}
       </tbody>
-      ${data.vydaje.length ? `
+      ${filtrovaneVydaje.length ? `
       <tfoot><tr class="table-footer">
-        <td colspan="8">Celkem (${data.vydaje.length} výdajů)</td>
-        <td style="text-align:right"><strong style="color:#dc2626">${czMoneyFull(data.celkem)}</strong></td>
+        <td colspan="8">Celkem (${filtrovaneVydaje.length} výdajů)</td>
+        <td style="text-align:right"><strong style="color:#dc2626">${czMoneyFull(filtrovaneVydaje.reduce((s,v)=>s+(v.castka||0),0))}</strong></td>
         <td colspan="2"></td>
       </tr></tfoot>` : ""}
     </table>`;
+}
+
+function vydajToggleStitky(stitek) {
+  if (!window._vydajAktivniStitky) window._vydajAktivniStitky = new Set();
+  if (window._vydajAktivniStitky.has(stitek)) {
+    window._vydajAktivniStitky.delete(stitek);
+  } else {
+    window._vydajAktivniStitky.add(stitek);
+  }
+  loadVydaje();
+}
+
+function vydajResetStitky() {
+  window._vydajAktivniStitky = new Set();
+  loadVydaje();
 }
 
 function _vydajModal(titul, v, onSave, typ) {
@@ -5806,6 +5848,9 @@ function _vydajModal(titul, v, onSave, typ) {
       <div class="form-group" style="grid-column:1/-1"><label class="form-label">Poznámka</label>
         <input id="evPoznamka" class="form-control" value="${escHtml(v.poznamka||'')}" placeholder="Interní poznámka...">
       </div>
+      <div class="form-group" style="grid-column:1/-1"><label class="form-label">Štítky</label>
+        <input id="evStitky" class="form-control" value="${escHtml(v.stitky||'')}" placeholder="např. auto, pojistka, Věrka (oddělte čárkou)">
+      </div>
     </div>
     <div style="margin-top:1rem">
       <label class="form-label">Položky</label>
@@ -5851,6 +5896,7 @@ function _vydajGetPayload() {
     banka_uhrady:     document.getElementById("evBankaUhrady")?.value || "",
     popis:            document.getElementById("evPopis").value,
     poznamka:         document.getElementById("evPoznamka").value,
+    stitky:           document.getElementById("evStitky")?.value.trim() || "",
     polozky,
   };
 }
@@ -7243,30 +7289,73 @@ async function dokNacist() {
   dokRenderList();
 }
 
+let _dokAktivniStitky = new Set();
+
+function dokToggleStitky(stitek) {
+  if (_dokAktivniStitky.has(stitek)) {
+    _dokAktivniStitky.delete(stitek);
+  } else {
+    _dokAktivniStitky.add(stitek);
+  }
+  dokRenderList();
+}
+
 function dokRenderList() {
   const el = document.getElementById("dok-list");
   if (!el) return;
   if (!_dokData.length) {
-    el.innerHTML = `<p style="color:var(--text-muted)">Žádné dokumenty.</p>`;
+    el.innerHTML = `<p style="color:var(--txt2)">Žádné dokumenty.</p>`;
     return;
   }
-  el.innerHTML = `<div class="dokumenty-grid">${_dokData.map(d => {
+
+  // Všechny unikátní štítky
+  const vsechnyStitky = [...new Set(
+    _dokData.flatMap(d => (d.kategorie||"").split(",").map(s=>s.trim()).filter(Boolean))
+  )].sort();
+
+  // Filtrovat podle aktivních štítků
+  const filtrovane = _dokAktivniStitky.size === 0 ? _dokData : _dokData.filter(d => {
+    const stitky = (d.kategorie||"").split(",").map(s=>s.trim()).filter(Boolean);
+    return [..._dokAktivniStitky].every(a => stitky.includes(a));
+  });
+
+  // Lišta filtrů
+  const filtryHtml = vsechnyStitky.length ? `
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:1rem;align-items:center">
+      <span style="font-size:.8rem;color:var(--txt2);margin-right:.2rem">Filtr:</span>
+      ${vsechnyStitky.map(s => {
+        const aktivni = _dokAktivniStitky.has(s);
+        return `<span onclick="dokToggleStitky('${escHtml(s)}')" style="cursor:pointer;display:inline-block;background:${aktivni ? 'var(--green)' : 'var(--green-pale)'};color:${aktivni ? '#fff' : 'var(--green)'};border-radius:20px;padding:.2rem .7rem;font-size:.78rem;font-weight:600;user-select:none">${escHtml(s)}</span>`;
+      }).join("")}
+      ${_dokAktivniStitky.size > 0 ? `<span onclick="dokResetStitky()" style="cursor:pointer;color:var(--txt2);font-size:.78rem;text-decoration:underline">× zrušit filtr</span>` : ""}
+    </div>` : "";
+
+  // Řádky dokumentů
+  const radkyHtml = filtrovane.map(d => {
     const stitky = (d.kategorie||"").split(",").map(s=>s.trim()).filter(Boolean);
     const stitkyHtml = stitky.map(s =>
-      `<span style="display:inline-block;background:var(--green-pale);color:var(--green);border-radius:20px;padding:.15rem .6rem;font-size:.75rem;font-weight:600;margin-right:.25rem">${escHtml(s)}</span>`
+      `<span onclick="event.stopPropagation();dokToggleStitky('${escHtml(s)}')" style="cursor:pointer;display:inline-block;background:var(--green-pale);color:var(--green);border-radius:20px;padding:.1rem .55rem;font-size:.75rem;font-weight:600">${escHtml(s)}</span>`
     ).join("");
     return `
-    <div class="dok-card">
-      <div class="dok-card-title">${d.nazev}</div>
-      <div class="dok-card-meta">${d.datum} &nbsp;·&nbsp; ${d.misto}</div>
-      ${stitkyHtml ? `<div style="margin-top:.4rem">${stitkyHtml}</div>` : ""}
-      <div class="dok-card-actions">
-        ${d.soubor_cesta ? `<button class="btn btn-sm btn-secondary" onclick="dokNahled(${d.id})">👁 Náhled</button>` : ''}
-        <button class="btn btn-sm btn-secondary" onclick="dokEditModal(${d.id})">✏️ Upravit</button>
-        <button class="btn btn-sm btn-danger" onclick="dokSmazat(${d.id})">🗑</button>
-      </div>
-    </div>
-  `}).join("")}</div>`;
+      <div style="display:flex;align-items:center;flex-wrap:wrap;gap:.5rem;padding:.6rem .8rem;border-bottom:1px solid var(--border);border-radius:6px">
+        <div style="min-width:130px;font-size:.82rem;color:var(--txt2)">${d.datum}</div>
+        <div style="flex:1;font-weight:600;min-width:160px">${escHtml(d.nazev)}</div>
+        <div style="font-size:.8rem;color:var(--txt2);min-width:70px">${escHtml(d.misto||"")}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:.25rem;flex:1">${stitkyHtml}</div>
+        <div style="display:flex;gap:.3rem;white-space:nowrap">
+          ${d.soubor_cesta ? `<button class="btn btn-sm btn-secondary" onclick="dokNahled(${d.id})">👁</button>` : ""}
+          <button class="btn btn-sm btn-secondary" onclick="dokEditModal(${d.id})">✏️</button>
+          <button class="btn btn-sm btn-danger" onclick="dokSmazat(${d.id})">🗑</button>
+        </div>
+      </div>`;
+  }).join("");
+
+  el.innerHTML = filtryHtml + `<div class="card" style="padding:.3rem">${radkyHtml || '<p style="color:var(--txt2);padding:1rem">Žádné dokumenty pro vybraný filtr.</p>'}</div>`;
+}
+
+function dokResetStitky() {
+  _dokAktivniStitky = new Set();
+  dokRenderList();
 }
 
 function dokModalNovy() {
