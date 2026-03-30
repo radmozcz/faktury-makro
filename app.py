@@ -3918,7 +3918,10 @@ def api_report_import_xlsx():
         mesic_map = {
             "LEDEN": 1, "ÚNOR": 2, "BŘEZEN": 3, "DUBEN": 4,
             "KVĚTEN": 5, "ČERVEN": 6, "ČERVENEC": 7, "SRPEN": 8,
-            "ZÁŘÍ": 9, "ŘÍJEN": 10, "LISTOPAD": 11, "PROSINEC": 12
+            "ZÁŘÍ": 9, "ŘÍJEN": 10, "LISTOPAD": 11, "PROSINEC": 12,
+            # Varianty bez diakritiky
+            "UNOR": 2, "BREZEN": 3, "KVETEN": 5, "CERVEN": 6,
+            "CERVENEC": 7, "ZARI": 9, "RIJEN": 10,
         }
 
         rows_to_insert = []
