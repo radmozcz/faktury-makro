@@ -5749,6 +5749,7 @@ async function loadVydaje() {
             ${v.popis?`<strong>${escHtml(v.popis)}</strong>`:""} 
             ${v.poznamka?`<small style="color:var(--txt2)">${escHtml(v.poznamka)}</small>`:""}
             ${stitkyHtml ? `<div style="margin-top:.2rem">${stitkyHtml}</div>` : ""}
+            ${v.duplicita_id ? `<div style="margin-top:.2rem"><span style="background:#fff7ed;color:#f59e0b;border:1px solid #f59e0b;border-radius:4px;padding:.1rem .4rem;font-size:.75rem;cursor:pointer" onclick="event.stopPropagation();openVydajEdit(${v.duplicita_id})">⚠️ duplicita #${v.duplicita_id}</span></div>` : ""}
           </td>
           <td style="font-size:.82rem;color:var(--txt2)">
             ${(v.polozky||[]).map(p=>`${escHtml(p.nazev)} ${czMoneyFull(p.castka)}`).join("<br>")||"—"}
@@ -5908,8 +5909,13 @@ function openVydajRucni() {
   _vydajModal("Nový výdaj", { firma_zkratka: defaultFirma, polozky:[] }, async function() {
     const payload = { ..._vydajGetPayload(), zdroj:"rucni", typ };
     if (!payload.firma_zkratka || !payload.castka) { toast("Vyplň lokaci a částku"); return; }
-    await api("/api/vydaje", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
-    toast("Výdaj uložen ✓"); closeModal(); loadVydaje(); loadVydajeNezaplacene();
+    const resp = await api("/api/vydaje", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+    if (resp && resp.duplicita) {
+      toast(`⚠️ Výdaj uložen — možná duplicita záznamu #${resp.duplicita_id}`, false);
+    } else {
+      toast("Výdaj uložen ✓");
+    }
+    closeModal(); loadVydaje(); loadVydajeNezaplacene();
   }, typ);
 }
 
@@ -6044,8 +6050,12 @@ async function ulozitVydajZDokladu(soubor_cesta, soubor_url) {
     polozky: [],
   };
   if (!payload.firma_zkratka || !payload.castka) { toast("Vyplň lokaci a částku"); return; }
-  await api("/api/vydaje", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
-  toast("Výdaj uložen ✓");
+  const resp = await api("/api/vydaje", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
+  if (resp && resp.duplicita) {
+    toast(`⚠️ Výdaj uložen — možná duplicita záznamu #${resp.duplicita_id}`, false);
+  } else {
+    toast("Výdaj uložen ✓");
+  }
   if (jeSoukrome) { renderVydaje("soukrome"); } else { closeModal(); loadVydaje(); loadVydajeNezaplacene(); }
 }
 function exportVydaje(fmt) {
