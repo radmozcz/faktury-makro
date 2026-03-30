@@ -4538,13 +4538,24 @@ def api_ai_dotaz():
         kontext_casti.append("\nOdpovídej stručně a konkrétně v češtině.\nPokud uživatel žádá export dat (CSV, tabulka, seznam), vrať odpověď ve formátu:\nEXPORT_CSV:nazev_souboru.csv\ndatum,hodnota1,hodnota2\nřádek1...\n\nJinak odpovídej normálně jako text.")
         kontext = "\n".join(kontext_casti)
 
+        # Sestavit messages — systémový kontext + historie + nový dotaz
+        historie = data.get("historie", [])  # [{"role": "user"/"assistant", "content": "..."}]
+        messages = []
+        # První zpráva obsahuje kontext + dotaz
+        if not historie:
+            messages = [{"role": "user", "content": kontext + "\n\nDotaz: " + dotaz}]
+        else:
+            # Kontext jen v první zprávě, pak navazující konverzace
+            messages = [{"role": "user", "content": kontext + "\n\nDotaz: " + historie[0]["content"]}]
+            for h in historie[1:]:
+                messages.append({"role": h["role"], "content": h["content"]})
+            messages.append({"role": "user", "content": dotaz})
+
         client = anthropic.Anthropic(api_key=api_key)
         msg = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=2000,
-            messages=[
-                {"role": "user", "content": kontext + "\n\nDotaz: " + dotaz}
-            ]
+            messages=messages
         )
         odpoved = msg.content[0].text.strip()
         # Detekce CSV exportu
