@@ -2836,7 +2836,7 @@ async function zobrazitKalkulaci(id) {
   let k;
   try { k = await api(`/api/kalkulace/${id}`); } catch { return; }
   const naklady   = _kalcSumaNakladu(k.polozky, k.pausalni);
-  const dopCena   = naklady * (1 + (k.cil_marze_pct||200)/100);
+  const dopCena   = naklady * (1 + (k.cil_marze_pct||250)/100);
   const skutMarze = k.prodejni_cena > 0 && naklady > 0 ? Math.round((k.prodejni_cena - naklady)/naklady*100) : null;
   const mc = skutMarze !== null ? (skutMarze>=100?"#16a34a":skutMarze>=50?"#d97706":"#dc2626") : "var(--txt2)";
 
@@ -2873,7 +2873,7 @@ async function zobrazitKalkulaci(id) {
           <td style="text-align:right;padding:6px 8px;color:#dc2626">${czMoney(naklady)}</td><td></td>
         </tr>
         <tr style="color:var(--txt2)">
-          <td colspan="2" style="padding:4px 8px">Doporučená cena (+${k.cil_marze_pct||200}%)</td>
+          <td colspan="2" style="padding:4px 8px">Doporučená cena (+${k.cil_marze_pct||250}%)</td>
           <td style="text-align:right;padding:4px 8px;color:#2563eb;font-weight:600">${czMoney(dopCena)}</td><td></td>
         </tr>
         <tr>
@@ -2955,7 +2955,7 @@ function _renderKalcPage(k) {
         <div class="card">
           <div class="form-group" style="margin-bottom:.75rem">
             <label class="form-label">Cílová marže (%)</label>
-            <input type="number" id="klCilMarze" class="form-control" value="${k.cil_marze_pct||200}" oninput="klRecalc()">
+            <input type="number" id="klCilMarze" class="form-control" value="${k.cil_marze_pct||250}" oninput="klRecalc()">
           </div>
           <div class="form-group" style="margin-bottom:.75rem">
             <label class="form-label">Skutečná prodejní cena (Kč)</label>
@@ -3111,7 +3111,7 @@ function klRecalc() {
     naklady += castka;
     if (nazev && castka > 0) radky.push({nazev, mnoz:1, jedn:"ks", cks:castka, celkem:castka, pausal:true});
   });
-  const cilMarze  = parseFloat(document.getElementById("klCilMarze")?.value || 200);
+  const cilMarze  = parseFloat(document.getElementById("klCilMarze")?.value || 250);
   const prodejni  = parseFloat(document.getElementById("klProdejniCena")?.value || 0);
   const dopCena   = naklady * (1 + cilMarze/100);
   const skutMarze = prodejni > 0 && naklady > 0 ? ((prodejni-naklady)/naklady*100) : null;
@@ -3169,7 +3169,7 @@ function _kalcGetPayload() {
   return {
     nazev:         document.getElementById("klNazev")?.value?.trim(),
     popis:         document.getElementById("klPopis")?.value||"",
-    cil_marze_pct: parseFloat(document.getElementById("klCilMarze")?.value||200),
+    cil_marze_pct: parseFloat(document.getElementById("klCilMarze")?.value||250),
     prodejni_cena: parseFloat(document.getElementById("klProdejniCena")?.value||0),
     polozky,
     pausalni,
