@@ -3761,7 +3761,7 @@ def api_reporty_list():
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     with get_db() as conn:
         rows = conn.execute(f"""
-            SELECT * FROM reporty {where} ORDER BY datum DESC LIMIT 200
+            SELECT * FROM reporty {where} ORDER BY datum DESC LIMIT 500
         """, params).fetchall()
     return jsonify([dict(r) for r in rows])
 
@@ -4521,7 +4521,7 @@ def api_ai_dotaz():
                         SELECT datum, dodavatel, castka, popis, stav
                         FROM vydaje WHERE typ='provozni'
                         AND datum >= ? AND datum <= ? {fw}
-                        ORDER BY datum DESC LIMIT 200
+                        ORDER BY datum DESC LIMIT 500
                     """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
                     kontext_casti.append(f"\nPROVOZNÍ VÝDAJE:\n{_safe_json(vyd)}")
                 if je_admin:
