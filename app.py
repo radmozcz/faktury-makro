@@ -4540,15 +4540,18 @@ def api_ai_dotaz():
 
         # Sestavit messages — systémový kontext + historie + nový dotaz
         historie = data.get("historie", [])  # [{"role": "user"/"assistant", "content": "..."}]
-        messages = []
-        # První zpráva obsahuje kontext + dotaz
+        # Sestavit messages — systémový kontext v první zprávě + správně střídající se role
+        historie = data.get("historie", [])
         if not historie:
             messages = [{"role": "user", "content": kontext + "\n\nDotaz: " + dotaz}]
         else:
-            # Kontext jen v první zprávě, pak navazující konverzace
-            messages = [{"role": "user", "content": kontext + "\n\nDotaz: " + historie[0]["content"]}]
-            for h in historie[1:]:
-                messages.append({"role": h["role"], "content": h["content"]})
+            # Kontext přidáme k první user zprávě v historii
+            messages = []
+            for i, h in enumerate(historie):
+                if i == 0 and h["role"] == "user":
+                    messages.append({"role": "user", "content": kontext + "\n\nDotaz: " + h["content"]})
+                else:
+                    messages.append({"role": h["role"], "content": h["content"]})
             messages.append({"role": "user", "content": dotaz})
 
         client = anthropic.Anthropic(api_key=api_key)
