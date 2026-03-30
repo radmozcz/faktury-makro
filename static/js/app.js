@@ -4143,8 +4143,16 @@ function initAiChat() {
         <input id="aiDotazInput" class="form-control" placeholder="Kolik burgerů bylo v únoru? Nebo: udělej CSV výpis karet za březen..."
           style="flex:1" onkeydown="if(event.key==='Enter')odeslitAiDotaz()">
         <button class="btn btn-primary btn-sm" onclick="odeslitAiDotaz()" id="aiOdeslatBtn">→ Odeslat</button>
+        <button class="btn btn-secondary btn-sm" onclick="vymazatAiHistorii()" title="Nová konverzace">🗑</button>
       </div>
     </div>`;
+}
+
+function vymazatAiHistorii() {
+  const chatEl = document.getElementById("statAiChat");
+  if (chatEl) chatEl._historie = [];
+  const hist = document.getElementById("aiHistorie");
+  if (hist) hist.innerHTML = "";
 }
 
 async function odeslitAiDotaz() {
@@ -4156,8 +4164,12 @@ async function odeslitAiDotaz() {
   const rok   = document.getElementById("sRok")?.value || new Date().getFullYear();
   const firma = document.getElementById("sFirma")?.value || "";
 
-  // Přidat dotaz do historie
-  hist.innerHTML += `<div style="align-self:flex-start;background:var(--primary-bg,#e8f4fd);border-radius:2px 10px 10px 10px;padding:.4rem .75rem;max-width:80%;font-size:.88rem;font-weight:500">${escHtml(dotaz)}</div>`;
+  // Historie konverzace
+  const chatEl = document.getElementById("statAiChat");
+  if (!chatEl._historie) chatEl._historie = [];
+
+  // Přidat dotaz do vizuální historie
+  hist.innerHTML += `<div style="align-self:flex-end;background:var(--primary-bg,#e8f4fd);border-radius:10px 2px 10px 10px;padding:.4rem .75rem;max-width:80%;font-size:.88rem;font-weight:500">${escHtml(dotaz)}</div>`;
   hist.innerHTML += `<div id="aiCekani" style="align-self:flex-start;color:var(--txt2);font-size:.85rem">⏳ Přemýšlím...</div>`;
   hist.scrollTop = hist.scrollHeight;
   input.value = "";
@@ -4167,13 +4179,19 @@ async function odeslitAiDotaz() {
     const resp = await api("/api/ai-dotaz", {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({dotaz, rok, firma})
+      body: JSON.stringify({dotaz, rok, firma, historie: chatEl._historie})
     });
     document.getElementById("aiCekani")?.remove();
 
     if (resp.chyba) {
       hist.innerHTML += `<div style="align-self:flex-start;color:#ef4444;font-size:.88rem;padding:.4rem .75rem;border:1px solid #fca5a5;border-radius:6px;background:#fef2f2">❌ ${escHtml(resp.chyba)}</div>`;
     } else {
+      // Uložit do historie pro příští dotaz
+      chatEl._historie.push({role: "user", content: dotaz});
+      chatEl._historie.push({role: "assistant", content: resp.odpoved});
+      // Omezit historii na posledních 10 výměn (20 zpráv)
+      if (chatEl._historie.length > 20) chatEl._historie = chatEl._historie.slice(-20);
+
       // Export CSV?
       let exportBtn = "";
       if (resp.export) {
