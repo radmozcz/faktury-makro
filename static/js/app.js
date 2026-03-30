@@ -5567,7 +5567,7 @@ const tlacitka = (maPravo(pravoUpravit)
       </select>
       <label>Rok:</label>
       <select id="vRok" onchange="aplikujRokFiltr('vRok','vOd','vDo',loadVydaje)">
-        ${rokOptions(new Date().getFullYear())}
+        ${rokOptions(jeSoukrome ? "" : new Date().getFullYear())}
       </select>
       <label>Od:</label><input type="date" id="vOd" onchange="loadVydaje()">
       <label>Do:</label><input type="date" id="vDo" onchange="loadVydaje()">
