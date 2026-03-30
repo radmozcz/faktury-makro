@@ -5761,6 +5761,7 @@ async function loadVydaje() {
           <td style="text-align:right;font-weight:600;color:${v.stav==='zaplaceno'?'var(--txt2)':'#dc2626'}">${czMoneyFull(v.castka)}</td>
           <td>${v.soubor_url?`<a href="${v.soubor_url}" target="_blank" onclick="event.stopPropagation()" style="font-size:.85rem">📎</a>`:""}</td>
           <td onclick="event.stopPropagation()">
+            ${mozeUpravit ? `<button class="btn btn-sm btn-secondary" style="padding:.2rem .4rem" onclick="openVydajEdit(${v.id})">✏️</button>` : ""}
             ${mozeSmazat?`<button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:.2rem .4rem;border-radius:4px" onclick="smazatVydaj(${v.id})">🗑</button>`:""}
           </td>
         </tr>`;}).join("")
