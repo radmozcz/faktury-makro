@@ -2810,26 +2810,26 @@ async function loadKalkulace() {
     const skutMarze = k.prodejni_cena > 0 && naklady > 0 ? Math.round((k.prodejni_cena - naklady)/naklady*100) : null;
     const mc = skutMarze !== null ? (skutMarze>=100?"#16a34a":skutMarze>=50?"#d97706":"#dc2626") : "var(--txt2)";
     return `<tr style="cursor:pointer" onclick="zobrazitKalkulaci(${k.id})" class="tm-month">
-      <td style="padding:8px 10px;font-weight:600">${escHtml(k.nazev)}${k.popis?` <small style="color:var(--txt2);font-weight:400">${escHtml(k.popis)}</small>`:""}</td>
-      <td style="padding:8px 10px;text-align:right;color:#dc2626;font-weight:600">${czMoney(naklady)}</td>
-      <td style="padding:8px 10px;text-align:right">${k.prodejni_cena?czMoney(k.prodejni_cena):"—"}</td>
-      <td style="padding:8px 10px;text-align:right;font-weight:600;color:${mc}">${skutMarze!==null?skutMarze+"%":"—"}</td>
-      <td style="padding:8px 10px;text-align:right;white-space:nowrap">
+      <td style="padding:5px 8px;font-weight:600">${escHtml(k.nazev)}${k.popis?` <small style="color:var(--txt2);font-weight:400">${escHtml(k.popis)}</small>`:""}</td>
+      <td style="padding:5px 8px;text-align:right;color:#dc2626;font-weight:600">${czMoney(naklady)}</td>
+      <td style="padding:5px 8px;text-align:right">${k.prodejni_cena?czMoney(k.prodejni_cena):"—"}</td>
+      <td style="padding:5px 8px;text-align:right;font-weight:600;color:${mc}">${skutMarze!==null?skutMarze+"%":"—"}</td>
+      <td style="padding:5px 8px;text-align:right;white-space:nowrap">
         <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();openEditKalkulace(${k.id})">✏️</button>
         <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();smazatKalkulaci(${k.id})">🗑</button>
       </td>
     </tr>`;
   }).join("");
-  el.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:.92rem">
-    <thead><tr style="font-size:.78rem;color:var(--txt2);border-bottom:1px solid var(--border)">
-      <th style="padding:6px 10px;text-align:left">Produkt</th>
-      <th style="padding:6px 10px;text-align:right">Náklady/ks</th>
-      <th style="padding:6px 10px;text-align:right">Prodejní cena</th>
-      <th style="padding:6px 10px;text-align:right">Marže</th>
+  el.innerHTML = `<div style="max-width:700px"><table style="width:100%;border-collapse:collapse;font-size:.88rem">
+    <thead><tr style="font-size:.75rem;color:var(--txt2);border-bottom:1px solid var(--border)">
+      <th style="padding:4px 8px;text-align:left">Produkt</th>
+      <th style="padding:4px 8px;text-align:right">Náklady/ks</th>
+      <th style="padding:4px 8px;text-align:right">Prodejní cena</th>
+      <th style="padding:4px 8px;text-align:right">Marže</th>
       <th></th>
     </tr></thead>
     <tbody>${rows}</tbody>
-  </table>`;
+  </table></div>`;
 }
 
 async function zobrazitKalkulaci(id) {
