@@ -4132,11 +4132,28 @@ function initAiChat() {
   const el = document.getElementById("statAiChat");
   if (!el) return;
   el._historie = [];
+  el._sekce = [];  // prázdné = auto detekce
   el.innerHTML = `
     <div class="card">
       <div class="card-title" style="display:flex;align-items:center;gap:.5rem">
         🤖 AI asistent
         <span style="font-size:.75rem;color:var(--txt2);font-weight:400">— zeptej se na data, požádej o export CSV...</span>
+      </div>
+      <div style="margin-bottom:.6rem">
+        <div style="font-size:.75rem;color:var(--txt2);margin-bottom:.3rem">Prohledávat: <span id="aiSekceInfo" style="color:var(--green);font-weight:600">auto</span></div>
+        <div style="display:flex;flex-wrap:wrap;gap:.3rem" id="aiSekceWrap">
+          ${[
+            ["reporty","📊 Reporty"],
+            ["faktury","🧾 Faktury"],
+            ["zbozi","📦 Zboží"],
+            ["vydaje","💸 Výdaje"],
+            ["dokumenty","📄 Dokumenty"],
+            ["vystavene","📤 Vystavené FA"],
+            ["vyplaty","💰 Výplaty"],
+            ["penezenka","💵 Peněženka"],
+          ].map(([k,l]) => `<span id="aiSekce_${k}" onclick="aiToggleSekce('${k}')" style="cursor:pointer;display:inline-block;background:var(--bg2);color:var(--txt2);border-radius:20px;padding:.15rem .6rem;font-size:.75rem;font-weight:500;user-select:none">${l}</span>`).join("")}
+          <span onclick="aiResetSekce()" style="cursor:pointer;color:var(--txt2);font-size:.75rem;text-decoration:underline;padding:.15rem .3rem">× auto</span>
+        </div>
       </div>
       <div id="aiHistorie" style="max-height:320px;overflow-y:auto;margin-bottom:.75rem;display:flex;flex-direction:column;gap:.5rem"></div>
       <div style="display:flex;gap:.5rem">
@@ -4146,6 +4163,37 @@ function initAiChat() {
         <button class="btn btn-secondary btn-sm" onclick="vymazatAiHistorii()" title="Nová konverzace">🗑</button>
       </div>
     </div>`;
+}
+
+function aiToggleSekce(sekce) {
+  const chatEl = document.getElementById("statAiChat");
+  if (!chatEl._sekce) chatEl._sekce = [];
+  const idx = chatEl._sekce.indexOf(sekce);
+  if (idx >= 0) {
+    chatEl._sekce.splice(idx, 1);
+  } else {
+    chatEl._sekce.push(sekce);
+  }
+  // Vizuální update
+  const btn = document.getElementById(`aiSekce_${sekce}`);
+  const aktivni = chatEl._sekce.includes(sekce);
+  if (btn) {
+    btn.style.background = aktivni ? "var(--green)" : "var(--bg2)";
+    btn.style.color = aktivni ? "#fff" : "var(--txt2)";
+  }
+  const info = document.getElementById("aiSekceInfo");
+  if (info) info.textContent = chatEl._sekce.length > 0 ? chatEl._sekce.join(", ") : "auto";
+}
+
+function aiResetSekce() {
+  const chatEl = document.getElementById("statAiChat");
+  if (chatEl) chatEl._sekce = [];
+  ["reporty","faktury","zbozi","vydaje","dokumenty","vystavene","vyplaty","penezenka"].forEach(k => {
+    const btn = document.getElementById(`aiSekce_${k}`);
+    if (btn) { btn.style.background = "var(--bg2)"; btn.style.color = "var(--txt2)"; }
+  });
+  const info = document.getElementById("aiSekceInfo");
+  if (info) info.textContent = "auto";
 }
 
 function vymazatAiHistorii() {
@@ -4167,6 +4215,7 @@ async function odeslitAiDotaz() {
   // Historie konverzace
   const chatEl = document.getElementById("statAiChat");
   if (!chatEl._historie) chatEl._historie = [];
+  if (!chatEl._sekce) chatEl._sekce = [];
 
   // Přidat dotaz do vizuální historie
   hist.innerHTML += `<div style="align-self:flex-start;background:var(--green-pale);color:var(--green);border-radius:2px 10px 10px 10px;padding:.4rem .75rem;max-width:80%;font-size:.88rem;font-weight:500">${escHtml(dotaz)}</div>`;
@@ -4179,7 +4228,7 @@ async function odeslitAiDotaz() {
     const resp = await api("/api/ai-dotaz", {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({dotaz, rok, firma, historie: chatEl._historie})
+      body: JSON.stringify({dotaz, rok, firma, historie: chatEl._historie, sekce: chatEl._sekce})
     });
     document.getElementById("aiCekani")?.remove();
 
