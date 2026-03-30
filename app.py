@@ -4419,14 +4419,47 @@ def api_ai_dotaz():
         prava = get_prava_z_db()
         return prava.get(role, {}).get(sekce, False)
 
+    # Detekce relevantních sekcí z dotazu
+    sekce_override = data.get("sekce", [])  # manuální override z frontendu
+
+    def _je_relevantni(klicova_slova, dotaz_lower):
+        return any(k in dotaz_lower for k in klicova_slova)
+
+    dotaz_lower = dotaz.lower()
+    if sekce_override:
+        # Uživatel ručně vybral sekce
+        nactist = set(sekce_override)
+    else:
+        # Automatická detekce
+        nactist = set()
+        if _je_relevantni(["tržb","trzb","burger","pizza","kart","hotov","report","směn","smen","talíř","talir","burtgul","pk","poukazk","výdaj v report"], dotaz_lower):
+            nactist.add("reporty")
+        if _je_relevantni(["faktur","nákup","náklad","dodavat","makro","účet","utrat"], dotaz_lower):
+            nactist.add("faktury")
+        if _je_relevantni(["zboží","zbozi","položk","polozk","klobás","klobas","maso","sýr","syr","zelenin","nápoj","napoj","pivo","víno","vino","chléb","chleb","uzenin","párk","park","sekan","parek"], dotaz_lower):
+            nactist.add("zbozi")
+        if _je_relevantni(["výplat","vyplat","mzd","plat","zaměstnan","zamestnan"], dotaz_lower):
+            nactist.add("vyplaty")
+        if _je_relevantni(["výdaj","vydaj","náklad","naklad","soukrom"], dotaz_lower):
+            nactist.add("vydaje")
+        if _je_relevantni(["dokument","smlouv","pojistk","faktur","certif","list","ppas","plynáren","elektr","energie"], dotaz_lower):
+            nactist.add("dokumenty")
+        if _je_relevantni(["peněženk","penezenk","hotovost","sporeni","majetek","úspor"], dotaz_lower):
+            nactist.add("penezenka")
+        if _je_relevantni(["vystaven","odberatel","bauhaus","fakturace"], dotaz_lower):
+            nactist.add("vystavene")
+        # Pokud nic nedetekováno — načti základní sekce
+        if not nactist:
+            nactist = {"reporty", "faktury"}
+
     try:
         with get_db() as conn:
             fw = "AND firma_zkratka=?" if firma else ""
             fp = [firma] if firma else []
-            kontext_casti = [f"Jsi analytik restaurace/bistra. Máš přístup k těmto datům za rok {rok}{' pro firmu '+firma if firma else ''}:"]
+            kontext_casti = [f"Jsi analytik restaurace/bistra. Máš přístup k těmto datům za rok {rok}{' pro firmu '+firma if firma else ''}. Načtené sekce: {', '.join(sorted(nactist))}."]
 
-            # Reporty – právo statistiky nebo reporty
-            if ma_pravo("statistiky") or ma_pravo("reporty"):
+            # Reporty
+            if "reporty" in nactist and (ma_pravo("statistiky") or ma_pravo("reporty")):
                 rep = conn.execute(f"""
                     SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY-MM') as mesic,
                         ROUND(SUM(karty)::numeric,0) as karty,
@@ -4447,13 +4480,11 @@ def api_ai_dotaz():
                     WHERE datum >= ? {fw}
                     ORDER BY datum DESC LIMIT 90
                 """, [(_dt.date.today() - _dt.timedelta(days=90)).isoformat()] + fp).fetchall()
-                kontext_casti.append(f"\nMĚSÍČNÍ PŘEHLED REPORTŮ (tržby v Kč):\n{_safe_json(rep)}")
+                kontext_casti.append(f"\nMĚSÍČNÍ PŘEHLED REPORTŮ:\n{_safe_json(rep)}")
                 kontext_casti.append(f"\nDENNÍ DATA (posledních 90 dní):\n{_safe_json(dny)}")
-            else:
-                kontext_casti.append("\n[Tržby a reporty: nemáš oprávnění]")
 
-            # Faktury – právo faktury
-            if ma_pravo("faktury"):
+            # Faktury
+            if "faktury" in nactist and ma_pravo("faktury"):
                 fakt = conn.execute(f"""
                     SELECT TO_CHAR(NULLIF(datum_vystaveni,'')::date,'YYYY-MM') as mesic,
                         dodavatel, ROUND(SUM(celkem_s_dph)::numeric,0) as castka, COUNT(*) as pocet
@@ -4461,12 +4492,10 @@ def api_ai_dotaz():
                     {"AND firma_zkratka=?" if firma else ""}
                     GROUP BY mesic, dodavatel ORDER BY mesic, castka DESC
                 """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
-                kontext_casti.append(f"\nFAKTURY (náklady podle dodavatele):\n{_safe_json(fakt)}")
-            else:
-                kontext_casti.append("\n[Faktury: nemáš oprávnění]")
+                kontext_casti.append(f"\nFAKTURY:\n{_safe_json(fakt)}")
 
-            # Výplaty – právo vyplaty
-            if ma_pravo("vyplaty"):
+            # Výplaty
+            if "vyplaty" in nactist and ma_pravo("vyplaty"):
                 vypl = conn.execute(f"""
                     SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY-MM') as mesic,
                         jmeno, ROUND(SUM(castka)::numeric,0) as castka
@@ -4475,36 +4504,35 @@ def api_ai_dotaz():
                     GROUP BY mesic, jmeno ORDER BY mesic, jmeno
                 """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
                 kontext_casti.append(f"\nVÝPLATY:\n{_safe_json(vypl)}")
-            else:
-                kontext_casti.append("\n[Výplaty: nemáš oprávnění]")
 
-            # Provozní výdaje
-            if ma_pravo("vydaje_zobrazit"):
-                vyd = conn.execute(f"""
-                    SELECT datum, dodavatel, castka, popis, stav, typ
-                    FROM vydaje WHERE typ='provozni'
-                    AND datum >= ? AND datum <= ? {fw}
-                    ORDER BY datum DESC LIMIT 200
-                """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
-                kontext_casti.append(f"\nPROVOZNÍ VÝDAJE:\n{_safe_json(vyd)}")
+            # Výdaje
+            if "vydaje" in nactist:
+                if ma_pravo("vydaje_zobrazit"):
+                    vyd = conn.execute(f"""
+                        SELECT datum, dodavatel, castka, popis, stav
+                        FROM vydaje WHERE typ='provozni'
+                        AND datum >= ? AND datum <= ? {fw}
+                        ORDER BY datum DESC LIMIT 200
+                    """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
+                    kontext_casti.append(f"\nPROVOZNÍ VÝDAJE:\n{_safe_json(vyd)}")
+                if je_admin:
+                    svyd = conn.execute("""
+                        SELECT datum, dodavatel, castka, popis, stav
+                        FROM vydaje WHERE typ='soukrome'
+                        ORDER BY datum DESC LIMIT 100
+                    """).fetchall()
+                    kontext_casti.append(f"\nSOUKROMÉ VÝDAJE:\n{_safe_json(svyd)}")
 
-            # Soukromé výdaje (jen admin)
-            if je_admin:
-                svyd = conn.execute("""
-                    SELECT datum, dodavatel, castka, popis, stav
-                    FROM vydaje WHERE typ='soukrome'
-                    ORDER BY datum DESC LIMIT 100
-                """).fetchall()
-                kontext_casti.append(f"\nSOUKROMÉ VÝDAJE (Radek):\n{_safe_json(svyd)}")
-
-                # Peněženka
+            # Peněženka
+            if "penezenka" in nactist and je_admin:
                 pw = conn.execute("""
                     SELECT datum, hotovost, sporeni, poznamka
                     FROM penezenka ORDER BY datum DESC LIMIT 24
                 """).fetchall()
-                kontext_casti.append(f"\nPENĚŽENKA (stav majetku):\n{_safe_json(pw)}")
+                kontext_casti.append(f"\nPENĚŽENKA:\n{_safe_json(pw)}")
 
-                # Dokumenty
+            # Dokumenty
+            if "dokumenty" in nactist and je_admin:
                 dok = conn.execute("""
                     SELECT datum, nazev, misto, kategorie
                     FROM dokumenty ORDER BY datum DESC
@@ -4512,7 +4540,7 @@ def api_ai_dotaz():
                 kontext_casti.append(f"\nDOKUMENTY:\n{_safe_json(dok)}")
 
             # Vystavené faktury
-            if ma_pravo("faktury_zobrazit"):
+            if "vystavene" in nactist and ma_pravo("faktury_zobrazit"):
                 vf = conn.execute("""
                     SELECT datum, odberatel, castka, stav, popis
                     FROM vystavene_faktury
@@ -4521,9 +4549,10 @@ def api_ai_dotaz():
                 """, [f"{rok}-01-01", f"{rok}-12-31"]).fetchall()
                 kontext_casti.append(f"\nVYSTAVENÉ FAKTURY:\n{_safe_json(vf)}")
 
-            # Zboží – top 50 nejnakupovanějších
-            if ma_pravo("zbozi_zobrazit"):
-                zbz = conn.execute("""
+            # Zboží — při výběru sekce zbozi načti vše, jinak top 100
+            if "zbozi" in nactist and ma_pravo("zbozi_zobrazit"):
+                limit_zbozi = "" if "zbozi" in sekce_override else "LIMIT 100"
+                zbz = conn.execute(f"""
                     SELECT z.nazev_canonical,
                         ROUND(SUM(p.celkem_s_dph)::numeric,0) as utraceno,
                         COUNT(DISTINCT p.faktura_id) as nakupu,
@@ -4531,15 +4560,13 @@ def api_ai_dotaz():
                     FROM zbozi z
                     JOIN polozky p ON p.zbozi_id = z.id
                     GROUP BY z.nazev_canonical
-                    ORDER BY utraceno DESC LIMIT 50
+                    ORDER BY utraceno DESC {limit_zbozi}
                 """).fetchall()
-                kontext_casti.append(f"\nZBOŽÍ (top 50 podle útraty):\n{_safe_json(zbz)}")
+                kontext_casti.append(f"\nZBOŽÍ{'(vše)' if not limit_zbozi else '(top 100)'}:\n{_safe_json(zbz)}")
 
         kontext_casti.append("\nOdpovídej stručně a konkrétně v češtině.\nPokud uživatel žádá export dat (CSV, tabulka, seznam), vrať odpověď ve formátu:\nEXPORT_CSV:nazev_souboru.csv\ndatum,hodnota1,hodnota2\nřádek1...\n\nJinak odpovídej normálně jako text.")
         kontext = "\n".join(kontext_casti)
 
-        # Sestavit messages — systémový kontext + historie + nový dotaz
-        historie = data.get("historie", [])  # [{"role": "user"/"assistant", "content": "..."}]
         # Sestavit messages — systémový kontext v první zprávě + správně střídající se role
         historie = data.get("historie", [])
         if not historie:
