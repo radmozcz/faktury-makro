@@ -573,6 +573,8 @@ def migrate_db():
         if "typ" not in vydaj_cols:
             try: conn.execute("ALTER TABLE vydaje ADD COLUMN typ TEXT DEFAULT 'provozni'")
             except Exception: pass
+            try: conn.execute("ALTER TABLE vydaje ADD COLUMN stitky TEXT DEFAULT ''")
+            except Exception: pass
     # Migrace vystavene_faktury
     with get_db() as conn:
         if _USE_PG:
@@ -2868,8 +2870,8 @@ def api_vydaje_ulozit():
     polozky = data.pop("polozky", [])
     with get_db() as conn:
         cur = conn.execute("""
-            INSERT INTO vydaje (firma_zkratka, dodavatel, datum, datum_splatnosti, castka, zpusob_uhrady, stav, popis, poznamka, soubor_cesta, soubor_url, zdroj, typ)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO vydaje (firma_zkratka, dodavatel, datum, datum_splatnosti, castka, zpusob_uhrady, stav, popis, poznamka, soubor_cesta, soubor_url, zdroj, typ, stitky)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             data.get("firma_zkratka"),
             data.get("dodavatel", ""),
@@ -2884,6 +2886,7 @@ def api_vydaje_ulozit():
             data.get("soubor_url", ""),
             data.get("zdroj", "rucni"),
             data.get("typ", "provozni"),
+            data.get("stitky", ""),
         ))
         vid = cur.lastrowid
         for p in polozky:
@@ -2902,7 +2905,7 @@ def api_vydaje_edit(vid):
         conn.execute("""
             UPDATE vydaje SET dodavatel=?, datum=?, datum_splatnosti=?, castka=?,
                 zpusob_uhrady=?, stav=?, popis=?, poznamka=?, firma_zkratka=?,
-                datum_uhrady=?, banka_uhrady=?
+                datum_uhrady=?, banka_uhrady=?, stitky=?
             WHERE id=?
         """, (
             data.get("dodavatel", ""),
@@ -2916,6 +2919,7 @@ def api_vydaje_edit(vid):
             data.get("firma_zkratka", ""),
             data.get("datum_uhrady", ""),
             data.get("banka_uhrady", ""),
+            data.get("stitky", ""),
             vid,
         ))
         if polozky is not None:
