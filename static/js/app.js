@@ -7210,6 +7210,10 @@ async function renderDokumenty() {
           <label>Název
             <input type="text" id="dok-nazev" class="form-control" placeholder="např. Pojistná smlouva auto" style="margin-top:.3rem">
           </label>
+          <label>Kategorie / štítky
+            <input type="text" id="dok-kategorie" class="form-control" placeholder="např. auto, pojistka, Věrka" style="margin-top:.3rem">
+            <small style="color:var(--txt2)">Více štítků oddělte čárkou</small>
+          </label>
           <label>Místo
             <select id="dok-misto" class="form-control" style="margin-top:.3rem">
               <option value="Praha">Praha</option>
@@ -7246,17 +7250,23 @@ function dokRenderList() {
     el.innerHTML = `<p style="color:var(--text-muted)">Žádné dokumenty.</p>`;
     return;
   }
-  el.innerHTML = `<div class="dokumenty-grid">${_dokData.map(d => `
+  el.innerHTML = `<div class="dokumenty-grid">${_dokData.map(d => {
+    const stitky = (d.kategorie||"").split(",").map(s=>s.trim()).filter(Boolean);
+    const stitkyHtml = stitky.map(s =>
+      `<span style="display:inline-block;background:var(--green-pale);color:var(--green);border-radius:20px;padding:.15rem .6rem;font-size:.75rem;font-weight:600;margin-right:.25rem">${escHtml(s)}</span>`
+    ).join("");
+    return `
     <div class="dok-card">
       <div class="dok-card-title">${d.nazev}</div>
       <div class="dok-card-meta">${d.datum} &nbsp;·&nbsp; ${d.misto}</div>
+      ${stitkyHtml ? `<div style="margin-top:.4rem">${stitkyHtml}</div>` : ""}
       <div class="dok-card-actions">
         ${d.soubor_cesta ? `<button class="btn btn-sm btn-secondary" onclick="dokNahled(${d.id})">👁 Náhled</button>` : ''}
         <button class="btn btn-sm btn-secondary" onclick="dokEditModal(${d.id})">✏️ Upravit</button>
         <button class="btn btn-sm btn-danger" onclick="dokSmazat(${d.id})">🗑</button>
       </div>
     </div>
-  `).join("")}</div>`;
+  `}).join("")}</div>`;
 }
 
 function dokModalNovy() {
@@ -7265,6 +7275,7 @@ function dokModalNovy() {
   document.getElementById("dok-nazev").value = "";
   document.getElementById("dok-datum").value = new Date().toISOString().slice(0,10);
   document.getElementById("dok-misto").value = "Praha";
+  document.getElementById("dok-kategorie").value = "";
   document.getElementById("dok-soubor-wrap").style.display = "";
   document.getElementById("dok-modal").style.display = "flex";
 }
@@ -7277,6 +7288,7 @@ function dokEditModal(id) {
   document.getElementById("dok-nazev").value = d.nazev;
   document.getElementById("dok-datum").value = d.datum;
   document.getElementById("dok-misto").value = d.misto || "Praha";
+  document.getElementById("dok-kategorie").value = d.kategorie || "";
   document.getElementById("dok-soubor-wrap").style.display = "none";
   document.getElementById("dok-modal").style.display = "flex";
 }
@@ -7286,25 +7298,25 @@ function dokModalZavrit() {
 }
 
 async function dokUlozit() {
-  const id    = document.getElementById("dok-id").value;
-  const nazev = document.getElementById("dok-nazev").value.trim();
-  const datum = document.getElementById("dok-datum").value;
-  const misto = document.getElementById("dok-misto").value;
+  const id        = document.getElementById("dok-id").value;
+  const nazev     = document.getElementById("dok-nazev").value.trim();
+  const datum     = document.getElementById("dok-datum").value;
+  const misto     = document.getElementById("dok-misto").value;
+  const kategorie = document.getElementById("dok-kategorie").value.trim();
   if (!nazev) { alert("Zadej název dokumentu"); return; }
 
   if (id) {
-    // Úprava
     await fetch(`/api/dokumenty/${id}`, {
       method: "PUT",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({datum, nazev, misto})
+      body: JSON.stringify({datum, nazev, misto, kategorie})
     });
   } else {
-    // Nový
     const fd = new FormData();
     fd.append("datum", datum);
     fd.append("nazev", nazev);
     fd.append("misto", misto);
+    fd.append("kategorie", kategorie);
     const soubor = document.getElementById("dok-soubor").files[0];
     if (soubor) fd.append("soubor", soubor);
     await fetch("/api/dokumenty", {method:"POST", body:fd});
