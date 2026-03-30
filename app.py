@@ -4446,6 +4446,63 @@ def api_ai_dotaz():
             else:
                 kontext_casti.append("\n[Výplaty: nemáš oprávnění]")
 
+            # Provozní výdaje
+            if ma_pravo("vydaje_zobrazit"):
+                vyd = conn.execute(f"""
+                    SELECT datum, dodavatel, castka, popis, stav, typ
+                    FROM vydaje WHERE typ='provozni'
+                    AND datum >= ? AND datum <= ? {fw}
+                    ORDER BY datum DESC LIMIT 200
+                """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
+                kontext_casti.append(f"\nPROVOZNÍ VÝDAJE:\n{json.dumps([dict(r) for r in vyd], ensure_ascii=False, indent=2)}")
+
+            # Soukromé výdaje (jen admin)
+            if je_admin:
+                svyd = conn.execute("""
+                    SELECT datum, dodavatel, castka, popis, stitky, stav
+                    FROM vydaje WHERE typ='soukrome'
+                    ORDER BY datum DESC LIMIT 100
+                """).fetchall()
+                kontext_casti.append(f"\nSOUKROMÉ VÝDAJE (Radek):\n{json.dumps([dict(r) for r in svyd], ensure_ascii=False, indent=2)}")
+
+                # Peněženka
+                pw = conn.execute("""
+                    SELECT datum, hotovost, sporeni, poznamka
+                    FROM penezenka ORDER BY datum DESC LIMIT 24
+                """).fetchall()
+                kontext_casti.append(f"\nPENĚŽENKA (stav majetku):\n{json.dumps([dict(r) for r in pw], ensure_ascii=False, indent=2)}")
+
+                # Dokumenty
+                dok = conn.execute("""
+                    SELECT datum, nazev, misto, kategorie
+                    FROM dokumenty ORDER BY datum DESC
+                """).fetchall()
+                kontext_casti.append(f"\nDOKUMENTY:\n{json.dumps([dict(r) for r in dok], ensure_ascii=False, indent=2)}")
+
+            # Vystavené faktury
+            if ma_pravo("faktury_zobrazit"):
+                vf = conn.execute("""
+                    SELECT datum, odberatel, castka, stav, popis
+                    FROM vystavene_faktury
+                    WHERE datum >= ? AND datum <= ?
+                    ORDER BY datum DESC
+                """, [f"{rok}-01-01", f"{rok}-12-31"]).fetchall()
+                kontext_casti.append(f"\nVYSTAVENÉ FAKTURY:\n{json.dumps([dict(r) for r in vf], ensure_ascii=False, indent=2)}")
+
+            # Zboží – top 50 nejnakupovanějších
+            if ma_pravo("zbozi_zobrazit"):
+                zbz = conn.execute("""
+                    SELECT z.nazev_canonical,
+                        ROUND(SUM(p.celkem_s_dph)::numeric,0) as utraceno,
+                        COUNT(DISTINCT p.faktura_id) as nakupu,
+                        ROUND(SUM(p.mnozstvi)::numeric,2) as mnozstvi
+                    FROM zbozi z
+                    JOIN polozky p ON p.zbozi_id = z.id
+                    GROUP BY z.nazev_canonical
+                    ORDER BY utraceno DESC LIMIT 50
+                """).fetchall()
+                kontext_casti.append(f"\nZBOŽÍ (top 50 podle útraty):\n{json.dumps([dict(r) for r in zbz], ensure_ascii=False, indent=2)}")
+
         kontext_casti.append("\nOdpovídej stručně a konkrétně v češtině.\nPokud uživatel žádá export dat (CSV, tabulka, seznam), vrať odpověď ve formátu:\nEXPORT_CSV:nazev_souboru.csv\ndatum,hodnota1,hodnota2\nřádek1...\n\nJinak odpovídej normálně jako text.")
         kontext = "\n".join(kontext_casti)
 
