@@ -4445,8 +4445,8 @@ def api_ai_dotaz():
                         vydaje, pk_celkem, burger, burtgulas, pizza_cela, pizza_ctvrt, talire, smena
                     FROM reporty
                     WHERE datum >= ? {fw}
-                    ORDER BY datum DESC LIMIT 90
-                """, [(_dt.date.today() - _dt.timedelta(days=90)).isoformat()] + fp).fetchall()
+                    ORDER BY datum DESC
+                """, [(_dt.date.today() - _dt.timedelta(days=365)).isoformat()] + fp).fetchall()
                 kontext_casti.append(f"\nMĚSÍČNÍ PŘEHLED REPORTŮ (tržby v Kč):\n{_safe_json(rep)}")
                 kontext_casti.append(f"\nDENNÍ DATA (posledních 90 dní):\n{_safe_json(dny)}")
             else:
