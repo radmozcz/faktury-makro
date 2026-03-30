@@ -575,6 +575,8 @@ def migrate_db():
             except Exception: pass
             try: conn.execute("ALTER TABLE vydaje ADD COLUMN stitky TEXT DEFAULT ''")
             except Exception: pass
+            try: conn.execute("ALTER TABLE vydaje ADD COLUMN duplicita_id INTEGER DEFAULT NULL")
+            except Exception: pass
     # Migrace vystavene_faktury
     with get_db() as conn:
         if _USE_PG:
@@ -2868,16 +2870,41 @@ def api_vydaje_ulozit():
     if not data.get("firma_zkratka"):
         return jsonify({"error": "Chybí firma"}), 400
     polozky = data.pop("polozky", [])
+
+    datum     = data.get("datum", "")
+    dodavatel = (data.get("dodavatel", "") or "").strip().lower()
+    castka    = float(data.get("castka", 0))
+    typ       = data.get("typ", "provozni")
+
+    duplicita_id = None
     with get_db() as conn:
+        # Hledej duplicitu — alespoň 2 ze 3 kritérií: datum, částka, dodavatel
+        kandidati = conn.execute("""
+            SELECT id, datum, dodavatel, castka FROM vydaje
+            WHERE typ=? AND duplicita_id IS NULL
+        """, (typ,)).fetchall()
+        for k in kandidati:
+            kid       = k["id"] if isinstance(k, dict) else k[0]
+            kdatum    = (k["datum"] if isinstance(k, dict) else k[1]) or ""
+            kdodav    = ((k["dodavatel"] if isinstance(k, dict) else k[2]) or "").strip().lower()
+            kcastka   = float(k["castka"] if isinstance(k, dict) else k[3])
+            datum_ok  = datum and kdatum and datum == kdatum
+            castka_ok = abs(castka - kcastka) < 1.0
+            dodav_ok  = bool(dodavatel and kdodav and dodavatel == kdodav)
+            skore = sum([datum_ok, castka_ok, dodav_ok])
+            if skore >= 2:
+                duplicita_id = kid
+                break
+
         cur = conn.execute("""
-            INSERT INTO vydaje (firma_zkratka, dodavatel, datum, datum_splatnosti, castka, zpusob_uhrady, stav, popis, poznamka, soubor_cesta, soubor_url, zdroj, typ, stitky)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            INSERT INTO vydaje (firma_zkratka, dodavatel, datum, datum_splatnosti, castka, zpusob_uhrady, stav, popis, poznamka, soubor_cesta, soubor_url, zdroj, typ, stitky, duplicita_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             data.get("firma_zkratka"),
             data.get("dodavatel", ""),
-            data.get("datum", ""),
+            datum,
             data.get("datum_splatnosti", ""),
-            float(data.get("castka", 0)),
+            castka,
             data.get("zpusob_uhrady", "hotovost"),
             data.get("stav", "nezaplaceno"),
             data.get("popis", ""),
@@ -2885,8 +2912,9 @@ def api_vydaje_ulozit():
             data.get("soubor_cesta", ""),
             data.get("soubor_url", ""),
             data.get("zdroj", "rucni"),
-            data.get("typ", "provozni"),
+            typ,
             data.get("stitky", ""),
+            duplicita_id,
         ))
         vid = cur.lastrowid
         for p in polozky:
@@ -2894,7 +2922,7 @@ def api_vydaje_ulozit():
             if not nazev: continue
             conn.execute("INSERT INTO vydaje_polozky (vydaj_id, nazev, castka) VALUES (?,?,?)",
                 (vid, nazev, float(p.get("castka", 0))))
-    return jsonify({"ok": True, "id": vid})
+    return jsonify({"ok": True, "id": vid, "duplicita": duplicita_id is not None, "duplicita_id": duplicita_id})
 
 @app.route("/api/vydaje/<int:vid>", methods=["PUT"])
 @vyzaduj_prihlaseni
