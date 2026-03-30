@@ -5544,7 +5544,7 @@ async function renderVydaje(typ = "provozni") {
 const tlacitka = (maPravo(pravoUpravit)
   ? `<button class="btn btn-primary btn-sm" onclick="${jeSoukrome ? 'renderSoukromeNahrat()' : `openVydajNahrat('${typ}')`}">📋 Nahrát doklad</button>
      <button class="btn btn-sm" onclick="openVydajRucni()">✏ Ruční zadání</button>`
-  : "") + exportButtons;
+  : "") + (jeSoukrome ? `<button class="btn btn-sm" style="background:#b45309;color:#fff" onclick="oznacDuplicityVydaje()">🔍 Najít duplicity</button>` : "") + exportButtons;
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
       <h1 class="page-title">${nazev}</h1>
@@ -5788,6 +5788,25 @@ function vydajToggleStitky(stitek) {
 function vydajResetStitky() {
   window._vydajAktivniStitky = new Set();
   loadVydaje();
+}
+
+async function oznacDuplicityVydaje() {
+  const btn = document.querySelector('[onclick="oznacDuplicityVydaje()"]');
+  if (btn) { btn.disabled = true; btn.textContent = "⏳ Hledám…"; }
+  try {
+    const res = await api("/api/vydaje/oznac-duplicity", { method: "POST" });
+    if (res.ok) {
+      const poc = res.oznaceno;
+      toast(poc === 0 ? "Žádné duplicity nenalezeny ✓" : `Označeno ${poc} duplicit — zkontroluj seznam`);
+      loadVydaje();
+    } else {
+      toast("Chyba: " + (res.chyba || "neznámá"), true);
+    }
+  } catch (e) {
+    toast("Chyba: " + e.message, true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "🔍 Najít duplicity"; }
+  }
 }
 
 function _vydajModal(titul, v, onSave, typ) {
