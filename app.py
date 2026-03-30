@@ -3935,10 +3935,16 @@ def api_report_import_xlsx():
             dnes = date.today()
             konec_import = date(dnes.year, dnes.month, dnes.day)
             for row in ws.iter_rows(min_row=2, values_only=True):
-                if not row or row[0] is None:
+                if not row:
+                    continue
+                # Řádek záhlaví měsíce — row[0] je None, row[1] je název měsíce
+                if row[0] is None:
+                    if row[1] and str(row[1]).upper() in mesic_map:
+                        current_mesic = mesic_map[str(row[1]).upper()]
                     continue
                 if str(row[0]).upper() in ("SOUČET", "DNÍ", "PRŮMĚR", "SOU\ČET"):
                     continue
+                # Datový řádek — aktualizuj měsíc pokud je v sloupci B
                 if row[1] and str(row[1]).upper() in mesic_map:
                     current_mesic = mesic_map[str(row[1]).upper()]
 
