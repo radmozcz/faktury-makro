@@ -301,7 +301,14 @@ class _PgCursor:
         if is_insert:
             try:
                 r = self._cur.fetchone()
-                self._lastrowid = r["id"] if r else None
+                if r is not None:
+                    try:
+                        self._lastrowid = r["id"]
+                    except (KeyError, TypeError):
+                        try:
+                            self._lastrowid = r[0]
+                        except Exception:
+                            self._lastrowid = None
             except Exception:
                 self._lastrowid = None
 
@@ -2949,9 +2956,6 @@ def api_vydaje_ulozit():
             duplicita_id,
         ))
         vid = cur.lastrowid
-        if not vid:
-            row = conn.execute("SELECT id FROM vydaje ORDER BY id DESC LIMIT 1").fetchone()
-            vid = row["id"] if isinstance(row, dict) else row[0]
         for p in polozky:
             nazev = (p.get("nazev") or "").strip()
             if not nazev: continue
