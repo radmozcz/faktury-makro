@@ -2956,6 +2956,9 @@ def api_vydaje_ulozit():
             duplicita_id,
         ))
         vid = cur.lastrowid
+        if not vid:
+            vid_row = conn.execute("SELECT currval('vydaje_id_seq')").fetchone()
+            vid = vid_row[0] if vid_row else None
         for p in polozky:
             nazev = (p.get("nazev") or "").strip()
             if not nazev: continue
