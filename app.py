@@ -2949,8 +2949,7 @@ def api_vydaje_ulozit():
             data.get("stitky", ""),
             duplicita_id,
         ))
-        row = cur.fetchone()
-        vid = row["id"] if isinstance(row, dict) else row[0]
+        vid = cur.lastrowid
         for p in polozky:
             nazev = (p.get("nazev") or "").strip()
             if not nazev: continue
