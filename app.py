@@ -2920,8 +2920,8 @@ def api_vydaje_ulozit():
             kdatum    = (k["datum"] if isinstance(k, dict) else k[1]) or ""
             kdodav    = ((k["dodavatel"] if isinstance(k, dict) else k[2]) or "").strip().lower()
             kcastka   = float(k["castka"] if isinstance(k, dict) else k[3])
-            datum_ok  = datum and kdatum and datum == kdatum
-            castka_ok = abs(castka - kcastka) < 1.0
+            datum_ok  = bool(datum and kdatum and datum == kdatum)
+            castka_ok = bool(abs(castka - kcastka) < 1.0)
             dodav_ok  = bool(dodavatel and kdodav and dodavatel == kdodav)
             skore = sum([datum_ok, castka_ok, dodav_ok])
             if skore >= 2:
