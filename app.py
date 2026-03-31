@@ -2931,6 +2931,7 @@ def api_vydaje_ulozit():
         cur = conn.execute("""
             INSERT INTO vydaje (firma_zkratka, dodavatel, datum, datum_splatnosti, castka, zpusob_uhrady, stav, popis, poznamka, soubor_cesta, soubor_url, zdroj, typ, stitky, duplicita_id)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            RETURNING id
         """, (
             data.get("firma_zkratka"),
             data.get("dodavatel", ""),
@@ -2948,7 +2949,8 @@ def api_vydaje_ulozit():
             data.get("stitky", ""),
             duplicita_id,
         ))
-        vid = cur.lastrowid
+        row = cur.fetchone()
+        vid = row["id"] if isinstance(row, dict) else row[0]
         for p in polozky:
             nazev = (p.get("nazev") or "").strip()
             if not nazev: continue
