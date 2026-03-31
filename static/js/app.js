@@ -2029,6 +2029,7 @@ async function ulozitRucni() {
   });
   toast("Faktura uložena ✓");
   navigateTo("faktury");
+  navigateTo("faktury");
 }
 
 // ═══════════════════════════════════════════════════════════════
