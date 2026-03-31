@@ -2905,69 +2905,53 @@ def api_vydaje_list():
 @app.route("/api/vydaje", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_vydaje_ulozit():
-    data = request.json
+    data = request.json or {}
     if not data.get("firma_zkratka"):
         return jsonify({"error": "Chybí firma"}), 400
-    polozky = data.pop("polozky", [])
-
-    datum     = data.get("datum", "")
-    dodavatel = (data.get("dodavatel", "") or "").strip().lower()
-    castka    = float(data.get("castka", 0))
-    typ       = data.get("typ", "provozni")
-
-    # Detekce duplicit
-    duplicita_id = None
-    with get_db() as conn:
-        kandidati = conn.execute("""
-            SELECT id, datum, dodavatel, castka FROM vydaje
-            WHERE typ=? AND duplicita_id IS NULL
-        """, (typ,)).fetchall()
-        for k in kandidati:
-            kid      = k["id"] if isinstance(k, dict) else k[0]
-            kdatum   = (k["datum"] if isinstance(k, dict) else k[1]) or ""
-            kdodav   = ((k["dodavatel"] if isinstance(k, dict) else k[2]) or "").strip().lower()
-            kcastka  = float(k["castka"] if isinstance(k, dict) else k[3])
-            if sum([bool(datum and kdatum and datum == kdatum),
-                    bool(abs(castka - kcastka) < 1.0),
-                    bool(dodavatel and kdodav and dodavatel == kdodav)]) >= 2:
-                duplicita_id = kid
-                break
-
-    # INSERT výdaje — samostatná transakce, pak čteme MAX(id)
-    import psycopg2, psycopg2.extras, os as _os
-    db_url = _os.environ.get("DATABASE_URL", "")
-    raw = psycopg2.connect(db_url)
+    polozky = data.get("polozky", [])
     try:
-        with raw.cursor() as cur:
-            cur.execute("""
-                INSERT INTO vydaje (firma_zkratka, dodavatel, datum, datum_splatnosti, castka,
-                    zpusob_uhrady, stav, popis, poznamka, soubor_cesta, soubor_url, zdroj, typ, stitky, duplicita_id)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                RETURNING id
-            """, (
-                data.get("firma_zkratka"), data.get("dodavatel", ""), datum,
-                data.get("datum_splatnosti", ""), castka,
-                data.get("zpusob_uhrady", "hotovost"), data.get("stav", "nezaplaceno"),
-                data.get("popis", ""), data.get("poznamka", ""),
-                data.get("soubor_cesta", ""), data.get("soubor_url", ""),
-                data.get("zdroj", "rucni"), typ, data.get("stitky", ""), duplicita_id,
-            ))
-            vid = cur.fetchone()[0]
-            for p in polozky:
-                nazev = (p.get("nazev") or "").strip()
-                if not nazev: continue
-                cur.execute(
-                    "INSERT INTO vydaje_polozky (vydaj_id, nazev, castka) VALUES (%s,%s,%s)",
-                    (vid, nazev, float(p.get("castka", 0)))
-                )
-        raw.commit()
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO vydaje
+                (firma_zkratka, dodavatel, datum, datum_splatnosti, castka,
+                 zpusob_uhrady, stav, popis, poznamka, soubor_cesta,
+                 soubor_url, zdroj, typ, stitky)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+        """, (
+            data.get("firma_zkratka", ""),
+            data.get("dodavatel", ""),
+            data.get("datum", ""),
+            data.get("datum_splatnosti", ""),
+            float(data.get("castka", 0)),
+            data.get("zpusob_uhrady", "hotovost"),
+            data.get("stav", "nezaplaceno"),
+            data.get("popis", ""),
+            data.get("poznamka", ""),
+            data.get("soubor_cesta", ""),
+            data.get("soubor_url", ""),
+            data.get("zdroj", "rucni"),
+            data.get("typ", "provozni"),
+            data.get("stitky", ""),
+        ))
+        vid = cur.fetchone()[0]
+        for p in polozky:
+            nazev = (p.get("nazev") or "").strip()
+            if not nazev:
+                continue
+            cur.execute(
+                "INSERT INTO vydaje_polozky (vydaj_id, nazev, castka) VALUES (%s,%s,%s)",
+                (vid, nazev, float(p.get("castka", 0)))
+            )
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({"ok": True, "id": vid, "duplicita": False, "duplicita_id": None})
     except Exception as e:
-        raw.rollback()
-        raise e
-    finally:
-        raw.close()
-
-    return jsonify({"ok": True, "id": vid, "duplicita": duplicita_id is not None, "duplicita_id": duplicita_id})
+        try: conn.rollback(); conn.close()
+        except: pass
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/vydaje/<int:vid>", methods=["PUT"])
 @vyzaduj_prihlaseni
