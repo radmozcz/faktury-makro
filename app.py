@@ -2959,6 +2959,8 @@ def api_vydaje_ulozit():
                 duplicita_id,
             ))
             vid = cur2.fetchone()[0]
+            import logging
+            logging.warning(f"DEBUG vydaje INSERT vid={vid}")
             for p in polozky:
                 nazev = (p.get("nazev") or "").strip()
                 if not nazev: continue
