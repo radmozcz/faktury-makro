@@ -2931,7 +2931,6 @@ def api_vydaje_ulozit():
         cur = conn.execute("""
             INSERT INTO vydaje (firma_zkratka, dodavatel, datum, datum_splatnosti, castka, zpusob_uhrady, stav, popis, poznamka, soubor_cesta, soubor_url, zdroj, typ, stitky, duplicita_id)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-            RETURNING id
         """, (
             data.get("firma_zkratka"),
             data.get("dodavatel", ""),
