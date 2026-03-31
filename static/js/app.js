@@ -1310,6 +1310,11 @@ function renderNahrat() {
 
       <div id="tabPanelRucni" style="display:none">
         <div class="grid-2" style="gap:1rem;margin-top:1rem">
+          <div class="form-group"><label class="form-label">Firma *</label>
+            <select id="rFirma" class="form-control firma-select">
+              ${App.config.firmy.map(f=>`<option value="${f}">${f}</option>`).join("")}
+            </select>
+          </div>
           <div class="form-group"><label class="form-label">Dodavatel *</label><input id="rDodavatel" class="form-control" placeholder="Název firmy dodavatele"></div>
           <div class="form-group"><label class="form-label">Číslo faktury</label><input id="rCislo" class="form-control"></div>
           <div class="form-group"><label class="form-label">Způsob úhrady</label><input id="rUhrada" class="form-control" placeholder="převodem / hotově"></div>
