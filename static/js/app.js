@@ -2006,13 +2006,13 @@ async function ulozitRucni() {
   });
 
   const payload = {
-    firma_zkratka: document.getElementById("rFirma").value,
+    firma_zkratka: document.getElementById("rFirma")?.value || App.aktivniFirma || "",
     dodavatel,
-    cislo_faktury: document.getElementById("rCislo").value,
-    datum_vystaveni: document.getElementById("rDatVys").value,
-    datum_splatnosti: document.getElementById("rDatSpl").value,
-    zpusob_uhrady: document.getElementById("rUhrada").value,
-    stav: document.getElementById("rStav").value,
+    cislo_faktury: document.getElementById("rCislo")?.value || "",
+    datum_vystaveni: document.getElementById("rDatVys")?.value || "",
+    datum_splatnosti: document.getElementById("rDatSpl")?.value || "",
+    zpusob_uhrady: document.getElementById("rUhrada")?.value || "",
+    stav: document.getElementById("rStav")?.value || "ceka",
     soubor_cesta,
     zdroj: "rucni",
     polozky,
