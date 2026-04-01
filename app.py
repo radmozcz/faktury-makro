@@ -3715,110 +3715,120 @@ def api_parovani_navrh():
     """Navrhne párování bankovních pohybů s fakturami a výdaji."""
     import datetime as _dt
     navrhy = []
-    with get_db() as conn:
-        # Načti nespárované pohyby
-        pohyby = conn.execute("""
-            SELECT * FROM bankovni_pohyby
-            WHERE sparovano = 0
-            ORDER BY datum DESC
-        """).fetchall()
-
-        for p in pohyby:
-            pid = p["id"] if isinstance(p, dict) else p[0]
-            datum = p["datum"] if isinstance(p, dict) else p[2]
-            castka = float(p["castka"] if isinstance(p, dict) else p[3])
-            var_sym = (p["var_sym"] if isinstance(p, dict) else p.get("var_sym", "")) or ""
-            nazev = (p["nazev_protiucet"] if isinstance(p, dict) else p[5]) or ""
-            firma = (p["firma_zkratka"] if isinstance(p, dict) else p[9]) or ""
-            banka = (p["banka"] if isinstance(p, dict) else p[1]) or ""
-
-            # Datum ±5 dní
+    try:
+        with get_db() as conn:
+            # Načti nespárované pohyby — odolné vůči chybějícímu sloupci sparovano
             try:
-                d = _dt.date.fromisoformat(datum)
-                d_od = (d - _dt.timedelta(days=5)).isoformat()
-                d_do = (d + _dt.timedelta(days=5)).isoformat()
+                pohyby = conn.execute("""
+                    SELECT * FROM bankovni_pohyby
+                    WHERE sparovano = 0
+                    ORDER BY datum DESC LIMIT 200
+                """).fetchall()
             except Exception:
-                continue
+                pohyby = conn.execute("""
+                    SELECT * FROM bankovni_pohyby
+                    ORDER BY datum DESC LIMIT 200
+                """).fetchall()
 
-            shoda = None
+            for p in pohyby:
+                pid = p["id"] if isinstance(p, dict) else p[0]
+                datum = p["datum"] if isinstance(p, dict) else p[2]
+                castka = float(p["castka"] if isinstance(p, dict) else p[3])
+                try:
+                    var_sym = str(p["var_sym"]) if isinstance(p, dict) else ""
+                except Exception:
+                    var_sym = ""
+                nazev = (p["nazev_protiucet"] if isinstance(p, dict) else p[5]) or ""
+                firma = (p["firma_zkratka"] if isinstance(p, dict) else p[9]) or ""
+                banka = (p["banka"] if isinstance(p, dict) else p[1]) or ""
 
-            # 1. Hledej ve fakturách (odchozí platba = záporná castka)
-            if castka < 0:
-                castka_abs = abs(castka)
-                kandidati = conn.execute("""
-                    SELECT id, firma_zkratka, dodavatel, cislo_faktury, celkem_s_dph, datum_splatnosti
-                    FROM faktury
-                    WHERE stav != 'zaplaceno' AND stav != 'duplikat'
-                    AND ABS(celkem_s_dph - ?) < 1.0
-                    AND (datum_vystaveni BETWEEN ? AND ? OR datum_splatnosti BETWEEN ? AND ?)
-                """, (castka_abs, d_od, d_do, d_od, d_do)).fetchall()
+                # Datum ±5 dní
+                try:
+                    d = _dt.date.fromisoformat(datum)
+                    d_od = (d - _dt.timedelta(days=5)).isoformat()
+                    d_do = (d + _dt.timedelta(days=5)).isoformat()
+                except Exception:
+                    continue
 
-                # Priorita: VS shoda
-                if var_sym and kandidati:
-                    for k in kandidati:
-                        cislo = (k["cislo_faktury"] if isinstance(k, dict) else k[3]) or ""
-                        if var_sym in cislo or cislo in var_sym:
+                shoda = None
+
+                if castka < 0:
+                    castka_abs = abs(castka)
+                    try:
+                        kandidati = conn.execute("""
+                            SELECT id, firma_zkratka, dodavatel, cislo_faktury, celkem_s_dph
+                            FROM faktury
+                            WHERE stav NOT IN ('zaplaceno','duplikat')
+                            AND ABS(celkem_s_dph - ?) < 1.0
+                            AND (datum_vystaveni BETWEEN ? AND ? OR datum_splatnosti BETWEEN ? AND ?)
+                        """, (castka_abs, d_od, d_do, d_od, d_do)).fetchall()
+                        if var_sym and kandidati:
+                            for k in kandidati:
+                                cislo = (k["cislo_faktury"] if isinstance(k, dict) else k[3]) or ""
+                                if var_sym in cislo or cislo in var_sym:
+                                    shoda = {"typ": "faktura", "id": k["id"] if isinstance(k, dict) else k[0],
+                                             "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
+                                             "popis": f"Faktura č.{cislo} | {k['dodavatel'] if isinstance(k, dict) else k[2]}",
+                                             "castka": k["celkem_s_dph"] if isinstance(k, dict) else k[4],
+                                             "istota": "vs"}
+                                    break
+                        if not shoda and kandidati:
+                            k = kandidati[0]
+                            cislo = (k["cislo_faktury"] if isinstance(k, dict) else k[3]) or ""
                             shoda = {"typ": "faktura", "id": k["id"] if isinstance(k, dict) else k[0],
                                      "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
                                      "popis": f"Faktura č.{cislo} | {k['dodavatel'] if isinstance(k, dict) else k[2]}",
                                      "castka": k["celkem_s_dph"] if isinstance(k, dict) else k[4],
-                                     "istota": "vs"}
-                            break
+                                     "istota": "castka"}
+                    except Exception:
+                        pass
 
-                if not shoda and kandidati:
-                    k = kandidati[0]
-                    cislo = (k["cislo_faktury"] if isinstance(k, dict) else k[3]) or ""
-                    shoda = {"typ": "faktura", "id": k["id"] if isinstance(k, dict) else k[0],
-                             "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
-                             "popis": f"Faktura č.{cislo} | {k['dodavatel'] if isinstance(k, dict) else k[2]}",
-                             "castka": k["celkem_s_dph"] if isinstance(k, dict) else k[4],
-                             "istota": "castka"}
+                    if not shoda:
+                        try:
+                            kandidati_v = conn.execute("""
+                                SELECT id, firma_zkratka, dodavatel, castka
+                                FROM vydaje
+                                WHERE stav = 'nezaplaceno'
+                                AND ABS(castka - ?) < 1.0
+                                AND datum BETWEEN ? AND ?
+                            """, (castka_abs, d_od, d_do)).fetchall()
+                            if kandidati_v:
+                                k = kandidati_v[0]
+                                shoda = {"typ": "vydaj", "id": k["id"] if isinstance(k, dict) else k[0],
+                                         "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
+                                         "popis": f"Výdaj | {k['dodavatel'] if isinstance(k, dict) else k[2]}",
+                                         "castka": k["castka"] if isinstance(k, dict) else k[3],
+                                         "istota": "castka"}
+                        except Exception:
+                            pass
 
-                # Hledej ve výdajích
-                if not shoda:
-                    kandidati_v = conn.execute("""
-                        SELECT id, firma_zkratka, dodavatel, castka, datum
-                        FROM vydaje
-                        WHERE stav = 'nezaplaceno'
-                        AND ABS(castka - ?) < 1.0
-                        AND datum BETWEEN ? AND ?
-                    """, (castka_abs, d_od, d_do)).fetchall()
-                    if kandidati_v:
-                        k = kandidati_v[0]
-                        shoda = {"typ": "vydaj", "id": k["id"] if isinstance(k, dict) else k[0],
-                                 "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
-                                 "popis": f"Výdaj | {k['dodavatel'] if isinstance(k, dict) else k[2]}",
-                                 "castka": k["castka"] if isinstance(k, dict) else k[3],
-                                 "istota": "castka"}
+                elif castka > 0:
+                    try:
+                        kandidati_vf = conn.execute("""
+                            SELECT id, firma_zkratka, odberatel, cislo_faktury, castka
+                            FROM vystavene_faktury
+                            WHERE stav = 'nezaplaceno'
+                            AND ABS(castka - ?) < 1.0
+                            AND (datum BETWEEN ? AND ? OR datum_splatnosti BETWEEN ? AND ?)
+                        """, (castka, d_od, d_do, d_od, d_do)).fetchall()
+                        if kandidati_vf:
+                            k = kandidati_vf[0]
+                            cislo = (k["cislo_faktury"] if isinstance(k, dict) else k[3]) or ""
+                            shoda = {"typ": "vystavena", "id": k["id"] if isinstance(k, dict) else k[0],
+                                     "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
+                                     "popis": f"Vystavená FA č.{cislo} | {k['odberatel'] if isinstance(k, dict) else k[2]}",
+                                     "castka": k["castka"] if isinstance(k, dict) else k[4],
+                                     "istota": "castka"}
+                    except Exception:
+                        pass
 
-            # 2. Hledej ve vystavených fakturách (příchozí platba = kladná castka)
-            elif castka > 0:
-                kandidati_vf = conn.execute("""
-                    SELECT id, firma_zkratka, odberatel, cislo_faktury, castka
-                    FROM vystavene_faktury
-                    WHERE stav = 'nezaplaceno'
-                    AND ABS(castka - ?) < 1.0
-                    AND (datum BETWEEN ? AND ? OR datum_splatnosti BETWEEN ? AND ?)
-                """, (castka, d_od, d_do, d_od, d_do)).fetchall()
-                if kandidati_vf:
-                    k = kandidati_vf[0]
-                    cislo = (k["cislo_faktury"] if isinstance(k, dict) else k[3]) or ""
-                    shoda = {"typ": "vystavena", "id": k["id"] if isinstance(k, dict) else k[0],
-                             "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
-                             "popis": f"Vystavená FA č.{cislo} | {k['odberatel'] if isinstance(k, dict) else k[2]}",
-                             "castka": k["castka"] if isinstance(k, dict) else k[4],
-                             "istota": "castka"}
-
-            navrhy.append({
-                "pohyb_id": pid,
-                "banka": banka,
-                "datum": datum,
-                "castka": castka,
-                "nazev_protiucet": nazev,
-                "var_sym": var_sym,
-                "firma_zkratka": firma,
-                "shoda": shoda
-            })
+                navrhy.append({
+                    "pohyb_id": pid, "banka": banka, "datum": datum,
+                    "castka": castka, "nazev_protiucet": nazev,
+                    "var_sym": var_sym, "firma_zkratka": firma, "shoda": shoda
+                })
+    except Exception as e:
+        return jsonify({"navrhy": [], "error": str(e)})
 
     return jsonify({"navrhy": navrhy})
 
@@ -3860,53 +3870,74 @@ def api_parovani_po_splatnosti():
     import datetime as _dt
     dnes = _dt.date.today().isoformat()
     vysledky = []
-    with get_db() as conn:
-        # Faktury po splatnosti
-        rows = conn.execute("""
-            SELECT id, firma_zkratka, dodavatel, cislo_faktury, celkem_s_dph, datum_splatnosti
-            FROM faktury
-            WHERE stav NOT IN ('zaplaceno','duplikat')
-            AND datum_splatnosti != '' AND datum_splatnosti < ?
-            ORDER BY datum_splatnosti
-        """, (dnes,)).fetchall()
-        for r in rows:
-            vysledky.append({
-                "typ": "faktura", "id": r[0], "firma": r[1],
-                "popis": f"Faktura č.{r[3]} | {r[2]}",
-                "castka": r[4], "datum_splatnosti": r[5],
-                "dnu_po": ((_dt.date.fromisoformat(dnes) - _dt.date.fromisoformat(r[5])).days if r[5] else 0)
-            })
-        # Výdaje po splatnosti
-        rows = conn.execute("""
-            SELECT id, firma_zkratka, dodavatel, castka, datum_splatnosti
-            FROM vydaje
-            WHERE stav = 'nezaplaceno'
-            AND datum_splatnosti != '' AND datum_splatnosti < ?
-            ORDER BY datum_splatnosti
-        """, (dnes,)).fetchall()
-        for r in rows:
-            vysledky.append({
-                "typ": "vydaj", "id": r[0], "firma": r[1],
-                "popis": f"Výdaj | {r[2]}",
-                "castka": r[3], "datum_splatnosti": r[4],
-                "dnu_po": ((_dt.date.fromisoformat(dnes) - _dt.date.fromisoformat(r[4])).days if r[4] else 0)
-            })
-        # Vystavené faktury po splatnosti
-        rows = conn.execute("""
-            SELECT id, firma_zkratka, odberatel, cislo_faktury, castka, datum_splatnosti
-            FROM vystavene_faktury
-            WHERE stav = 'nezaplaceno'
-            AND datum_splatnosti != '' AND datum_splatnosti < ?
-            ORDER BY datum_splatnosti
-        """, (dnes,)).fetchall()
-        for r in rows:
-            vysledky.append({
-                "typ": "vystavena", "id": r[0], "firma": r[1],
-                "popis": f"Vystavená FA č.{r[3]} | {r[2]}",
-                "castka": r[4], "datum_splatnosti": r[5],
-                "dnu_po": ((_dt.date.fromisoformat(dnes) - _dt.date.fromisoformat(r[5])).days if r[5] else 0)
-            })
-    vysledky.sort(key=lambda x: x["datum_splatnosti"])
+    try:
+        with get_db() as conn:
+            try:
+                rows = conn.execute("""
+                    SELECT id, firma_zkratka, dodavatel, cislo_faktury, celkem_s_dph, datum_splatnosti
+                    FROM faktury
+                    WHERE stav NOT IN ('zaplaceno','duplikat')
+                    AND datum_splatnosti != '' AND datum_splatnosti < ?
+                    ORDER BY datum_splatnosti
+                """, (dnes,)).fetchall()
+                for r in rows:
+                    ds = r["datum_splatnosti"] if isinstance(r, dict) else r[5]
+                    vysledky.append({
+                        "typ": "faktura",
+                        "id": r["id"] if isinstance(r, dict) else r[0],
+                        "firma": r["firma_zkratka"] if isinstance(r, dict) else r[1],
+                        "popis": f"Faktura č.{r['cislo_faktury'] if isinstance(r,dict) else r[3]} | {r['dodavatel'] if isinstance(r,dict) else r[2]}",
+                        "castka": r["celkem_s_dph"] if isinstance(r, dict) else r[4],
+                        "datum_splatnosti": ds,
+                        "dnu_po": ((_dt.date.fromisoformat(dnes) - _dt.date.fromisoformat(ds)).days if ds else 0)
+                    })
+            except Exception: pass
+
+            try:
+                rows = conn.execute("""
+                    SELECT id, firma_zkratka, dodavatel, castka, datum_splatnosti
+                    FROM vydaje
+                    WHERE stav = 'nezaplaceno'
+                    AND datum_splatnosti != '' AND datum_splatnosti < ?
+                    ORDER BY datum_splatnosti
+                """, (dnes,)).fetchall()
+                for r in rows:
+                    ds = r["datum_splatnosti"] if isinstance(r, dict) else r[4]
+                    vysledky.append({
+                        "typ": "vydaj",
+                        "id": r["id"] if isinstance(r, dict) else r[0],
+                        "firma": r["firma_zkratka"] if isinstance(r, dict) else r[1],
+                        "popis": f"Výdaj | {r['dodavatel'] if isinstance(r,dict) else r[2]}",
+                        "castka": r["castka"] if isinstance(r, dict) else r[3],
+                        "datum_splatnosti": ds,
+                        "dnu_po": ((_dt.date.fromisoformat(dnes) - _dt.date.fromisoformat(ds)).days if ds else 0)
+                    })
+            except Exception: pass
+
+            try:
+                rows = conn.execute("""
+                    SELECT id, firma_zkratka, odberatel, cislo_faktury, castka, datum_splatnosti
+                    FROM vystavene_faktury
+                    WHERE stav = 'nezaplaceno'
+                    AND datum_splatnosti != '' AND datum_splatnosti < ?
+                    ORDER BY datum_splatnosti
+                """, (dnes,)).fetchall()
+                for r in rows:
+                    ds = r["datum_splatnosti"] if isinstance(r, dict) else r[5]
+                    vysledky.append({
+                        "typ": "vystavena",
+                        "id": r["id"] if isinstance(r, dict) else r[0],
+                        "firma": r["firma_zkratka"] if isinstance(r, dict) else r[1],
+                        "popis": f"Vystavená FA č.{r['cislo_faktury'] if isinstance(r,dict) else r[3]} | {r['odberatel'] if isinstance(r,dict) else r[2]}",
+                        "castka": r["castka"] if isinstance(r, dict) else r[4],
+                        "datum_splatnosti": ds,
+                        "dnu_po": ((_dt.date.fromisoformat(dnes) - _dt.date.fromisoformat(ds)).days if ds else 0)
+                    })
+            except Exception: pass
+
+        vysledky.sort(key=lambda x: x.get("datum_splatnosti",""))
+    except Exception as e:
+        return jsonify({"po_splatnosti": [], "error": str(e)})
     return jsonify({"po_splatnosti": vysledky})
 
 # ── API: REPORTY ──────────────────────────────────────────────────────────────
