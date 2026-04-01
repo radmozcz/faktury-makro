@@ -5623,6 +5623,14 @@ Odpověz POUZE platným JSON, žádný jiný text.
 
 Důležité pro číslo faktury: hledej POUZE pole "Faktura č. / VS" — hodnota je číslo ve formátu 0415000291 (10 číslic, pouze číslice). IGNORUJ číslo vpravo nahoře (formát 0015/0135 — to je číslo stránky), IGNORUJ "č. zákazníka" a IGNORUJ "Technické ID".
 
+Důležité pro položky:
+- MAKRO faktura obsahuje SEKCE/KATEGORIE zboží jako nadpisy (např. "OVOCE A ZELENINA", "MASO A DRŮBEŽ", "MRAŽENÉ POTRAVINY" atd.) — tyto IGNORUJ, nejsou to položky zboží.
+- Skutečná položka zboží má vždy číslo zboží (čárový kód, např. 8435409365610) a jednotku (PC/KG/CA atd.).
+- Řádky "Urceno pro konecnou spotrebu" jsou slevy — IGNORUJ je jako samostatné položky, ale jejich zápornou hodnotu odečti od ceny předchozí položky.
+- Řádky "KUP VÍCE = PLAŤ MÉNĚ" jsou slevy — stejně IGNORUJ jako položku, odečti od předchozí položky.
+- IGNORUJ souhrnné řádky: "Strana celkem", "Poslední strana celkem", "Celková částka", "Spotřební daň celkem", "Platba kartou".
+- Pokud je faktura vícestrannová, zpracuj položky ze VŠECH stran.
+
 {{
   "dodavatel": "název dodavatele (obvykle MAKRO Cash & Carry ČR s.r.o.)",
   "cislo_faktury": "číslo POUZE z pole Faktura č. / VS (10 číslic, např. 0415000291)",
