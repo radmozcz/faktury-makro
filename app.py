@@ -3540,13 +3540,18 @@ def api_banky_import():
 
     naimportovano = 0
     duplicity = 0
-    with get_db() as conn:
+    try:
+        import psycopg2 as _pg2
+        db_url = os.environ.get("DATABASE_URL", "")
+        pg_conn = _pg2.connect(db_url)
+        pg_cur = pg_conn.cursor()
         for p in pohyby:
             try:
-                conn.execute("""
+                pg_cur.execute("""
                     INSERT INTO bankovni_pohyby
                         (banka, datum, castka, protiucet, nazev_protiucet, typ_transakce, zprava, var_sym, id_transakce, firma_zkratka)
-                    VALUES (?,?,?,?,?,?,?,?,?,?)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON CONFLICT (id_transakce) DO NOTHING
                 """, (
                     p["banka"], p["datum"], p["castka"],
                     p["protiucet"], p["nazev_protiucet"],
@@ -3554,9 +3559,16 @@ def api_banky_import():
                     p.get("var_sym", ""),
                     p["id_transakce"], firma
                 ))
-                naimportovano += 1
+                if pg_cur.rowcount > 0:
+                    naimportovano += 1
+                else:
+                    duplicity += 1
             except Exception:
                 duplicity += 1
+        pg_conn.commit()
+        pg_conn.close()
+    except Exception as e:
+        return jsonify({"error": f"Chyba DB: {str(e)}"}), 500
     return jsonify({"ok": True, "banka": banka, "naimportovano": naimportovano, "duplicity": duplicity})
 
 @app.route("/api/banky/pohyby")
