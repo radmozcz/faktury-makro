@@ -5767,10 +5767,6 @@ async function nacistParovani() {
     el.innerHTML = `<div class="card" style="color:var(--danger)">❌ Chyba při načítání párování: ${e.message}</div>`;
   }
 }
-  } catch(e) {
-    el.innerHTML = `<div class="card" style="color:var(--danger)">❌ Chyba při načítání párování: ${e.message}</div>`;
-  }
-}
 
 async function potvrditParovani(pohybId, typ, dokladId) {
   const datumEl = document.getElementById(`datPl_${pohybId}`);
