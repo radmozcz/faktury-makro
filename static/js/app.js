@@ -1254,6 +1254,7 @@ function renderNahrat() {
         <button id="tabText" class="tab-btn" onclick="switchTab('text');zkontrolovatDriveMobil()">📱 Z mobilu</button>
         <button id="tabHromadne" class="tab-btn" onclick="switchTab('hromadne')">📦 Hromadné nahrání</button>
         <button id="tabRucni" class="tab-btn" onclick="switchTab('rucni')">✏️ Ruční zadání</button>
+        <button id="tabSkener" class="tab-btn" onclick="switchTab('skener');spustitSkener()">📷 Skener</button>
       </div>
 
       <div id="tabPanelPdf">
@@ -1351,6 +1352,25 @@ function renderNahrat() {
         <div class="btn-group" style="margin-top:1.2rem">
           <button class="btn btn-primary" onclick="ulozitRucni()">💾 Uložit fakturu</button>
         </div>
+      </div>
+
+      <div id="tabPanelSkener" style="display:none">
+        <div style="margin-bottom:.8rem">
+          <label class="form-label">Vyberte kameru</label>
+          <select id="skenerKameraSelect" class="form-control" style="max-width:360px" onchange="prepnoutKameru()">
+            <option value="">-- načítám kamery... --</option>
+          </select>
+        </div>
+        <div style="position:relative;display:inline-block;max-width:100%">
+          <video id="skenerVideo" autoplay playsinline
+            style="display:block;max-width:100%;max-height:480px;border:2px solid var(--border);border-radius:8px;background:#111"></video>
+          <canvas id="skenerCanvas" style="display:none"></canvas>
+        </div>
+        <div style="margin-top:.8rem;display:flex;gap:.6rem;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-primary" onclick="skenerVyfotit()" id="btnVyfotit" disabled>📷 Vyfotit a zpracovat</button>
+          <button class="btn btn-secondary" onclick="zastavitSkener()">⏹ Zastavit kameru</button>
+        </div>
+        <div id="skenerStatus" style="margin-top:.8rem;font-size:.9rem;color:var(--txt2)"></div>
       </div>
 
     </div>`;
@@ -1512,11 +1532,12 @@ async function zkontrolovatDriveNyni() {
 }
 
 function switchTab(tab) {
-  ['pdf','text','hromadne','rucni'].forEach(t => {
+  ['pdf','text','hromadne','rucni','skener'].forEach(t => {
     document.getElementById('tabPanel' + t.charAt(0).toUpperCase() + t.slice(1)).style.display = t === tab ? '' : 'none';
     document.getElementById('tab' + t.charAt(0).toUpperCase() + t.slice(1)).classList.toggle('tab-active', t === tab);
   });
   if (tab === 'rucni') rUpdateTotal();
+  if (tab !== 'skener') zastavitSkener();
 }
 
 async function zpracovatText() {
@@ -1536,6 +1557,123 @@ async function zpracovatText() {
     document.getElementById('textStatus').textContent = '❌ Chyba: ' + e.message;
   }
 }
+
+// ========== SKENER — kamera funkce ==========
+let _skenerStream = null;
+
+async function spustitSkener() {
+  const statusEl = document.getElementById('skenerStatus');
+  const btnVyfotit = document.getElementById('btnVyfotit');
+  if (!statusEl) return;
+  statusEl.innerHTML = '<span class="spinner"></span> Spouštím kameru…';
+
+  try {
+    // Načti seznam kamer
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const kamery = devices.filter(d => d.kind === 'videoinput');
+    const select = document.getElementById('skenerKameraSelect');
+    if (select) {
+      select.innerHTML = kamery.map((k, i) =>
+        `<option value="${k.deviceId}">${k.label || 'Kamera ' + (i+1)}</option>`
+      ).join('');
+      // Preferuj kameru s názvem obsahujícím "NETUM" nebo "document"
+      const netum = kamery.find(k => /netum|document|scan/i.test(k.label));
+      if (netum) select.value = netum.deviceId;
+    }
+
+    await _otevritKameru(select ? select.value : null);
+    statusEl.textContent = '✅ Kamera připravena — položte dokument pod kameru a klikněte Vyfotit';
+    if (btnVyfotit) btnVyfotit.disabled = false;
+  } catch(e) {
+    statusEl.textContent = '❌ Nepodařilo se spustit kameru: ' + e.message;
+    if (btnVyfotit) btnVyfotit.disabled = true;
+  }
+}
+
+async function _otevritKameru(deviceId) {
+  if (_skenerStream) {
+    _skenerStream.getTracks().forEach(t => t.stop());
+    _skenerStream = null;
+  }
+  const constraints = {
+    video: deviceId
+      ? { deviceId: { exact: deviceId }, width: { ideal: 3264 }, height: { ideal: 2448 } }
+      : { width: { ideal: 3264 }, height: { ideal: 2448 } }
+  };
+  _skenerStream = await navigator.mediaDevices.getUserMedia(constraints);
+  const video = document.getElementById('skenerVideo');
+  if (video) { video.srcObject = _skenerStream; }
+}
+
+async function prepnoutKameru() {
+  const select = document.getElementById('skenerKameraSelect');
+  const statusEl = document.getElementById('skenerStatus');
+  if (!select) return;
+  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Přepínám kameru…';
+  try {
+    await _otevritKameru(select.value);
+    if (statusEl) statusEl.textContent = '✅ Kamera připravena';
+  } catch(e) {
+    if (statusEl) statusEl.textContent = '❌ Chyba při přepnutí kamery: ' + e.message;
+  }
+}
+
+function zastavitSkener() {
+  if (_skenerStream) {
+    _skenerStream.getTracks().forEach(t => t.stop());
+    _skenerStream = null;
+  }
+  const video = document.getElementById('skenerVideo');
+  if (video) video.srcObject = null;
+  const btn = document.getElementById('btnVyfotit');
+  if (btn) btn.disabled = true;
+  const statusEl = document.getElementById('skenerStatus');
+  if (statusEl) statusEl.textContent = '';
+}
+
+async function skenerVyfotit() {
+  const video = document.getElementById('skenerVideo');
+  const canvas = document.getElementById('skenerCanvas');
+  const statusEl = document.getElementById('skenerStatus');
+  const btn = document.getElementById('btnVyfotit');
+  if (!video || !canvas) return;
+
+  // Zachyť snímek z videa do canvasu
+  canvas.width = video.videoWidth || 1920;
+  canvas.height = video.videoHeight || 1080;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+  statusEl.innerHTML = '<span class="spinner"></span> Zpracovávám přes OCR…';
+  btn.disabled = true;
+
+  try {
+    // Převeď canvas na JPEG blob
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.95));
+    const ts = new Date().toISOString().replace(/[-:T]/g,'').slice(0,14);
+    const file = new File([blob], `skener_${ts}.jpg`, { type: 'image/jpeg' });
+
+    const firma = document.getElementById('nahratFirma')?.value || '';
+    const fd = new FormData();
+    fd.append('soubor', file);
+    fd.append('firma_zkratka', firma);
+
+    const r = await fetch('/api/nahrat', { method: 'POST', body: fd });
+    const data = await r.json();
+
+    if (data.error) {
+      statusEl.textContent = '❌ Chyba OCR: ' + data.error;
+    } else {
+      statusEl.textContent = '✅ Hotovo — zkontrolujte vyplněná data níže';
+      naplnFormular(data);
+    }
+  } catch(e) {
+    statusEl.textContent = '❌ Chyba: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+// ========== konec SKENER ==========
 
 function setupDropzoneHromadne() {
   const dz  = document.getElementById('dropzoneHromadne');
