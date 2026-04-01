@@ -1266,6 +1266,11 @@ function renderNahrat() {
           </div>
           <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg,.tiff,.bmp">
         </div>
+        <div style="margin-top:.8rem">
+          <button class="btn btn-secondary" onclick="nacistNaskenoany()">📁 NASKENOVANÉ</button>
+          <small style="margin-left:.7rem;color:var(--txt2)">Otevře složku D:\SKENOVANE SOUBORY\</small>
+        </div>
+        <input type="file" id="fileInputNaskenoany" accept=".pdf,.png,.jpg,.jpeg,.tiff,.bmp" style="display:none">
         <div id="uploadStatus" style="margin-top:1rem;color:var(--txt2);font-size:.9rem"></div>
       </div>
 
@@ -1959,10 +1964,21 @@ async function hromadneNahrat(files) {
   statusEl.insertAdjacentHTML('afterbegin', `<div style="font-weight:600;margin-bottom:.5rem">Hotovo: ${ok} uloženo, ${err} chyb</div>`);
 }
 
+function nacistNaskenoany() {
+  const inp = document.getElementById('fileInputNaskenoany');
+  if (!inp) return;
+  // Nastaví nativní dialog — prohlížeč ho otevře,
+  // uživatel naviguje do D:\SKENOVANE SOUBORY\ (nebo jiné složky)
+  inp.value = '';
+  inp.click();
+  inp.onchange = () => {
+    if (inp.files[0]) uploadFile(inp.files[0]);
+  };
+}
+
 function setupDropzone() {
   const dz   = document.getElementById("dropzone");
   const inp  = document.getElementById("fileInput");
-
   dz.addEventListener("click", (e) => { if (e.target !== inp) inp.click(); });
   inp.addEventListener("change", () => { if (inp.files[0]) uploadFile(inp.files[0]); });
 
