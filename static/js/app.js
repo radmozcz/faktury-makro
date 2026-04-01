@@ -1306,6 +1306,7 @@ function renderNahrat() {
         <div style="margin-top:1rem;font-weight:600;font-size:1.05rem" id="totalSum"></div>
         <div class="btn-group" style="margin-top:1.2rem">
           <button class="btn btn-primary" onclick="ulozitFakturuMakro()">💾 Uložit fakturu</button>
+          <button class="btn btn-secondary" onclick="document.getElementById('parsedForm').style.display='none';document.getElementById('uploadStatus').textContent=''">🗑 Zrušit</button>
         </div>
       </div>
 
@@ -1562,12 +1563,12 @@ async function otevritSkenerModal(callback, firma = '') {
   // Vytvoř modal
   const modal = document.createElement('div');
   modal.id = 'skenerModal';
-  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:flex;align-items:center;justify-content:center;padding:1rem';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1rem';
   modal.innerHTML = `
-    <div style="background:var(--card-bg);border-radius:14px;padding:1.5rem;width:min(700px,95vw);max-height:90vh;overflow-y:auto;position:relative">
+    <div style="background:var(--card-bg);border-radius:14px;padding:1.5rem;width:min(700px,95vw);max-height:90vh;overflow-y:auto;position:relative;z-index:10000">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
         <h3 style="margin:0">📷 Skener</h3>
-        <button onclick="zavritSkenerModal()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--txt2)">✕</button>
+        <button onclick="zavritSkenerModal()" style="background:#ef4444;border:none;border-radius:6px;font-size:1rem;cursor:pointer;color:#fff;padding:.3rem .8rem;font-weight:700">✕ Zavřít</button>
       </div>
       <div style="margin-bottom:.8rem;display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
         <select id="skenerKameraSelect" class="form-control" style="max-width:300px" onchange="skenerPrepnoutKameru()">
