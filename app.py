@@ -3704,10 +3704,11 @@ def api_banky_debug():
             ORDER BY banka, firma_zkratka
         """).fetchall()
         total = conn.execute("SELECT COUNT(*) as c FROM bankovni_pohyby").fetchone()
-    return jsonify({
-        "celkem_zaznamu": total["c"] if isinstance(total, dict) else total[0],
-        "skupiny": [{"banka": r[0], "firma": r[1], "pocet": r[2]} for r in rows]
-    })
+    celkem = total[0] if total else 0
+    skupiny = []
+    for r in rows:
+        skupiny.append({"banka": r[0], "firma": r[1], "pocet": r[2]})
+    return jsonify({"celkem_zaznamu": celkem, "skupiny": skupiny})
 
 @app.route("/api/banky/oprav-soukrome", methods=["POST"])
 @vyzaduj_prihlaseni
