@@ -3696,19 +3696,18 @@ def api_banky_export():
 @app.route("/api/banky/debug")
 @vyzaduj_prihlaseni
 def api_banky_debug():
-    with get_db() as conn:
-        rows = conn.execute("""
-            SELECT banka, firma_zkratka, COUNT(*) as pocet
-            FROM bankovni_pohyby
-            GROUP BY banka, firma_zkratka
-            ORDER BY banka, firma_zkratka
-        """).fetchall()
-        total = conn.execute("SELECT COUNT(*) as c FROM bankovni_pohyby").fetchone()
-    celkem = total[0] if total else 0
-    skupiny = []
-    for r in rows:
-        skupiny.append({"banka": r[0], "firma": r[1], "pocet": r[2]})
-    return jsonify({"celkem_zaznamu": celkem, "skupiny": skupiny})
+    try:
+        with get_db() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM bankovni_pohyby").fetchone()
+            banky = conn.execute("SELECT DISTINCT banka FROM bankovni_pohyby ORDER BY banka").fetchall()
+            firmy = conn.execute("SELECT DISTINCT firma_zkratka FROM bankovni_pohyby ORDER BY firma_zkratka").fetchall()
+        return jsonify({
+            "celkem": total[0],
+            "banky": [r[0] for r in banky],
+            "firmy": [r[0] for r in firmy]
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/api/banky/oprav-soukrome", methods=["POST"])
 @vyzaduj_prihlaseni
