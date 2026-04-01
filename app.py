@@ -5642,7 +5642,7 @@ Důležité pro položky — KRITICKÁ PRAVIDLA:
   "ico_odberatele": "IČO odběratele nebo null",
   "polozky": [
     {{
-      "nazev": "název zboží (BEZ názvu sekce/kategorie)",
+      "nazev": "název zboží (BEZ názvu sekce/kategorie) — např. pokud vidíš řádek 'OVOCE A ZELENINA' a pak řádek 'JABLKA ČER.BAL. TAŠKA 1kg', název je POUZE 'JABLKA ČER.BAL. TAŠKA 1kg'",
       "mnozstvi": číslo,
       "jednotka": "PC/CA/KG atd.",
       "cena_za_jednotku_s_dph": číslo,
