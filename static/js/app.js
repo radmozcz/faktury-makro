@@ -1967,12 +1967,50 @@ async function hromadneNahrat(files) {
 function nacistNaskenoany() {
   const inp = document.getElementById('fileInputNaskenoany');
   if (!inp) return;
-  // Nastaví nativní dialog — prohlížeč ho otevře,
-  // uživatel naviguje do D:\SKENOVANE SOUBORY\ (nebo jiné složky)
+  inp.value = '';
+  inp.click();
+  inp.onchange = () => { if (inp.files[0]) uploadFile(inp.files[0]); };
+}
+
+function nacistNaskenoanyVydaj() {
+  const inp = document.getElementById('vydajFileInputNask');
+  if (!inp) return;
+  inp.value = '';
+  inp.click();
+  inp.onchange = () => { if (inp.files[0]) doVydajNahrat(inp.files[0]); };
+}
+
+function nacistNaskenoanyVyst() {
+  const inp = document.getElementById('vystSouborNask');
+  if (!inp) return;
   inp.value = '';
   inp.click();
   inp.onchange = () => {
-    if (inp.files[0]) uploadFile(inp.files[0]);
+    if (inp.files[0]) {
+      // Přenést soubor do hlavního inputu a spustit OCR
+      const dt = new DataTransfer();
+      dt.items.add(inp.files[0]);
+      const hlavni = document.getElementById('vystSoubor');
+      if (hlavni) hlavni.files = dt.files;
+      spustVystOCR();
+    }
+  };
+}
+
+function nacistNaskenoanyDok() {
+  const inp = document.getElementById('dokSouborNask');
+  if (!inp) return;
+  inp.value = '';
+  inp.click();
+  inp.onchange = () => {
+    if (inp.files[0]) {
+      const dt = new DataTransfer();
+      dt.items.add(inp.files[0]);
+      const hlavni = document.getElementById('dok-soubor');
+      if (hlavni) hlavni.files = dt.files;
+      const statusEl = document.getElementById('dok-skener-status');
+      if (statusEl) statusEl.textContent = '✅ Soubor připraven — vyplňte název a uložte';
+    }
   };
 }
 
@@ -6389,8 +6427,10 @@ function openVydajNahrat(typ = null) {
       <div class="dropzone-text"><strong>Přetáhněte foto nebo PDF dokladu</strong> nebo klikněte</div>
       <input type="file" id="vydajFileInput" accept="image/*,.pdf">
     </div>
-    <div style="margin-top:.75rem;text-align:center">
+    <div style="margin-top:.75rem;display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
       <button class="btn btn-secondary btn-sm" onclick="openDrivePicker(drivePickerVydaj)">📂 Vybrat z Google Drive</button>
+      <button class="btn btn-secondary btn-sm" onclick="nacistNaskenoanyVydaj()">📁 NASKENOVANÉ</button>
+      <input type="file" id="vydajFileInputNask" accept="image/*,.pdf" style="display:none">
     </div>
     <div id="vydajNahratStatus" style="margin-top:1rem;font-size:.9rem"></div>
     <div id="vydajNahratForm" style="display:none;margin-top:1rem"></div>`);
@@ -6716,9 +6756,13 @@ function openVystNahrat() {
       <label>PDF / foto</label>
       <input type="file" id="vystSoubor" accept=".pdf,image/*" class="form-control">
     </div>
-    <button class="btn btn-primary" onclick="spustVystOCR()">🔍 Rozpoznat z PDF</button>
-    <button class="btn btn-secondary" onclick="openDrivePicker(drivePickerVyst)" style="margin-left:.5rem">📂 Z Google Drive</button>
-    <span id="vystOcrStatus" style="margin-left:0.5rem;font-size:0.85rem;color:var(--text-muted)"></span>
+    <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:.5rem">
+      <button class="btn btn-primary" onclick="spustVystOCR()">🔍 Rozpoznat z PDF</button>
+      <button class="btn btn-secondary" onclick="openDrivePicker(drivePickerVyst)">📂 Z Google Drive</button>
+      <button class="btn btn-secondary" onclick="nacistNaskenoanyVyst()">📁 NASKENOVANÉ</button>
+      <input type="file" id="vystSouborNask" accept=".pdf,image/*" style="display:none">
+    </div>
+    <span id="vystOcrStatus" style="font-size:0.85rem;color:var(--text-muted)"></span>
     <hr>
     <div id="vystFormFields" style="display:none">
       <div id="vystDuplikátWarning" style="display:none;margin-bottom:1rem;padding:.75rem 1rem;border-radius:8px;background:#fff3cd;border:1px solid #ffc107;color:#856404"></div>
@@ -7723,6 +7767,8 @@ async function renderDokumenty() {
           </label>
           <label id="dok-soubor-wrap">Soubor (PDF nebo JPG)
             <input type="file" id="dok-soubor" accept=".pdf,.jpg,.jpeg,.png" style="margin-top:.3rem">
+            <button type="button" class="btn btn-secondary btn-sm" style="margin-top:.4rem" onclick="nacistNaskenoanyDok()">📁 NASKENOVANÉ</button>
+            <input type="file" id="dokSouborNask" accept=".pdf,.jpg,.jpeg,.png" style="display:none">
           </label>
         </div>
         <div style="display:flex;gap:.7rem;justify-content:flex-end;margin-top:1.4rem">
