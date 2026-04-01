@@ -6022,6 +6022,8 @@ async function doImportBanky(file, banka, firma) {
         ✅ Import dokončen! Banka: <strong>${data.banka}</strong><br>
         Naimportováno: <strong>${data.naimportovano}</strong> transakcí
         ${data.duplicity ? `, přeskočeno duplicit: <strong>${data.duplicity}</strong>` : ""}
+        ${data.prvni_chyba ? `<br><span style="color:#dc2626;font-size:.85rem">⚠ Chyba: ${data.prvni_chyba}</span>` : ""}
+        ${data.sloupce ? `<br><span style="font-size:.75rem;color:#666">Sloupce: ${data.sloupce.join(', ')}</span>` : ""}
       </div>`;
     setTimeout(() => { closeModal(); loadBankaAccordion(banka, firma); }, 2000);
   } catch(e) {
