@@ -3693,6 +3693,22 @@ def api_banky_export():
         resp.headers["Content-Disposition"] = f'attachment; filename="{banka}_{mesic}.pdf"'
         return resp
 
+@app.route("/api/banky/debug")
+@vyzaduj_prihlaseni
+def api_banky_debug():
+    with get_db() as conn:
+        rows = conn.execute("""
+            SELECT banka, firma_zkratka, COUNT(*) as pocet
+            FROM bankovni_pohyby
+            GROUP BY banka, firma_zkratka
+            ORDER BY banka, firma_zkratka
+        """).fetchall()
+        total = conn.execute("SELECT COUNT(*) as c FROM bankovni_pohyby").fetchone()
+    return jsonify({
+        "celkem_zaznamu": total["c"] if isinstance(total, dict) else total[0],
+        "skupiny": [{"banka": r[0], "firma": r[1], "pocet": r[2]} for r in rows]
+    })
+
 @app.route("/api/banky/oprav-soukrome", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_banky_oprav_soukrome():
