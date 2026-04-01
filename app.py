@@ -766,6 +766,27 @@ def migrate_db():
         if "akcie" in pen_cols and "xtb_czk" not in pen_cols:
             try: conn.execute("ALTER TABLE penezenka RENAME COLUMN akcie TO xtb_czk")
             except Exception: pass
+            # Párování výpisů — nové sloupce
+            try: conn.execute("ALTER TABLE vydaje ADD COLUMN var_sym TEXT DEFAULT ''")
+            except Exception: pass
+            try: conn.execute("ALTER TABLE vydaje ADD COLUMN datum_zaplaceno TEXT DEFAULT ''")
+            except Exception: pass
+            try: conn.execute("ALTER TABLE faktury ADD COLUMN var_sym TEXT DEFAULT ''")
+            except Exception: pass
+            try: conn.execute("ALTER TABLE faktury ADD COLUMN datum_zaplaceno TEXT DEFAULT ''")
+            except Exception: pass
+            try: conn.execute("ALTER TABLE vystavene_faktury ADD COLUMN var_sym TEXT DEFAULT ''")
+            except Exception: pass
+            try: conn.execute("ALTER TABLE vystavene_faktury ADD COLUMN datum_zaplaceno TEXT DEFAULT ''")
+            except Exception: pass
+            try: conn.execute("ALTER TABLE bankovni_pohyby ADD COLUMN var_sym TEXT DEFAULT ''")
+            except Exception: pass
+            try: conn.execute("ALTER TABLE bankovni_pohyby ADD COLUMN sparovano INTEGER DEFAULT 0")
+            except Exception: pass
+            try: conn.execute("ALTER TABLE bankovni_pohyby ADD COLUMN sparovano_typ TEXT DEFAULT ''")
+            except Exception: pass
+            try: conn.execute("ALTER TABLE bankovni_pohyby ADD COLUMN sparovano_id INTEGER DEFAULT NULL")
+            except Exception: pass
 
     # Dluhy — půjčky kamarádům
     with get_db() as conn:
@@ -3334,6 +3355,11 @@ def parse_csv_airbank(content_bytes):
             castka = float(castka_raw)
         except Exception:
             continue
+        zprava = row.get("Obchodní místo", "").strip().strip('"') or row.get("Zpráva pro příjemce", "").strip().strip('"') or row.get("Poznámka pro mne", "").strip().strip('"')
+        # Parsuj VS ze zprávy — hledej číslo 4-10 číslic
+        import re as _re
+        vs_match = _re.search(r'\b(\d{4,10})\b', zprava)
+        var_sym = vs_match.group(1) if vs_match else ''
         pohyby.append({
             "banka":           "AirBank",
             "datum":           datum,
@@ -3341,7 +3367,8 @@ def parse_csv_airbank(content_bytes):
             "protiucet":       row.get("Číslo účtu protistrany", "").strip().strip('"'),
             "nazev_protiucet": row.get("Název protistrany", "").strip().strip('"'),
             "typ_transakce":   row.get("Typ úhrady", "").strip().strip('"'),
-            "zprava":          row.get("Obchodní místo", "").strip().strip('"') or row.get("Zpráva pro příjemce", "").strip().strip('"') or row.get("Poznámka pro mne", "").strip().strip('"'),
+            "zprava":          zprava,
+            "var_sym":         var_sym,
             "id_transakce":    f"AIR_{id_transakce}" if id_transakce else None,
         })
     return pohyby
@@ -3385,6 +3412,9 @@ def parse_csv_kb(content_bytes):
             castka = float(castka_raw)
         except Exception:
             continue
+        zprava_kb = (row.get("Zprava pro prijemce") or row.get("Zpráva pro příjemce") or row.get("Popis pro me") or "").strip()
+        import re as _re
+        vs_match_kb = _re.search(r'\b(\d{4,10})\b', zprava_kb)
         pohyby.append({
             "banka":           "KB",
             "datum":           datum,
@@ -3392,7 +3422,8 @@ def parse_csv_kb(content_bytes):
             "protiucet":       (row.get("Protistrana") or "").strip(),
             "nazev_protiucet": (row.get("Nazev protiuctu") or row.get("Název protiúčtu") or "").strip(),
             "typ_transakce":   (row.get("Typ transakce") or "").strip(),
-            "zprava":          (row.get("Zprava pro prijemce") or row.get("Zpráva pro příjemce") or row.get("Popis pro me") or "").strip(),
+            "zprava":          zprava_kb,
+            "var_sym":         vs_match_kb.group(1) if vs_match_kb else '',
             "id_transakce":    f"KB_{id_transakce}" if id_transakce else None,
         })
     return pohyby
@@ -3428,6 +3459,9 @@ def parse_csv_rb(content_bytes):
             castka = float(castka_raw)
         except Exception:
             continue
+        zprava_rb = row.get("Zpráva", "").strip().strip('"') or row.get("Poznámka", "").strip().strip('"')
+        import re as _re
+        vs_match_rb = _re.search(r'\b(\d{4,10})\b', zprava_rb)
         pohyby.append({
             "banka":           "RB",
             "datum":           datum,
@@ -3435,7 +3469,8 @@ def parse_csv_rb(content_bytes):
             "protiucet":       row.get("Číslo protiúčtu", "").strip().strip('"'),
             "nazev_protiucet": row.get("Název protiúčtu", "").strip().strip('"') or row.get("Název obchodníka", "").strip().strip('"'),
             "typ_transakce":   row.get("Typ transakce", "").strip().strip('"'),
-            "zprava":          row.get("Zpráva", "").strip().strip('"') or row.get("Poznámka", "").strip().strip('"'),
+            "zprava":          zprava_rb,
+            "var_sym":         vs_match_rb.group(1) if vs_match_rb else '',
             "id_transakce":    f"RB_{id_transakce}" if id_transakce else None,
         })
     return pohyby
@@ -3501,12 +3536,13 @@ def api_banky_import():
             try:
                 conn.execute("""
                     INSERT INTO bankovni_pohyby
-                        (banka, datum, castka, protiucet, nazev_protiucet, typ_transakce, zprava, id_transakce, firma_zkratka)
-                    VALUES (?,?,?,?,?,?,?,?,?)
+                        (banka, datum, castka, protiucet, nazev_protiucet, typ_transakce, zprava, var_sym, id_transakce, firma_zkratka)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)
                 """, (
                     p["banka"], p["datum"], p["castka"],
                     p["protiucet"], p["nazev_protiucet"],
                     p["typ_transakce"], p["zprava"],
+                    p.get("var_sym", ""),
                     p["id_transakce"], firma
                 ))
                 naimportovano += 1
@@ -3672,6 +3708,206 @@ def api_banky_pohyb_delete(pid):
     with get_db() as conn:
         conn.execute("DELETE FROM bankovni_pohyby WHERE id=?", (pid,))
     return jsonify({"ok": True})
+
+@app.route("/api/parovani/navrh")
+@vyzaduj_prihlaseni
+def api_parovani_navrh():
+    """Navrhne párování bankovních pohybů s fakturami a výdaji."""
+    import datetime as _dt
+    navrhy = []
+    with get_db() as conn:
+        # Načti nespárované pohyby
+        pohyby = conn.execute("""
+            SELECT * FROM bankovni_pohyby
+            WHERE sparovano = 0
+            ORDER BY datum DESC
+        """).fetchall()
+
+        for p in pohyby:
+            pid = p["id"] if isinstance(p, dict) else p[0]
+            datum = p["datum"] if isinstance(p, dict) else p[2]
+            castka = float(p["castka"] if isinstance(p, dict) else p[3])
+            var_sym = (p["var_sym"] if isinstance(p, dict) else p.get("var_sym", "")) or ""
+            nazev = (p["nazev_protiucet"] if isinstance(p, dict) else p[5]) or ""
+            firma = (p["firma_zkratka"] if isinstance(p, dict) else p[9]) or ""
+            banka = (p["banka"] if isinstance(p, dict) else p[1]) or ""
+
+            # Datum ±5 dní
+            try:
+                d = _dt.date.fromisoformat(datum)
+                d_od = (d - _dt.timedelta(days=5)).isoformat()
+                d_do = (d + _dt.timedelta(days=5)).isoformat()
+            except Exception:
+                continue
+
+            shoda = None
+
+            # 1. Hledej ve fakturách (odchozí platba = záporná castka)
+            if castka < 0:
+                castka_abs = abs(castka)
+                kandidati = conn.execute("""
+                    SELECT id, firma_zkratka, dodavatel, cislo_faktury, celkem_s_dph, datum_splatnosti
+                    FROM faktury
+                    WHERE stav != 'zaplaceno' AND stav != 'duplikat'
+                    AND ABS(celkem_s_dph - ?) < 1.0
+                    AND (datum_vystaveni BETWEEN ? AND ? OR datum_splatnosti BETWEEN ? AND ?)
+                """, (castka_abs, d_od, d_do, d_od, d_do)).fetchall()
+
+                # Priorita: VS shoda
+                if var_sym and kandidati:
+                    for k in kandidati:
+                        cislo = (k["cislo_faktury"] if isinstance(k, dict) else k[3]) or ""
+                        if var_sym in cislo or cislo in var_sym:
+                            shoda = {"typ": "faktura", "id": k["id"] if isinstance(k, dict) else k[0],
+                                     "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
+                                     "popis": f"Faktura č.{cislo} | {k['dodavatel'] if isinstance(k, dict) else k[2]}",
+                                     "castka": k["celkem_s_dph"] if isinstance(k, dict) else k[4],
+                                     "istota": "vs"}
+                            break
+
+                if not shoda and kandidati:
+                    k = kandidati[0]
+                    cislo = (k["cislo_faktury"] if isinstance(k, dict) else k[3]) or ""
+                    shoda = {"typ": "faktura", "id": k["id"] if isinstance(k, dict) else k[0],
+                             "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
+                             "popis": f"Faktura č.{cislo} | {k['dodavatel'] if isinstance(k, dict) else k[2]}",
+                             "castka": k["celkem_s_dph"] if isinstance(k, dict) else k[4],
+                             "istota": "castka"}
+
+                # Hledej ve výdajích
+                if not shoda:
+                    kandidati_v = conn.execute("""
+                        SELECT id, firma_zkratka, dodavatel, castka, datum
+                        FROM vydaje
+                        WHERE stav = 'nezaplaceno'
+                        AND ABS(castka - ?) < 1.0
+                        AND datum BETWEEN ? AND ?
+                    """, (castka_abs, d_od, d_do)).fetchall()
+                    if kandidati_v:
+                        k = kandidati_v[0]
+                        shoda = {"typ": "vydaj", "id": k["id"] if isinstance(k, dict) else k[0],
+                                 "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
+                                 "popis": f"Výdaj | {k['dodavatel'] if isinstance(k, dict) else k[2]}",
+                                 "castka": k["castka"] if isinstance(k, dict) else k[3],
+                                 "istota": "castka"}
+
+            # 2. Hledej ve vystavených fakturách (příchozí platba = kladná castka)
+            elif castka > 0:
+                kandidati_vf = conn.execute("""
+                    SELECT id, firma_zkratka, odberatel, cislo_faktury, castka
+                    FROM vystavene_faktury
+                    WHERE stav = 'nezaplaceno'
+                    AND ABS(castka - ?) < 1.0
+                    AND (datum BETWEEN ? AND ? OR datum_splatnosti BETWEEN ? AND ?)
+                """, (castka, d_od, d_do, d_od, d_do)).fetchall()
+                if kandidati_vf:
+                    k = kandidati_vf[0]
+                    cislo = (k["cislo_faktury"] if isinstance(k, dict) else k[3]) or ""
+                    shoda = {"typ": "vystavena", "id": k["id"] if isinstance(k, dict) else k[0],
+                             "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
+                             "popis": f"Vystavená FA č.{cislo} | {k['odberatel'] if isinstance(k, dict) else k[2]}",
+                             "castka": k["castka"] if isinstance(k, dict) else k[4],
+                             "istota": "castka"}
+
+            navrhy.append({
+                "pohyb_id": pid,
+                "banka": banka,
+                "datum": datum,
+                "castka": castka,
+                "nazev_protiucet": nazev,
+                "var_sym": var_sym,
+                "firma_zkratka": firma,
+                "shoda": shoda
+            })
+
+    return jsonify({"navrhy": navrhy})
+
+@app.route("/api/parovani/potvrdit", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_parovani_potvrdit():
+    """Potvrdí spárování pohybu s dokladem."""
+    data = request.json
+    pohyb_id = data.get("pohyb_id")
+    typ = data.get("typ")        # faktura / vydaj / vystavena / bez_dokladu
+    doklad_id = data.get("doklad_id")
+    datum_zaplaceno = data.get("datum_zaplaceno", "")
+
+    with get_db() as conn:
+        # Označ pohyb jako spárovaný
+        conn.execute("""
+            UPDATE bankovni_pohyby
+            SET sparovano=1, sparovano_typ=?, sparovano_id=?
+            WHERE id=?
+        """, (typ, doklad_id, pohyb_id))
+
+        # Označ doklad jako zaplacený
+        if typ == "faktura" and doklad_id:
+            conn.execute("UPDATE faktury SET stav='zaplaceno', datum_zaplaceno=? WHERE id=?",
+                        (datum_zaplaceno, doklad_id))
+        elif typ == "vydaj" and doklad_id:
+            conn.execute("UPDATE vydaje SET stav='zaplaceno', datum_zaplaceno=? WHERE id=?",
+                        (datum_zaplaceno, doklad_id))
+        elif typ == "vystavena" and doklad_id:
+            conn.execute("UPDATE vystavene_faktury SET stav='zaplaceno', datum_zaplaceno=? WHERE id=?",
+                        (datum_zaplaceno, doklad_id))
+
+    return jsonify({"ok": True})
+
+@app.route("/api/parovani/po-splatnosti")
+@vyzaduj_prihlaseni
+def api_parovani_po_splatnosti():
+    """Vrátí všechny nezaplacené doklady po splatnosti ze všech firem."""
+    import datetime as _dt
+    dnes = _dt.date.today().isoformat()
+    vysledky = []
+    with get_db() as conn:
+        # Faktury po splatnosti
+        rows = conn.execute("""
+            SELECT id, firma_zkratka, dodavatel, cislo_faktury, celkem_s_dph, datum_splatnosti
+            FROM faktury
+            WHERE stav NOT IN ('zaplaceno','duplikat')
+            AND datum_splatnosti != '' AND datum_splatnosti < ?
+            ORDER BY datum_splatnosti
+        """, (dnes,)).fetchall()
+        for r in rows:
+            vysledky.append({
+                "typ": "faktura", "id": r[0], "firma": r[1],
+                "popis": f"Faktura č.{r[3]} | {r[2]}",
+                "castka": r[4], "datum_splatnosti": r[5],
+                "dnu_po": ((_dt.date.fromisoformat(dnes) - _dt.date.fromisoformat(r[5])).days if r[5] else 0)
+            })
+        # Výdaje po splatnosti
+        rows = conn.execute("""
+            SELECT id, firma_zkratka, dodavatel, castka, datum_splatnosti
+            FROM vydaje
+            WHERE stav = 'nezaplaceno'
+            AND datum_splatnosti != '' AND datum_splatnosti < ?
+            ORDER BY datum_splatnosti
+        """, (dnes,)).fetchall()
+        for r in rows:
+            vysledky.append({
+                "typ": "vydaj", "id": r[0], "firma": r[1],
+                "popis": f"Výdaj | {r[2]}",
+                "castka": r[3], "datum_splatnosti": r[4],
+                "dnu_po": ((_dt.date.fromisoformat(dnes) - _dt.date.fromisoformat(r[4])).days if r[4] else 0)
+            })
+        # Vystavené faktury po splatnosti
+        rows = conn.execute("""
+            SELECT id, firma_zkratka, odberatel, cislo_faktury, castka, datum_splatnosti
+            FROM vystavene_faktury
+            WHERE stav = 'nezaplaceno'
+            AND datum_splatnosti != '' AND datum_splatnosti < ?
+            ORDER BY datum_splatnosti
+        """, (dnes,)).fetchall()
+        for r in rows:
+            vysledky.append({
+                "typ": "vystavena", "id": r[0], "firma": r[1],
+                "popis": f"Vystavená FA č.{r[3]} | {r[2]}",
+                "castka": r[4], "datum_splatnosti": r[5],
+                "dnu_po": ((_dt.date.fromisoformat(dnes) - _dt.date.fromisoformat(r[5])).days if r[5] else 0)
+            })
+    vysledky.sort(key=lambda x: x["datum_splatnosti"])
+    return jsonify({"po_splatnosti": vysledky})
 
 # ── API: REPORTY ──────────────────────────────────────────────────────────────
 @app.route("/api/reporty/nahrat-foto", methods=["POST"])
