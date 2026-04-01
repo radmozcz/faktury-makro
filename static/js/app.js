@@ -5685,11 +5685,15 @@ async function nacistPoSplatnosti() {
             const prijmy = i.typ === 'vystavena';
             const sipka = prijmy ? '→' : '←';
             const barva = '#E24B4A';
-            return `<div style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${barva};border-radius:0 6px 6px 0;padding:8px 12px;display:flex;align-items:center;gap:10px">
+            const onclick = i.typ === 'faktura' ? `navigateTo('faktury');setTimeout(()=>openFakturaDetail(${i.id}),500)`
+                          : i.typ === 'vystavena' ? `navigateTo('vystavene');setTimeout(()=>openVystEdit(${i.id}),500)`
+                          : i.typ === 'vydaj' ? `navigateTo('vydaje');` : '';
+            return `<div onclick="${onclick}" style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${barva};border-radius:0 6px 6px 0;padding:8px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:background .15s" onmouseover="this.style.background='var(--hover-bg)'" onmouseout="this.style.background='var(--card-bg)'">
               <span style="font-size:18px;color:${barva};font-weight:500;min-width:20px">${sipka}</span>
               <span style="flex:1;font-size:.9rem"><span class="badge">${escHtml(i.firma)}</span> ${escHtml(i.popis)}</span>
               <span style="font-size:.85rem;color:#E24B4A;font-weight:600;white-space:nowrap">po ${i.dnu_po} dní</span>
               <span style="font-weight:600;white-space:nowrap">${czMoneyFull(i.castka)}</span>
+              <span style="font-size:.8rem;color:var(--txt2)">→</span>
             </div>`;
           }).join('')}
         </div>
