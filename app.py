@@ -3546,43 +3546,59 @@ def api_banky_import():
         db_url = os.environ.get("DATABASE_URL", "")
         pg_conn = _pg2.connect(db_url)
         pg_cur = pg_conn.cursor()
+
         # Zjisti jaké sloupce existují
         pg_cur.execute("SELECT column_name FROM information_schema.columns WHERE table_name='bankovni_pohyby'")
         existujici_sloupce = [r[0] for r in pg_cur.fetchall()]
         ma_var_sym = 'var_sym' in existujici_sloupce
-        ma_sparovano = 'sparovano' in existujici_sloupce
+
+        # Přidej chybějící sloupce
+        if not ma_var_sym:
+            try:
+                pg_cur.execute("ALTER TABLE bankovni_pohyby ADD COLUMN var_sym TEXT DEFAULT ''")
+                pg_conn.commit()
+                ma_var_sym = True
+            except Exception: pg_conn.rollback()
+        if 'sparovano' not in existujici_sloupce:
+            try:
+                pg_cur.execute("ALTER TABLE bankovni_pohyby ADD COLUMN sparovano INTEGER DEFAULT 0")
+                pg_conn.commit()
+            except Exception: pg_conn.rollback()
+        if 'sparovano_typ' not in existujici_sloupce:
+            try:
+                pg_cur.execute("ALTER TABLE bankovni_pohyby ADD COLUMN sparovano_typ TEXT DEFAULT ''")
+                pg_conn.commit()
+            except Exception: pg_conn.rollback()
+        if 'sparovano_id' not in existujici_sloupce:
+            try:
+                pg_cur.execute("ALTER TABLE bankovni_pohyby ADD COLUMN sparovano_id INTEGER DEFAULT NULL")
+                pg_conn.commit()
+            except Exception: pg_conn.rollback()
+
+        # Načti existující id_transakce pro deduplikaci
+        pg_cur.execute("SELECT id_transakce FROM bankovni_pohyby WHERE id_transakce IS NOT NULL")
+        existujici_ids = set(r[0] for r in pg_cur.fetchall())
 
         for p in pohyby:
+            id_tr = p["id_transakce"]
+            if id_tr and id_tr in existujici_ids:
+                duplicity += 1
+                continue
             try:
-                if ma_var_sym:
-                    pg_cur.execute("""
-                        INSERT INTO bankovni_pohyby
-                            (banka, datum, castka, protiucet, nazev_protiucet, typ_transakce, zprava, var_sym, id_transakce, firma_zkratka)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ON CONFLICT (id_transakce) DO NOTHING
-                    """, (
-                        p["banka"], p["datum"], p["castka"],
-                        p["protiucet"], p["nazev_protiucet"],
-                        p["typ_transakce"], p["zprava"],
-                        p.get("var_sym", ""),
-                        p["id_transakce"], firma
-                    ))
-                else:
-                    pg_cur.execute("""
-                        INSERT INTO bankovni_pohyby
-                            (banka, datum, castka, protiucet, nazev_protiucet, typ_transakce, zprava, id_transakce, firma_zkratka)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                        ON CONFLICT (id_transakce) DO NOTHING
-                    """, (
-                        p["banka"], p["datum"], p["castka"],
-                        p["protiucet"], p["nazev_protiucet"],
-                        p["typ_transakce"], p["zprava"],
-                        p["id_transakce"], firma
-                    ))
-                if pg_cur.rowcount > 0:
-                    naimportovano += 1
-                else:
-                    duplicity += 1
+                pg_cur.execute("""
+                    INSERT INTO bankovni_pohyby
+                        (banka, datum, castka, protiucet, nazev_protiucet, typ_transakce, zprava, var_sym, id_transakce, firma_zkratka)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """, (
+                    p["banka"], p["datum"], p["castka"],
+                    p["protiucet"], p["nazev_protiucet"],
+                    p["typ_transakce"], p["zprava"],
+                    p.get("var_sym", ""),
+                    id_tr, firma
+                ))
+                if id_tr:
+                    existujici_ids.add(id_tr)
+                naimportovano += 1
             except Exception as row_err:
                 if not prvni_chyba:
                     prvni_chyba = str(row_err)
@@ -3593,7 +3609,7 @@ def api_banky_import():
         pg_conn.close()
     except Exception as e:
         return jsonify({"error": f"Chyba DB: {str(e)}"}), 500
-    return jsonify({"ok": True, "banka": banka, "naimportovano": naimportovano, "duplicity": duplicity, "prvni_chyba": prvni_chyba, "sloupce": existujici_sloupce if 'existujici_sloupce' in dir() else []})
+    return jsonify({"ok": True, "banka": banka, "naimportovano": naimportovano, "duplicity": duplicity, "prvni_chyba": prvni_chyba})
 
 @app.route("/api/banky/pohyby")
 @vyzaduj_prihlaseni
