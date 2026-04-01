@@ -3430,7 +3430,7 @@ def parse_csv_kb(content_bytes):
 
 
 def parse_csv_rb(content_bytes):
-    import csv, io
+    import csv, io, re as _re
     for enc in ["utf-8-sig", "cp1250", "utf-8"]:
         try:
             text = content_bytes.decode(enc)
@@ -3438,19 +3438,31 @@ def parse_csv_rb(content_bytes):
         except Exception:
             continue
 
-    # Detekce oddělovače
     first_line = text.split("\n")[0]
     delimiter = "\t" if "\t" in first_line else ";"
 
     reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
     pohyby = []
     for row in reader:
-        datum_raw = row.get("Datum provedení", "").strip().strip('"')
-        castka_raw = row.get("Zaúčtovaná částka", "").strip().strip('"').replace("\xa0", "").replace(" ", "").replace(",", ".")
-        id_transakce = (row.get("Id transakce") or row.get("ID transakce") or "").strip().strip('"')
+        # Datum — zkus oba sloupce
+        datum_raw = (row.get("Datum provedení") or row.get("Datum zaúčtování") or "").strip().strip('"')
+        # Částka — Raifka má "Zaúčtovaná částka" nebo "Zaúčtovaná částka"
+        castka_raw = (row.get("Zaúčtovaná částka") or row.get("Zaúčtovaná částka") or row.get("Castka") or row.get("Částka") or "").strip().strip('"').replace("\xa0", "").replace(" ", "").replace(",", ".")
+        # ID transakce
+        id_transakce = (row.get("Id transakce") or row.get("ID transakce") or row.get("Identifikace transakce") or "").strip().strip('"')
+        # VS — Raifka má samostatný sloupec VS!
+        var_sym = (row.get("VS") or "").strip().strip('"')
+        # Zpráva
+        zprava_rb = (row.get("Zpráva") or row.get("Poznámka") or row.get("Vlastní poznámka") or "").strip().strip('"')
+        # Pokud VS prázdné, zkus ho najít ve zprávě
+        if not var_sym:
+            vs_match_rb = _re.search(r'\b(\d{4,10})\b', zprava_rb)
+            var_sym = vs_match_rb.group(1) if vs_match_rb else ''
+
         if not datum_raw or not castka_raw:
             continue
         try:
+            datum_raw = datum_raw.split(" ")[0]  # odstraň čas pokud je přítomen
             if "." in datum_raw:
                 d, m, y = datum_raw.split(".")
             else:
@@ -3459,18 +3471,15 @@ def parse_csv_rb(content_bytes):
             castka = float(castka_raw)
         except Exception:
             continue
-        zprava_rb = row.get("Zpráva", "").strip().strip('"') or row.get("Poznámka", "").strip().strip('"')
-        import re as _re
-        vs_match_rb = _re.search(r'\b(\d{4,10})\b', zprava_rb)
         pohyby.append({
             "banka":           "RB",
             "datum":           datum,
             "castka":          castka,
-            "protiucet":       row.get("Číslo protiúčtu", "").strip().strip('"'),
-            "nazev_protiucet": row.get("Název protiúčtu", "").strip().strip('"') or row.get("Název obchodníka", "").strip().strip('"'),
-            "typ_transakce":   row.get("Typ transakce", "").strip().strip('"'),
+            "protiucet":       (row.get("Číslo protiúčtu") or row.get("Číslo protiúčtu") or "").strip().strip('"'),
+            "nazev_protiucet": (row.get("Název protiúčtu") or row.get("Název obchodníka") or "").strip().strip('"'),
+            "typ_transakce":   (row.get("Typ transakce") or row.get("Kategorie transakce") or "").strip().strip('"'),
             "zprava":          zprava_rb,
-            "var_sym":         vs_match_rb.group(1) if vs_match_rb else '',
+            "var_sym":         var_sym,
             "id_transakce":    f"RB_{id_transakce}" if id_transakce else None,
         })
     return pohyby
