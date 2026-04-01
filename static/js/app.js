@@ -1633,41 +1633,13 @@ async function skenerNacistKamery() {
 async function _otevritKameru(deviceId) {
   if (_skenerStream) { _skenerStream.getTracks().forEach(t => t.stop()); _skenerStream = null; }
   const constraints = {
-    video: {
-      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-      width: { ideal: 3264 },
-      height: { ideal: 2448 },
-      advanced: [
-        { whiteBalanceMode: 'manual' },
-        { exposureMode: 'manual' },
-        { focusMode: 'manual' },
-        { brightness: 100 },
-        { contrast: 100 },
-        { sharpness: 100 },
-        { colorTemperature: 6500 },
-      ]
-    }
+    video: deviceId
+      ? { deviceId: { exact: deviceId }, width: { ideal: 3264 }, height: { ideal: 2448 } }
+      : { width: { ideal: 3264 }, height: { ideal: 2448 } }
   };
-  try {
-    _skenerStream = await navigator.mediaDevices.getUserMedia(constraints);
-  } catch(e) {
-    // Pokud advanced constraints selžou, zkus bez nich
-    const fallback = { video: deviceId ? { deviceId: { exact: deviceId }, width: { ideal: 3264 }, height: { ideal: 2448 } } : { width: { ideal: 3264 }, height: { ideal: 2448 } } };
-    _skenerStream = await navigator.mediaDevices.getUserMedia(fallback);
-  }
+  _skenerStream = await navigator.mediaDevices.getUserMedia(constraints);
   const video = document.getElementById('skenerVideo');
   if (video) video.srcObject = _skenerStream;
-  // Pokus o vypnutí automatických úprav přes track settings
-  try {
-    const track = _skenerStream.getVideoTracks()[0];
-    await track.applyConstraints({
-      advanced: [
-        { whiteBalanceMode: 'manual' },
-        { exposureMode: 'manual' },
-        { focusMode: 'manual' },
-      ]
-    });
-  } catch(e) { /* ignoruj pokud není podporováno */ }
 }
 
 async function skenerPrepnoutKameru() {
