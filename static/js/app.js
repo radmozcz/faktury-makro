@@ -5661,8 +5661,146 @@ function renderBanky() {
         <div style="color:var(--txt2);font-size:.9rem;margin-top:.3rem">Vybrat banku →</div>
       </div>`).join("")}
       ${soukromeCard}
-    </div>`;
+    </div>
+    <div id="poSplatnostiBox" style="margin-top:1.5rem"></div>
+    <div id="parovaniBox" style="margin-top:1.5rem"></div>`;
+  nacistPoSplatnosti();
+  nacistParovani();
 }
+
+// ========== PÁROVÁNÍ VÝPISŮ ==========
+
+async function nacistPoSplatnosti() {
+  const el = document.getElementById('poSplatnostiBox');
+  if (!el) return;
+  try {
+    const data = await api('/api/parovani/po-splatnosti');
+    const items = data.po_splatnosti || [];
+    if (!items.length) { el.innerHTML = ''; return; }
+    el.innerHTML = `
+      <div class="card" style="border-left:4px solid #dc2626">
+        <div style="font-weight:700;color:#dc2626;margin-bottom:.8rem">⚠️ Po splatnosti (${items.length})</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Firma</th><th>Doklad</th><th>Splatnost</th><th>Po (dní)</th><th style="text-align:right">Částka</th></tr></thead>
+            <tbody>
+              ${items.map(i => `
+              <tr style="background:${i.dnu_po > 14 ? '#fff5f5' : ''}">
+                <td><span class="badge">${escHtml(i.firma)}</span></td>
+                <td>${escHtml(i.popis)}</td>
+                <td style="color:#dc2626;font-weight:600">${czDate(i.datum_splatnosti)}</td>
+                <td style="color:#dc2626;font-weight:700">${i.dnu_po} dní</td>
+                <td style="text-align:right;font-weight:600">${czMoneyFull(i.castka)}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  } catch(e) { el.innerHTML = ''; }
+}
+
+async function nacistParovani() {
+  const el = document.getElementById('parovaniBox');
+  if (!el) return;
+  el.innerHTML = `<div class="card"><span class="spinner"></span> Načítám návrhy párování…</div>`;
+  try {
+    const data = await api('/api/parovani/navrh');
+    const navrhy = data.navrhy || [];
+    if (!navrhy.length) {
+      el.innerHTML = '<div class="card" style="color:var(--txt2)">✅ Žádné nespárované pohyby</div>';
+      return;
+    }
+    const sparovane = navrhy.filter(n => n.shoda);
+    const nesparovane = navrhy.filter(n => !n.shoda);
+    el.innerHTML = `
+      <div class="card">
+        <div style="font-weight:700;font-size:1.1rem;margin-bottom:1rem">🔗 Párování výpisů</div>
+        ${sparovane.length ? `
+        <div style="font-weight:600;margin-bottom:.5rem;color:#16a34a">✅ Navržené shody (${sparovane.length})</div>
+        <div class="table-wrap" style="margin-bottom:1.5rem">
+          <table>
+            <thead><tr><th>Firma</th><th>Datum</th><th>Pohyb</th><th>Spárovat s</th><th>Datum platby</th><th>Jistota</th><th></th></tr></thead>
+            <tbody>
+              ${sparovane.map(n => `
+              <tr id="par_${n.pohyb_id}">
+                <td><span class="badge">${escHtml(n.firma_zkratka||'')}</span></td>
+                <td>${czDate(n.datum)}</td>
+                <td style="font-weight:600;color:${n.castka<0?'#dc2626':'#16a34a'}">${czMoneyFull(n.castka)}<br><small style="color:var(--txt2)">${escHtml(n.nazev_protiucet||'')}</small></td>
+                <td>${escHtml(n.shoda.popis)}<br><small class="badge">${escHtml(n.shoda.firma)}</small></td>
+                <td><input type="date" id="datPl_${n.pohyb_id}" value="${n.datum}" class="form-control" style="width:140px"></td>
+                <td><span style="background:${n.shoda.istota==='vs'?'#d1fae5':'#fef3c7'};padding:.2rem .5rem;border-radius:4px;font-size:.8rem">${n.shoda.istota==='vs'?'VS ✓':'Částka'}</span></td>
+                <td>
+                  <button class="btn btn-primary btn-sm" onclick="potvrditParovani(${n.pohyb_id},'${n.shoda.typ}',${n.shoda.id})">✅ Potvrdit</button>
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>` : ''}
+        ${nesparovane.length ? `
+        <div style="font-weight:600;margin-bottom:.5rem;color:#d97706">❓ Nespárované pohyby (${nesparovane.length})</div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Firma</th><th>Datum</th><th>Pohyb</th><th>VS</th><th></th></tr></thead>
+            <tbody>
+              ${nesparovane.map(n => `
+              <tr id="par_${n.pohyb_id}">
+                <td><span class="badge">${escHtml(n.firma_zkratka||'')}</span></td>
+                <td>${czDate(n.datum)}</td>
+                <td style="font-weight:600;color:${n.castka<0?'#dc2626':'#16a34a'}">${czMoneyFull(n.castka)}<br><small style="color:var(--txt2)">${escHtml(n.nazev_protiucet||'')}</small></td>
+                <td>${escHtml(n.var_sym||'—')}</td>
+                <td style="display:flex;gap:.4rem;flex-wrap:wrap">
+                  <button class="btn btn-secondary btn-sm" onclick="parovaniRucne(${n.pohyb_id},'${n.datum}',${Math.abs(n.castka)})">🔗 Přiřadit</button>
+                  <button class="btn btn-sm" style="background:#f59e0b;color:#fff" onclick="parovatBezDokladu(${n.pohyb_id})">📝 Bez dokladu</button>
+                </td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>` : ''}
+      </div>`;
+  } catch(e) {
+    el.innerHTML = `<div class="card" style="color:var(--danger)">❌ Chyba při načítání párování: ${e.message}</div>`;
+  }
+}
+
+async function potvrditParovani(pohybId, typ, dokladId) {
+  const datumEl = document.getElementById(`datPl_${pohybId}`);
+  const datum = datumEl?.value || '';
+  try {
+    await api('/api/parovani/potvrdit', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ pohyb_id: pohybId, typ, doklad_id: dokladId, datum_zaplaceno: datum })
+    });
+    const row = document.getElementById(`par_${pohybId}`);
+    if (row) {
+      row.style.background = '#d1fae5';
+      row.innerHTML = `<td colspan="7" style="color:#16a34a;font-weight:600">✅ Spárováno a označeno jako zaplaceno</td>`;
+    }
+    toast('✅ Spárováno!');
+  } catch(e) { toast('❌ Chyba: ' + e.message, true); }
+}
+
+async function parovatBezDokladu(pohybId) {
+  try {
+    await api('/api/parovani/potvrdit', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ pohyb_id: pohybId, typ: 'bez_dokladu', doklad_id: null, datum_zaplaceno: '' })
+    });
+    const row = document.getElementById(`par_${pohybId}`);
+    if (row) {
+      row.style.background = '#fef3c7';
+      row.innerHTML = `<td colspan="5" style="color:#92400e;font-weight:600">📝 Označeno jako bez dokladu</td>`;
+    }
+  } catch(e) { toast('❌ Chyba: ' + e.message, true); }
+}
+
+function parovaniRucne(pohybId, datum, castka) {
+  // TODO — ruční přiřazení (rozbalovací seznam faktur) — bude dodělán
+  toast('Ruční přiřazení bude k dispozici v další verzi.');
+}
+
+// ========== konec PÁROVÁNÍ ==========
 
 // Výběr osobní banky Radek
 function renderBankySoukrome() {
