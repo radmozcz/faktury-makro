@@ -1355,22 +1355,10 @@ function renderNahrat() {
       </div>
 
       <div id="tabPanelSkener" style="display:none">
-        <div style="margin-bottom:.8rem">
-          <label class="form-label">Vyberte kameru</label>
-          <select id="skenerKameraSelect" class="form-control" style="max-width:360px" onchange="prepnoutKameru()">
-            <option value="">-- načítám kamery... --</option>
-          </select>
+        <div style="padding:1.5rem 0">
+          <button class="btn btn-primary" onclick="spustitSkener()">📷 Spustit skener</button>
+          <p style="margin-top:.8rem;color:var(--txt2);font-size:.9rem">Otevře okno se skenerem. Po vyfocení se data automaticky vyplní do formuláře níže.</p>
         </div>
-        <div style="position:relative;display:inline-block;max-width:100%">
-          <video id="skenerVideo" autoplay playsinline
-            style="display:block;max-width:100%;max-height:480px;border:2px solid var(--border);border-radius:8px;background:#111"></video>
-          <canvas id="skenerCanvas" style="display:none"></canvas>
-        </div>
-        <div style="margin-top:.8rem;display:flex;gap:.6rem;flex-wrap:wrap;align-items:center">
-          <button class="btn btn-primary" onclick="skenerVyfotit()" id="btnVyfotit" disabled>📷 Vyfotit a zpracovat</button>
-          <button class="btn btn-secondary" onclick="zastavitSkener()">⏹ Zastavit kameru</button>
-        </div>
-        <div id="skenerStatus" style="margin-top:.8rem;font-size:.9rem;color:var(--txt2)"></div>
       </div>
 
     </div>`;
@@ -1558,17 +1546,70 @@ async function zpracovatText() {
   }
 }
 
-// ========== SKENER — kamera funkce ==========
+// ========== SKENER — sdílené funkce ==========
 let _skenerStream = null;
+let _skenerStrany = [];      // pole Blob objektů (jednotlivé strany)
+let _skenerCallback = null;  // funkce volaná po odeslání
+let _skenerFirma = '';       // aktuální firma/lokace
 
-async function spustitSkener() {
+// Otevře modální skener dialog
+// callback(blobs, firma) - volá se po kliknutí Odeslat
+async function otevritSkenerModal(callback, firma = '') {
+  _skenerCallback = callback;
+  _skenerFirma = firma;
+  _skenerStrany = [];
+
+  // Vytvoř modal
+  const modal = document.createElement('div');
+  modal.id = 'skenerModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;display:flex;align-items:center;justify-content:center;padding:1rem';
+  modal.innerHTML = `
+    <div style="background:var(--card-bg);border-radius:14px;padding:1.5rem;width:min(700px,95vw);max-height:90vh;overflow-y:auto;position:relative">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem">
+        <h3 style="margin:0">📷 Skener</h3>
+        <button onclick="zavritSkenerModal()" style="background:none;border:none;font-size:1.4rem;cursor:pointer;color:var(--txt2)">✕</button>
+      </div>
+      <div style="margin-bottom:.8rem;display:flex;gap:1rem;align-items:center;flex-wrap:wrap">
+        <select id="skenerKameraSelect" class="form-control" style="max-width:300px" onchange="skenerPrepnoutKameru()">
+          <option>-- načítám kamery... --</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer;font-size:.95rem">
+          <input type="checkbox" id="skenerViceStran" onchange="skenerToggleViceStran()">
+          Více stran
+        </label>
+      </div>
+      <div style="position:relative;display:inline-block;max-width:100%">
+        <video id="skenerVideo" autoplay playsinline
+          style="display:block;max-width:100%;max-height:360px;border:2px solid var(--border);border-radius:8px;background:#111"></video>
+        <canvas id="skenerCanvas" style="display:none"></canvas>
+      </div>
+      <div style="margin-top:.8rem;display:flex;gap:.6rem;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-primary" onclick="skenerVyfotit()" id="btnVyfotit" disabled>📷 Vyfotit</button>
+        <button class="btn btn-secondary" onclick="skenerZastavitKameru()">⏹ Zastavit</button>
+        <button class="btn btn-primary" onclick="skenerOdeslat()" id="btnSkenerOdeslat" style="display:none;background:#16a34a">✅ Odeslat ke zpracování</button>
+      </div>
+      <div id="skenerStranyNahled" style="display:none;margin-top:1rem">
+        <div style="font-size:.9rem;font-weight:600;margin-bottom:.5rem">Naskenované strany:</div>
+        <div id="skenerStranyList" style="display:flex;gap:.5rem;flex-wrap:wrap"></div>
+      </div>
+      <div id="skenerStatus" style="margin-top:.8rem;font-size:.9rem;color:var(--txt2)"></div>
+    </div>`;
+  document.body.appendChild(modal);
+  await skenerNacistKamery();
+}
+
+function zavritSkenerModal() {
+  skenerZastavitKameru();
+  const modal = document.getElementById('skenerModal');
+  if (modal) modal.remove();
+  _skenerStrany = [];
+  _skenerCallback = null;
+}
+
+async function skenerNacistKamery() {
   const statusEl = document.getElementById('skenerStatus');
-  const btnVyfotit = document.getElementById('btnVyfotit');
-  if (!statusEl) return;
-  statusEl.innerHTML = '<span class="spinner"></span> Spouštím kameru…';
-
+  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Spouštím kameru…';
   try {
-    // Načti seznam kamer
     const devices = await navigator.mediaDevices.enumerateDevices();
     const kamery = devices.filter(d => d.kind === 'videoinput');
     const select = document.getElementById('skenerKameraSelect');
@@ -1576,25 +1617,20 @@ async function spustitSkener() {
       select.innerHTML = kamery.map((k, i) =>
         `<option value="${k.deviceId}">${k.label || 'Kamera ' + (i+1)}</option>`
       ).join('');
-      // Preferuj kameru s názvem obsahujícím "NETUM" nebo "document"
       const netum = kamery.find(k => /netum|document|scan/i.test(k.label));
       if (netum) select.value = netum.deviceId;
     }
-
     await _otevritKameru(select ? select.value : null);
-    statusEl.textContent = '✅ Kamera připravena — položte dokument pod kameru a klikněte Vyfotit';
-    if (btnVyfotit) btnVyfotit.disabled = false;
+    if (statusEl) statusEl.textContent = '✅ Kamera připravena — položte dokument a klikněte Vyfotit';
+    const btn = document.getElementById('btnVyfotit');
+    if (btn) btn.disabled = false;
   } catch(e) {
-    statusEl.textContent = '❌ Nepodařilo se spustit kameru: ' + e.message;
-    if (btnVyfotit) btnVyfotit.disabled = true;
+    if (statusEl) statusEl.textContent = '❌ Nepodařilo se spustit kameru: ' + e.message;
   }
 }
 
 async function _otevritKameru(deviceId) {
-  if (_skenerStream) {
-    _skenerStream.getTracks().forEach(t => t.stop());
-    _skenerStream = null;
-  }
+  if (_skenerStream) { _skenerStream.getTracks().forEach(t => t.stop()); _skenerStream = null; }
   const constraints = {
     video: deviceId
       ? { deviceId: { exact: deviceId }, width: { ideal: 3264 }, height: { ideal: 2448 } }
@@ -1602,33 +1638,45 @@ async function _otevritKameru(deviceId) {
   };
   _skenerStream = await navigator.mediaDevices.getUserMedia(constraints);
   const video = document.getElementById('skenerVideo');
-  if (video) { video.srcObject = _skenerStream; }
+  if (video) video.srcObject = _skenerStream;
 }
 
-async function prepnoutKameru() {
+async function skenerPrepnoutKameru() {
   const select = document.getElementById('skenerKameraSelect');
   const statusEl = document.getElementById('skenerStatus');
-  if (!select) return;
-  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Přepínám kameru…';
   try {
-    await _otevritKameru(select.value);
+    await _otevritKameru(select?.value);
     if (statusEl) statusEl.textContent = '✅ Kamera připravena';
   } catch(e) {
-    if (statusEl) statusEl.textContent = '❌ Chyba při přepnutí kamery: ' + e.message;
+    if (statusEl) statusEl.textContent = '❌ Chyba: ' + e.message;
   }
 }
 
-function zastavitSkener() {
-  if (_skenerStream) {
-    _skenerStream.getTracks().forEach(t => t.stop());
-    _skenerStream = null;
-  }
+function skenerZastavitKameru() {
+  if (_skenerStream) { _skenerStream.getTracks().forEach(t => t.stop()); _skenerStream = null; }
   const video = document.getElementById('skenerVideo');
   if (video) video.srcObject = null;
   const btn = document.getElementById('btnVyfotit');
   if (btn) btn.disabled = true;
-  const statusEl = document.getElementById('skenerStatus');
-  if (statusEl) statusEl.textContent = '';
+}
+
+function skenerToggleViceStran() {
+  const viceStran = document.getElementById('skenerViceStran')?.checked;
+  const odeslat = document.getElementById('btnSkenerOdeslat');
+  const nahled = document.getElementById('skenerStranyNahled');
+  const btnVyfotit = document.getElementById('btnVyfotit');
+  if (viceStran) {
+    if (odeslat) odeslat.style.display = '';
+    if (nahled) nahled.style.display = '';
+    if (btnVyfotit) btnVyfotit.textContent = '📷 Přidat stranu';
+    _skenerStrany = [];
+    skenerAktualizovatNahled();
+  } else {
+    if (odeslat) odeslat.style.display = 'none';
+    if (nahled) nahled.style.display = 'none';
+    if (btnVyfotit) btnVyfotit.textContent = '📷 Vyfotit';
+    _skenerStrany = [];
+  }
 }
 
 async function skenerVyfotit() {
@@ -1636,43 +1684,169 @@ async function skenerVyfotit() {
   const canvas = document.getElementById('skenerCanvas');
   const statusEl = document.getElementById('skenerStatus');
   const btn = document.getElementById('btnVyfotit');
+  const viceStran = document.getElementById('skenerViceStran')?.checked;
   if (!video || !canvas) return;
 
-  // Zachyť snímek z videa do canvasu
   canvas.width = video.videoWidth || 1920;
   canvas.height = video.videoHeight || 1080;
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
 
-  statusEl.innerHTML = '<span class="spinner"></span> Zpracovávám přes OCR…';
-  btn.disabled = true;
+  const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.95));
 
-  try {
-    // Převeď canvas na JPEG blob
-    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.95));
-    const ts = new Date().toISOString().replace(/[-:T]/g,'').slice(0,14);
-    const file = new File([blob], `skener_${ts}.jpg`, { type: 'image/jpeg' });
-
-    const firma = document.getElementById('nahratFirma')?.value || '';
-    const fd = new FormData();
-    fd.append('soubor', file);
-    fd.append('firma_zkratka', firma);
-
-    const r = await fetch('/api/nahrat', { method: 'POST', body: fd });
-    const data = await r.json();
-
-    if (data.error) {
-      statusEl.textContent = '❌ Chyba OCR: ' + data.error;
-    } else {
-      statusEl.textContent = '✅ Hotovo — zkontrolujte vyplněná data níže';
-      naplnFormular(data);
-    }
-  } catch(e) {
-    statusEl.textContent = '❌ Chyba: ' + e.message;
-  } finally {
+  if (viceStran) {
+    // Více stran — přidej do seznamu
+    _skenerStrany.push(blob);
+    skenerAktualizovatNahled();
+    if (statusEl) statusEl.textContent = `✅ Strana ${_skenerStrany.length} přidána — přidejte další nebo klikněte Odeslat`;
+  } else {
+    // Jedna strana — rovnou odeslat
+    btn.disabled = true;
+    if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Zpracovávám…';
+    await skenerZpracovat([blob]);
     btn.disabled = false;
   }
 }
+
+function skenerAktualizovatNahled() {
+  const list = document.getElementById('skenerStranyList');
+  if (!list) return;
+  list.innerHTML = _skenerStrany.map((blob, i) => {
+    const url = URL.createObjectURL(blob);
+    return `<div style="position:relative">
+      <img src="${url}" style="height:80px;border-radius:6px;border:2px solid var(--border);cursor:pointer" title="Strana ${i+1}">
+      <span style="position:absolute;top:-6px;right:-6px;background:#ef4444;color:#fff;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:.75rem;cursor:pointer;font-weight:700"
+        onclick="skenerSmazatStranu(${i})">✕</span>
+      <div style="text-align:center;font-size:.75rem;color:var(--txt2)">Str. ${i+1}</div>
+    </div>`;
+  }).join('');
+}
+
+function skenerSmazatStranu(idx) {
+  _skenerStrany.splice(idx, 1);
+  skenerAktualizovatNahled();
+  const statusEl = document.getElementById('skenerStatus');
+  if (statusEl) statusEl.textContent = `Strana odstraněna. Celkem: ${_skenerStrany.length} stran.`;
+}
+
+async function skenerOdeslat() {
+  if (_skenerStrany.length === 0) {
+    const statusEl = document.getElementById('skenerStatus');
+    if (statusEl) statusEl.textContent = '⚠ Nejprve naskenujte alespoň jednu stranu.';
+    return;
+  }
+  const btn = document.getElementById('btnSkenerOdeslat');
+  const statusEl = document.getElementById('skenerStatus');
+  if (btn) btn.disabled = true;
+  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Zpracovávám…';
+  await skenerZpracovat([..._skenerStrany]);
+  if (btn) btn.disabled = false;
+}
+
+async function skenerZpracovat(blobs) {
+  const statusEl = document.getElementById('skenerStatus');
+  try {
+    const ts = new Date().toISOString().replace(/[-:T]/g,'').slice(0,14);
+    if (blobs.length === 1) {
+      // Jedna strana — pošli jako JPG
+      const file = new File([blobs[0]], `skener_${ts}.jpg`, { type: 'image/jpeg' });
+      if (_skenerCallback) await _skenerCallback([file], _skenerFirma);
+    } else {
+      // Více stran — pošli jako pole souborů
+      const files = blobs.map((b, i) => new File([b], `skener_${ts}_str${i+1}.jpg`, { type: 'image/jpeg' }));
+      if (_skenerCallback) await _skenerCallback(files, _skenerFirma);
+    }
+  } catch(e) {
+    if (statusEl) statusEl.textContent = '❌ Chyba: ' + e.message;
+  }
+}
+
+// ---- Konkrétní callbacky pro každou sekci ----
+
+// Nahrát fakturu (MAKRO)
+async function skenerCallbackNahrat(files, firma) {
+  zavritSkenerModal();
+  const statusEl = document.getElementById('uploadStatus');
+  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Zpracovávám přes OCR…';
+  try {
+    const fd = new FormData();
+    fd.append('soubor', files[0]);
+    fd.append('firma_zkratka', firma || document.getElementById('nahratFirma')?.value || '');
+    const r = await fetch('/api/nahrat', { method: 'POST', body: fd });
+    const data = await r.json();
+    if (data.error && !data.dodavatel) {
+      if (statusEl) statusEl.textContent = '❌ ' + data.error;
+    } else {
+      if (statusEl) statusEl.textContent = '✅ Hotovo — zkontrolujte vyplněná data';
+      naplnFormular(data);
+    }
+  } catch(e) {
+    if (statusEl) statusEl.textContent = '❌ Chyba: ' + e.message;
+  }
+}
+
+// Výdaje (provozní i soukromé)
+async function skenerCallbackVydaj(files, firma) {
+  zavritSkenerModal();
+  const statusEl = document.getElementById('vydajNahratStatus');
+  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Zpracovávám doklad…';
+  try {
+    const fd = new FormData();
+    fd.append('soubor', files[0]);
+    fd.append('firma_zkratka', firma || '');
+    const data = await api('/api/vydaje/nahrat', { method: 'POST', body: fd });
+    if (statusEl) statusEl.innerHTML = '✅ Doklad rozpoznán';
+    const formEl = document.getElementById('vydajNahratForm');
+    if (formEl) { formEl.style.display = 'block'; _renderVydajForm(formEl, data); }
+  } catch(e) {
+    if (statusEl) statusEl.textContent = '❌ Chyba: ' + e.message;
+  }
+}
+
+// Vystavené faktury
+async function skenerCallbackVystavene(files, firma) {
+  zavritSkenerModal();
+  const statusEl = document.getElementById('vystOcrStatus');
+  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Zpracovávám…';
+  try {
+    const fd = new FormData();
+    fd.append('soubor', files[0]);
+    const r = await fetch('/api/vystavene-faktury/nahrat', { method: 'POST', body: fd });
+    const data = await r.json();
+    if (statusEl) statusEl.textContent = '✅ Rozpoznáno';
+    const formEl = document.getElementById('vystFormFields');
+    if (formEl) {
+      formEl.style.display = '';
+      if (data.cislo_faktury) document.getElementById('vystCislo').value = data.cislo_faktury;
+      if (data.datum_vystaveni) document.getElementById('vystDatVys').value = data.datum_vystaveni;
+      if (data.celkem_s_dph) document.getElementById('vystCelkem').value = data.celkem_s_dph;
+    }
+  } catch(e) {
+    if (statusEl) statusEl.textContent = '❌ Chyba: ' + e.message;
+  }
+}
+
+// Dokumenty — uloží jako PDF/JPG
+async function skenerCallbackDokumenty(files, firma) {
+  zavritSkenerModal();
+  // Vyplň soubor do formuláře dokumentu
+  const souborInput = document.getElementById('dok-soubor');
+  if (souborInput && files[0]) {
+    const dt = new DataTransfer();
+    dt.items.add(files[0]);
+    souborInput.files = dt.files;
+    const statusEl = document.getElementById('dok-skener-status');
+    if (statusEl) statusEl.textContent = '✅ Soubor připraven — vyplňte název a uložte';
+  }
+}
+
+// Pomocné funkce pro zpětnou kompatibilitu záložky Skener v Nahrát fakturu
+async function spustitSkener() {
+  const firma = document.getElementById('nahratFirma')?.value || '';
+  await otevritSkenerModal(skenerCallbackNahrat, firma);
+}
+function zastavitSkener() { zavritSkenerModal(); }
+function prepnoutKameru() { skenerPrepnoutKameru(); }
+function skenerVyfotit_old() {}  // zachováno pro případ
 // ========== konec SKENER ==========
 
 function setupDropzoneHromadne() {
@@ -5754,7 +5928,8 @@ async function renderVydaje(typ = "provozni") {
   <button class="btn btn-secondary btn-sm" onclick="exportVydaje('csv')">⬇ CSV</button>`;
 const tlacitka = (maPravo(pravoUpravit)
   ? `<button class="btn btn-primary btn-sm" onclick="${jeSoukrome ? 'renderSoukromeNahrat()' : `openVydajNahrat('${typ}')`}">📋 Nahrát doklad</button>
-     <button class="btn btn-sm" onclick="openVydajRucni()">✏ Ruční zadání</button>`
+     <button class="btn btn-sm" onclick="openVydajRucni()">✏ Ruční zadání</button>
+     <button class="btn btn-sm" onclick="openVydajNahrat('${typ}');setTimeout(()=>otevritSkenerModal(skenerCallbackVydaj, document.getElementById('vNahratFirma')?.value||''),300)">📷 Skener</button>`
   : "") + (jeSoukrome ? `<button class="btn btn-sm" style="background:#b45309;color:#fff" onclick="oznacDuplicityVydaje()">🔍 Najít duplicity</button>` : "") + exportButtons;
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
@@ -6322,7 +6497,8 @@ async function renderVystavene() {
   const muzeEditovat = App.role === "admin";
   const tlacitka = muzeEditovat
     ? `<button class="btn btn-primary btn-sm" onclick="openVystNahrat()">📄 Nahrát PDF</button>
-       <button class="btn btn-sm" onclick="openVystRucni()">✏️ Ruční zadání</button>`
+       <button class="btn btn-sm" onclick="openVystRucni()">✏️ Ruční zadání</button>
+       <button class="btn btn-sm" onclick="openVystNahrat();setTimeout(()=>otevritSkenerModal(skenerCallbackVystavene,''),300)">📷 Skener</button>`
     : "";
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
@@ -7481,7 +7657,10 @@ async function renderDokumenty() {
   document.getElementById("mainContent").innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.8rem">
       <h2>🗂️ Dokumenty</h2>
-      <button class="btn btn-primary" onclick="dokModalNovy()">＋ Přidat dokument</button>
+      <div style="display:flex;gap:.5rem">
+        <button class="btn btn-primary" onclick="dokModalNovy()">＋ Přidat dokument</button>
+        <button class="btn btn-secondary" onclick="dokModalNovy();setTimeout(()=>otevritSkenerModal(skenerCallbackDokumenty,''),300)">📷 Skener</button>
+      </div>
     </div>
     <div id="dok-list" style="margin-top:1rem">Načítám…</div>
 
