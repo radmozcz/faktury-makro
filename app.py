@@ -5623,13 +5623,15 @@ Odpověz POUZE platným JSON, žádný jiný text.
 
 Důležité pro číslo faktury: hledej POUZE pole "Faktura č. / VS" — hodnota je číslo ve formátu 0415000291 (10 číslic, pouze číslice). IGNORUJ číslo vpravo nahoře (formát 0015/0135 — to je číslo stránky), IGNORUJ "č. zákazníka" a IGNORUJ "Technické ID".
 
-Důležité pro položky:
-- MAKRO faktura obsahuje SEKCE/KATEGORIE zboží jako nadpisy (např. "OVOCE A ZELENINA", "MASO A DRŮBEŽ", "MRAŽENÉ POTRAVINY" atd.) — tyto IGNORUJ, nejsou to položky zboží.
-- Skutečná položka zboží má vždy číslo zboží (čárový kód, např. 8435409365610) a jednotku (PC/KG/CA atd.).
-- Řádky "Urceno pro konecnou spotrebu" jsou slevy — IGNORUJ je jako samostatné položky, ale jejich zápornou hodnotu odečti od ceny předchozí položky.
-- Řádky "KUP VÍCE = PLAŤ MÉNĚ" jsou slevy — stejně IGNORUJ jako položku, odečti od předchozí položky.
-- IGNORUJ souhrnné řádky: "Strana celkem", "Poslední strana celkem", "Celková částka", "Spotřební daň celkem", "Platba kartou".
-- Pokud je faktura vícestrannová, zpracuj položky ze VŠECH stran.
+Důležité pro položky — KRITICKÁ PRAVIDLA:
+1. MAKRO faktura má SEKCE (nadpisy kategorií) a pod nimi POLOŽKY ZBOŽÍ. Jsou to RŮZNÉ věci.
+2. SEKCE poznáš takto: jsou to řádky POUZE s textem jako "OVOCE A ZELENINA", "MASO A DRŮBEŽ", "ZPRACOVANÉ MASO", "MRAŽENÉ POTRAVINY", "MLÉČNÉ VÝROBKY", "CHLÉB A PEČIVO", "JEDLÉ POTRAVINY KOLONIAL", "DROGERIE", "NÁPOJE" atd. Nemají číslo zboží ani cenu. SEKCE VŮBEC NEZAPISUJ do položek.
+3. POLOŽKA ZBOŽÍ poznáš takto: má číslo zboží (dlouhé číslo např. 8435409365610 nebo kratší jako 24251105), má jednotku (PC/KG/CA/BAL), má cenu. Název položky je JEN samotný název zboží (např. "JABLKA ČER.BAL. TAŠKA 1kg") BEZ názvu sekce.
+4. NIKDY nespojuj název sekce s názvem zboží. "OVOCE A ZELENINA" je sekce, "JABLKA ČER.BAL." je zboží — jsou to DVA oddělené řádky, zboží je vždy jen to druhé.
+5. Řádky "Urceno pro konecnou spotrebu" jsou slevy — IGNORUJ jako položku.
+6. Řádky "KUP VÍCE = PLAŤ MÉNĚ" jsou slevy — IGNORUJ jako položku.
+7. IGNORUJ: "Strana celkem", "Poslední strana celkem", "Celková částka", "Spotřební daň celkem", "Platba kartou".
+8. Zpracuj položky ze VŠECH stran faktury.
 
 {{
   "dodavatel": "název dodavatele (obvykle MAKRO Cash & Carry ČR s.r.o.)",
@@ -5640,7 +5642,7 @@ Důležité pro položky:
   "ico_odberatele": "IČO odběratele nebo null",
   "polozky": [
     {{
-      "nazev": "název zboží",
+      "nazev": "název zboží (BEZ názvu sekce/kategorie)",
       "mnozstvi": číslo,
       "jednotka": "PC/CA/KG atd.",
       "cena_za_jednotku_s_dph": číslo,
