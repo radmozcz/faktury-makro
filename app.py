@@ -3540,6 +3540,7 @@ def api_banky_import():
 
     naimportovano = 0
     duplicity = 0
+    prvni_chyba = ""
     try:
         import psycopg2 as _pg2
         db_url = os.environ.get("DATABASE_URL", "")
@@ -3563,13 +3564,16 @@ def api_banky_import():
                     naimportovano += 1
                 else:
                     duplicity += 1
-            except Exception:
+            except Exception as row_err:
+                if not prvni_chyba:
+                    prvni_chyba = str(row_err)
+                pg_conn.rollback()
                 duplicity += 1
         pg_conn.commit()
         pg_conn.close()
     except Exception as e:
         return jsonify({"error": f"Chyba DB: {str(e)}"}), 500
-    return jsonify({"ok": True, "banka": banka, "naimportovano": naimportovano, "duplicity": duplicity})
+    return jsonify({"ok": True, "banka": banka, "naimportovano": naimportovano, "duplicity": duplicity, "prvni_chyba": prvni_chyba})
 
 @app.route("/api/banky/pohyby")
 @vyzaduj_prihlaseni
