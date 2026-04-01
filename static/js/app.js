@@ -1688,19 +1688,33 @@ async function skenerVyfotit() {
   const viceStran = document.getElementById('skenerViceStran')?.checked;
   if (!video || !canvas) return;
 
-  canvas.width = video.videoWidth || 1920;
-  canvas.height = video.videoHeight || 1080;
-  canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
-
-  const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.95));
+  let blob;
+  try {
+    // Zkus ImageCapture API — dostane plné rozlišení z kamery (8MP)
+    const track = _skenerStream?.getVideoTracks()[0];
+    if (track && typeof ImageCapture !== 'undefined') {
+      const imageCapture = new ImageCapture(track);
+      const bitmap = await imageCapture.grabFrame();
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      canvas.getContext('2d').drawImage(bitmap, 0, 0);
+      blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.97));
+    } else {
+      throw new Error('ImageCapture není k dispozici');
+    }
+  } catch(e) {
+    // Fallback — zachyť z video elementu
+    canvas.width = video.videoWidth || 1920;
+    canvas.height = video.videoHeight || 1080;
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.97));
+  }
 
   if (viceStran) {
-    // Více stran — přidej do seznamu
     _skenerStrany.push(blob);
     skenerAktualizovatNahled();
     if (statusEl) statusEl.textContent = `✅ Strana ${_skenerStrany.length} přidána — přidejte další nebo klikněte Odeslat`;
   } else {
-    // Jedna strana — rovnou odeslat
     btn.disabled = true;
     if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Zpracovávám…';
     await skenerZpracovat([blob]);
