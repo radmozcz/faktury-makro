@@ -1766,6 +1766,9 @@ async function skenerZpracovat(blobs) {
 // Nahrát fakturu (MAKRO)
 async function skenerCallbackNahrat(files, firma) {
   zavritSkenerModal();
+  // Vyčisti starý formulář
+  const parsedForm = document.getElementById('parsedForm');
+  if (parsedForm) parsedForm.style.display = 'none';
   const statusEl = document.getElementById('uploadStatus');
   if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Zpracovávám přes OCR…';
   try {
