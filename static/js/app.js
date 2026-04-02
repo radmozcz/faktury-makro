@@ -5743,8 +5743,8 @@ async function nacistParovani() {
       <div style="font-size:11px;color:var(--txt2);font-weight:500;display:flex;gap:8px;padding:0 12px 4px;border-bottom:0.5px solid var(--border);margin-bottom:4px">
         <span style="width:20px"></span>
         <span style="width:32px"></span>
-        <span style="width:120px">Název</span>
-        <span style="flex:1">Popis</span>
+        <span style="width:150px">Název</span>
+        <span style="width:200px">Popis</span>
         <span style="width:80px">VS</span>
         <span style="width:85px">Splatnost</span>
         <span style="width:85px;text-align:right">Částka</span>
@@ -5836,10 +5836,10 @@ function parovaniRucne(typ, dokladId) {
 function parovaniProkliken(typ, id) {
   if (typ === 'faktura') {
     navigateTo('faktury');
-    setTimeout(() => openFakturaDetail(id), 500);
+    setTimeout(() => openFakturaDetail(id), 800);
   } else if (typ === 'vystavena') {
     navigateTo('vystavene');
-    setTimeout(() => openVystEdit(id), 500);
+    setTimeout(() => openVystEdit(id), 800);
   } else if (typ === 'vydaj') {
     navigateTo('vydaje');
   }
