@@ -4784,7 +4784,17 @@ def api_ai_dotaz():
     import datetime as _dt
     data   = request.json or {}
     dotaz  = data.get("dotaz", "").strip()
-    rok    = data.get("rok", str(_dt.date.today().year))
+    rok_raw = data.get("rok", str(_dt.date.today().year))
+    if rok_raw in ("", "vše", "vse", "Vše", "all"):
+        rok = None
+        rok_od = "2020-01-01"
+        rok_do = "2099-12-31"
+        rok_label = "všechny roky"
+    else:
+        rok = str(rok_raw)
+        rok_od = rok_od
+        rok_do = rok_do
+        rok_label = rok
     firma  = data.get("firma", "")
     if not dotaz:
         return jsonify({"chyba": "Prázdný dotaz"}), 400
@@ -4839,7 +4849,7 @@ def api_ai_dotaz():
         with get_db() as conn:
             fw = "AND firma_zkratka=%s" if firma else ""
             fp = [firma] if firma else []
-            kontext_casti = [f"Jsi analytik restaurace/bistra. Máš přístup k těmto datům za rok {rok}{' pro firmu '+firma if firma else ''}. Načtené sekce: {', '.join(sorted(nactist))}."]
+            kontext_casti = [f"Jsi analytik restaurace/bistra. Máš přístup k těmto datům za rok {rok_label}{' pro firmu '+firma if firma else ''}. Načtené sekce: {', '.join(sorted(nactist))}."]
 
             # Reporty
             if "reporty" in nactist and (ma_pravo("statistiky") or ma_pravo("reporty")):
@@ -4855,7 +4865,7 @@ def api_ai_dotaz():
                         SUM(talire) as talire, COUNT(*) as dni
                     FROM reporty WHERE datum >= %s AND datum <= %s {fw}
                     GROUP BY mesic ORDER BY mesic
-                """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
+                """, [rok_od, rok_do] + fp).fetchall()
                 dny = conn.execute(f"""
                     SELECT datum, firma_zkratka, karty, hotovost, trzba_vcpk as trzba,
                         vydaje, pk_celkem, burger, burtgulas, pizza_cela, pizza_ctvrt, talire, smena
@@ -4874,7 +4884,7 @@ def api_ai_dotaz():
                     FROM faktury WHERE datum_vystaveni >= %s AND datum_vystaveni <= %s
                     {"AND firma_zkratka=%s" if firma else ""}
                     GROUP BY mesic, dodavatel ORDER BY mesic, castka DESC
-                """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
+                """, [rok_od, rok_do] + fp).fetchall()
                 kontext_casti.append(f"\nFAKTURY:\n{_safe_json(fakt)}")
 
             # Výplaty
@@ -4885,7 +4895,7 @@ def api_ai_dotaz():
                     FROM vyplaty WHERE datum >= %s AND datum <= %s
                     {"AND firma_zkratka=%s" if firma else ""}
                     GROUP BY mesic, jmeno ORDER BY mesic, jmeno
-                """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
+                """, [rok_od, rok_do] + fp).fetchall()
                 kontext_casti.append(f"\nVÝPLATY:\n{_safe_json(vypl)}")
 
             # Výdaje
@@ -4896,7 +4906,7 @@ def api_ai_dotaz():
                         FROM vydaje WHERE typ='provozni'
                         AND datum >= %s AND datum <= %s {fw}
                         ORDER BY datum DESC LIMIT 500
-                    """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
+                    """, [rok_od, rok_do] + fp).fetchall()
                     kontext_casti.append(f"\nPROVOZNÍ VÝDAJE:\n{_safe_json(vyd)}")
                 if je_admin:
                     svyd = conn.execute("""
@@ -4929,7 +4939,7 @@ def api_ai_dotaz():
                     FROM vystavene_faktury
                     WHERE datum >= %s AND datum <= %s
                     ORDER BY datum DESC
-                """, [f"{rok}-01-01", f"{rok}-12-31"]).fetchall()
+                """, [rok_od, rok_do]).fetchall()
                 kontext_casti.append(f"\nVYSTAVENÉ FAKTURY:\n{_safe_json(vf)}")
 
             # Zboží — při výběru sekce zbozi načti vše, jinak top 100
@@ -4960,7 +4970,7 @@ def api_ai_dotaz():
                         FROM bankovni_pohyby
                         WHERE datum >= %s AND datum <= %s {fw2}
                         ORDER BY datum DESC LIMIT 500
-                    """, [f"{rok}-01-01", f"{rok}-12-31"] + ([firma] if firma else []))
+                    """, [rok_od, rok_do] + ([firma] if firma else []))
                     cols2 = [d[0] for d in pg_cur2.description]
                     banky_rows = [dict(zip(cols2, r)) for r in pg_cur2.fetchall()]
                     pg_conn2.close()
