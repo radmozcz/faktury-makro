@@ -3794,125 +3794,126 @@ def api_banky_pohyb_delete(pid):
 @app.route("/api/parovani/navrh")
 @vyzaduj_prihlaseni
 def api_parovani_navrh():
-    """Navrhne párování bankovních pohybů s fakturami a výdaji."""
+    """Vrátí nezaplacené doklady a k nim hledá platbu v bankovním výpisu."""
     import datetime as _dt
     navrhy = []
     try:
-        with get_db() as conn:
-            # Načti nespárované pohyby — odolné vůči chybějícímu sloupci sparovano
-            try:
-                pohyby = conn.execute("""
-                    SELECT * FROM bankovni_pohyby
-                    WHERE sparovano = 0
-                    ORDER BY datum DESC LIMIT 200
-                """).fetchall()
-            except Exception:
-                pohyby = conn.execute("""
-                    SELECT * FROM bankovni_pohyby
-                    ORDER BY datum DESC LIMIT 200
-                """).fetchall()
+        import psycopg2 as _pg2
+        db_url = os.environ.get("DATABASE_URL", "")
+        pg_conn = _pg2.connect(db_url)
+        pg_cur = pg_conn.cursor()
 
-            for p in pohyby:
-                pid = p["id"] if isinstance(p, dict) else p[0]
-                datum = p["datum"] if isinstance(p, dict) else p[2]
-                castka = float(p["castka"] if isinstance(p, dict) else p[3])
-                try:
-                    var_sym = str(p["var_sym"]) if isinstance(p, dict) else ""
-                except Exception:
-                    var_sym = ""
-                nazev = (p["nazev_protiucet"] if isinstance(p, dict) else p[5]) or ""
-                firma = (p["firma_zkratka"] if isinstance(p, dict) else p[9]) or ""
-                banka = (p["banka"] if isinstance(p, dict) else p[1]) or ""
+        # 1. Přijaté faktury (kromě MAKRO) — odchozí platba
+        pg_cur.execute("""
+            SELECT id, firma_zkratka, dodavatel, cislo_faktury, celkem_s_dph,
+                   datum_vystaveni, datum_splatnosti
+            FROM faktury
+            WHERE stav NOT IN ('zaplaceno','duplikat')
+            AND dodavatel NOT ILIKE '%MAKRO%'
+            ORDER BY datum_splatnosti, datum_vystaveni
+        """)
+        for r in pg_cur.fetchall():
+            fid, firma, dodavatel, cislo, castka, dat_vys, dat_spl = r
+            shoda = _hledej_platbu_pg(pg_cur, castka, dat_vys, dat_spl, cislo, smer='odchozi')
+            navrhy.append({
+                "typ": "faktura", "id": fid, "firma": firma,
+                "popis": f"Faktura č.{cislo or '?'} | {dodavatel}",
+                "castka": castka, "datum": dat_vys, "datum_splatnosti": dat_spl,
+                "smer": "odchozi", "shoda": shoda
+            })
 
-                # Datum ±5 dní
-                try:
-                    d = _dt.date.fromisoformat(datum)
-                    d_od = (d - _dt.timedelta(days=5)).isoformat()
-                    d_do = (d + _dt.timedelta(days=5)).isoformat()
-                except Exception:
-                    continue
+        # 2. Výdaje — odchozí platba
+        pg_cur.execute("""
+            SELECT id, firma_zkratka, dodavatel, castka, datum, datum_splatnosti
+            FROM vydaje
+            WHERE stav = 'nezaplaceno'
+            ORDER BY datum_splatnosti, datum
+        """)
+        for r in pg_cur.fetchall():
+            vid, firma, dodavatel, castka, datum, dat_spl = r
+            shoda = _hledej_platbu_pg(pg_cur, castka, datum, dat_spl, None, smer='odchozi')
+            navrhy.append({
+                "typ": "vydaj", "id": vid, "firma": firma,
+                "popis": f"Výdaj | {dodavatel}",
+                "castka": castka, "datum": datum, "datum_splatnosti": dat_spl,
+                "smer": "odchozi", "shoda": shoda
+            })
 
-                shoda = None
+        # 3. Vystavené faktury — příchozí platba
+        pg_cur.execute("""
+            SELECT id, firma_zkratka, odberatel, cislo_faktury, castka,
+                   datum, datum_splatnosti
+            FROM vystavene_faktury
+            WHERE stav = 'nezaplaceno'
+            ORDER BY datum_splatnosti, datum
+        """)
+        for r in pg_cur.fetchall():
+            fid, firma, odberatel, cislo, castka, datum, dat_spl = r
+            shoda = _hledej_platbu_pg(pg_cur, castka, datum, dat_spl, cislo, smer='prichozi')
+            navrhy.append({
+                "typ": "vystavena", "id": fid, "firma": firma,
+                "popis": f"Vystavená FA č.{cislo or '?'} | {odberatel}",
+                "castka": castka, "datum": datum, "datum_splatnosti": dat_spl,
+                "smer": "prichozi", "shoda": shoda
+            })
 
-                if castka < 0:
-                    castka_abs = abs(castka)
-                    try:
-                        kandidati = conn.execute("""
-                            SELECT id, firma_zkratka, dodavatel, cislo_faktury, celkem_s_dph
-                            FROM faktury
-                            WHERE stav NOT IN ('zaplaceno','duplikat')
-                            AND ABS(celkem_s_dph - ?) < 1.0
-                            AND (datum_vystaveni BETWEEN ? AND ? OR datum_splatnosti BETWEEN ? AND ?)
-                        """, (castka_abs, d_od, d_do, d_od, d_do)).fetchall()
-                        if var_sym and kandidati:
-                            for k in kandidati:
-                                cislo = (k["cislo_faktury"] if isinstance(k, dict) else k[3]) or ""
-                                if var_sym in cislo or cislo in var_sym:
-                                    shoda = {"typ": "faktura", "id": k["id"] if isinstance(k, dict) else k[0],
-                                             "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
-                                             "popis": f"Faktura č.{cislo} | {k['dodavatel'] if isinstance(k, dict) else k[2]}",
-                                             "castka": k["celkem_s_dph"] if isinstance(k, dict) else k[4],
-                                             "istota": "vs"}
-                                    break
-                        if not shoda and kandidati:
-                            k = kandidati[0]
-                            cislo = (k["cislo_faktury"] if isinstance(k, dict) else k[3]) or ""
-                            shoda = {"typ": "faktura", "id": k["id"] if isinstance(k, dict) else k[0],
-                                     "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
-                                     "popis": f"Faktura č.{cislo} | {k['dodavatel'] if isinstance(k, dict) else k[2]}",
-                                     "castka": k["celkem_s_dph"] if isinstance(k, dict) else k[4],
-                                     "istota": "castka"}
-                    except Exception:
-                        pass
-
-                    if not shoda:
-                        try:
-                            kandidati_v = conn.execute("""
-                                SELECT id, firma_zkratka, dodavatel, castka
-                                FROM vydaje
-                                WHERE stav = 'nezaplaceno'
-                                AND ABS(castka - ?) < 1.0
-                                AND datum BETWEEN ? AND ?
-                            """, (castka_abs, d_od, d_do)).fetchall()
-                            if kandidati_v:
-                                k = kandidati_v[0]
-                                shoda = {"typ": "vydaj", "id": k["id"] if isinstance(k, dict) else k[0],
-                                         "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
-                                         "popis": f"Výdaj | {k['dodavatel'] if isinstance(k, dict) else k[2]}",
-                                         "castka": k["castka"] if isinstance(k, dict) else k[3],
-                                         "istota": "castka"}
-                        except Exception:
-                            pass
-
-                elif castka > 0:
-                    try:
-                        kandidati_vf = conn.execute("""
-                            SELECT id, firma_zkratka, odberatel, cislo_faktury, castka
-                            FROM vystavene_faktury
-                            WHERE stav = 'nezaplaceno'
-                            AND ABS(castka - ?) < 1.0
-                            AND (datum BETWEEN ? AND ? OR datum_splatnosti BETWEEN ? AND ?)
-                        """, (castka, d_od, d_do, d_od, d_do)).fetchall()
-                        if kandidati_vf:
-                            k = kandidati_vf[0]
-                            cislo = (k["cislo_faktury"] if isinstance(k, dict) else k[3]) or ""
-                            shoda = {"typ": "vystavena", "id": k["id"] if isinstance(k, dict) else k[0],
-                                     "firma": k["firma_zkratka"] if isinstance(k, dict) else k[1],
-                                     "popis": f"Vystavená FA č.{cislo} | {k['odberatel'] if isinstance(k, dict) else k[2]}",
-                                     "castka": k["castka"] if isinstance(k, dict) else k[4],
-                                     "istota": "castka"}
-                    except Exception:
-                        pass
-
-                navrhy.append({
-                    "pohyb_id": pid, "banka": banka, "datum": datum,
-                    "castka": castka, "nazev_protiucet": nazev,
-                    "var_sym": var_sym, "firma_zkratka": firma, "shoda": shoda
-                })
+        pg_conn.close()
     except Exception as e:
         return jsonify({"navrhy": [], "error": str(e)})
 
     return jsonify({"navrhy": navrhy})
+
+
+def _hledej_platbu_pg(pg_cur, castka, datum, datum_splatnosti, cislo_faktury, smer):
+    """Hledá platbu v bankovních pohybech odpovídající dokladu."""
+    import datetime as _dt
+    # Datum ±5 dní od vystavení nebo splatnosti
+    ref_datum = datum_splatnosti or datum
+    if not ref_datum:
+        return None
+    try:
+        d = _dt.date.fromisoformat(ref_datum[:10])
+        d_od = (d - _dt.timedelta(days=5)).isoformat()
+        d_do = (d + _dt.timedelta(days=5)).isoformat()
+    except Exception:
+        return None
+
+    castka_abs = abs(float(castka))
+    operator = "<" if smer == "odchozi" else ">"
+
+    try:
+        # Hledej podle VS + částka
+        if cislo_faktury:
+            pg_cur.execute(f"""
+                SELECT id, banka, datum, castka, nazev_protiucet, var_sym, firma_zkratka
+                FROM bankovni_pohyby
+                WHERE castka {operator} 0
+                AND ABS(ABS(castka) - %s) < 1.0
+                AND datum BETWEEN %s AND %s
+                AND (var_sym = %s OR zprava ILIKE %s)
+                LIMIT 1
+            """, (castka_abs, d_od, d_do, str(cislo_faktury), f"%{cislo_faktury}%"))
+            row = pg_cur.fetchone()
+            if row:
+                return {"pohyb_id": row[0], "banka": row[1], "datum": row[2],
+                        "castka": row[3], "nazev": row[4] or "", "istota": "vs"}
+
+        # Hledej jen podle částky
+        pg_cur.execute(f"""
+            SELECT id, banka, datum, castka, nazev_protiucet, var_sym, firma_zkratka
+            FROM bankovni_pohyby
+            WHERE castka {operator} 0
+            AND ABS(ABS(castka) - %s) < 1.0
+            AND datum BETWEEN %s AND %s
+            LIMIT 1
+        """, (castka_abs, d_od, d_do))
+        row = pg_cur.fetchone()
+        if row:
+            return {"pohyb_id": row[0], "banka": row[1], "datum": row[2],
+                    "castka": row[3], "nazev": row[4] or "", "istota": "castka"}
+    except Exception:
+        pass
+    return None
 
 @app.route("/api/parovani/potvrdit", methods=["POST"])
 @vyzaduj_prihlaseni
@@ -5191,6 +5192,13 @@ def api_faktura_ulozit():
             return jsonify({"error": f"Chybí pole: {r}"}), 400
 
     polozky = data.pop("polozky", [])
+
+    # MAKRO faktury jsou vždy zaplaceny okamžitě při nákupu
+    dodavatel = data.get("dodavatel", "")
+    if "MAKRO" in dodavatel.upper():
+        data["stav"] = "zaplaceno"
+        if not data.get("datum_zaplaceno"):
+            data["datum_zaplaceno"] = data.get("datum_vystaveni", "")
 
     # Detekce obsahové duplicity před uložením
     obsahova_duplicita_id = None
