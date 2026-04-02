@@ -3892,14 +3892,14 @@ def api_parovani_navrh():
 def _hledej_platbu_pg(pg_cur, castka, datum, datum_splatnosti, cislo_faktury, smer):
     """Hledá platbu v bankovních pohybech odpovídající dokladu."""
     import datetime as _dt
-    # Datum ±5 dní od vystavení nebo splatnosti
-    ref_datum = datum_splatnosti or datum
-    if not ref_datum:
+    if not datum and not datum_splatnosti:
         return None
     try:
-        d = _dt.date.fromisoformat(ref_datum[:10])
-        d_od = (d - _dt.timedelta(days=5)).isoformat()
-        d_do = (d + _dt.timedelta(days=5)).isoformat()
+        # Hledej od data vystavení -5 dní až do splatnosti +14 dní
+        d_start = _dt.date.fromisoformat((datum or datum_splatnosti)[:10])
+        d_end = _dt.date.fromisoformat((datum_splatnosti or datum)[:10])
+        d_od = (d_start - _dt.timedelta(days=5)).isoformat()
+        d_do = (d_end + _dt.timedelta(days=14)).isoformat()
     except Exception:
         return None
 
