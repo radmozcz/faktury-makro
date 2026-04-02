@@ -282,7 +282,7 @@ async function api(url, opts = {}) {
       zobrazLogin();
       throw new Error("Nejsi přihlášen");
     }
-    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || r.statusText); }
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.chyba || e.error || r.statusText); }
     return r.json();
   } catch (e) {
     if (e.message !== "Nejsi přihlášen") toast("Chyba: " + e.message, true);
