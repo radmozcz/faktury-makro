@@ -504,9 +504,14 @@ function drawLineChart(canvasId, labels, datasets) {
 async function renderDashboard() {
   document.getElementById("mainContent").innerHTML = `<div class="loading-center"><span class="spinner"></span></div>`;
 
-  let check, karty_stats = {};
+  let check, karty_stats = {}, rocniData = {}, backupInfo = {};
   try { check = await api("/api/nastenka-check"); } catch { return; }
   try { karty_stats = await api("/api/reporty/karty-stats"); } catch {}
+  try {
+    const r = await api("/api/nastenka-rocni-prehled");
+    if (r.ok) rocniData = r.data;
+  } catch {}
+  try { backupInfo = await api("/api/nastenka-backup-check"); } catch {}
 
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
@@ -515,10 +520,15 @@ async function renderDashboard() {
     </div>
     <div id="nastenkaBoxiky" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;margin-bottom:1.5rem"></div>
     <div style="border-top:2px solid var(--border);margin:1.2rem 0 .8rem;opacity:.4"></div>
-    <div id="nastenkaSpodek" style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1rem"></div>`;
+    <div id="nastenkaSpodek" style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1rem"></div>
+    <div style="border-top:2px solid var(--border);margin:1.2rem 0 .8rem;opacity:.4"></div>
+    <div id="nastenkaTrzby"></div>
+    <div id="nastenkaBackup" style="margin-top:1rem"></div>`;
 
   _renderNastenkaBoxiky(check);
   _renderNastenkaSpodek(check, karty_stats);
+  _renderRocniTrzby(rocniData);
+  _renderBackupWarning(backupInfo);
 }
 
 function _renderNastenkaSpodek(c, karty_stats) {
@@ -621,6 +631,90 @@ function _renderNastenkaSpodek(c, karty_stats) {
         </tr></tfoot>
       </table>
       <div style="font-size:.75rem;color:var(--txt2);margin-top:.3rem">Faktury →</div>
+    </div>`;
+}
+
+function _renderBackupWarning(info) {
+  const el = document.getElementById("nastenkaBackup");
+  if (!el) return;
+  if (!info || info.dnu_od === undefined) { el.innerHTML = ''; return; }
+  if (info.ok) {
+    el.innerHTML = `<div style="font-size:.8rem;color:var(--txt2)">💾 ${info.zprava}</div>`;
+  } else {
+    el.innerHTML = `
+      <div style="background:#fee2e2;border:1.5px solid #ef4444;border-radius:8px;padding:.7rem 1rem;display:flex;align-items:center;gap:.7rem">
+        <span style="font-size:1.2rem">⚠️</span>
+        <span style="font-weight:600;color:#991b1b">Záloha DB: ${info.zprava}</span>
+      </div>`;
+  }
+}
+
+function _renderRocniTrzby(data) {
+  const el = document.getElementById("nastenkaTrzby");
+  if (!el) return;
+
+  const mesNames = ["","Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
+  const roky = Object.keys(data).map(Number).sort();
+  if (!roky.length) { el.innerHTML = ''; return; }
+
+  // Přidej aktuální rok pokud není
+  const aktRok = new Date().getFullYear();
+  if (!roky.includes(aktRok)) roky.push(aktRok);
+
+  // Celkové součty za rok
+  const celkem = {};
+  const pocetMesicu = {};
+  roky.forEach(r => {
+    celkem[r] = 0;
+    pocetMesicu[r] = 0;
+    for (let m = 1; m <= 12; m++) {
+      const d = data[r]?.[m];
+      if (d) { celkem[r] += d.trzba; pocetMesicu[r]++; }
+    }
+  });
+
+  const rokHlavicky = roky.map(r => `<th style="text-align:right;padding:5px 10px;min-width:130px">${r}</th>`).join('');
+
+  const radky = [];
+  for (let m = 1; m <= 12; m++) {
+    const bunky = roky.map(r => {
+      const d = data[r]?.[m];
+      if (!d) return `<td style="text-align:right;padding:4px 10px;color:var(--txt2)">—</td>`;
+      return `<td style="text-align:right;padding:4px 10px">
+        <span style="font-weight:600">${czInt(d.trzba)}</span>
+        <span style="font-size:.75rem;color:var(--txt2);margin-left:4px">/ ${czInt(d.prumer)}</span>
+      </td>`;
+    }).join('');
+    radky.push(`<tr><td style="padding:4px 10px;font-weight:500">${mesNames[m]}</td>${bunky}</tr>`);
+  }
+
+  const soucetyRow = roky.map(r => `<td style="text-align:right;padding:6px 10px;font-weight:700;font-size:1rem">${czInt(celkem[r])}</td>`).join('');
+  const prumeryRow = roky.map(r => `<td style="text-align:right;padding:4px 10px;color:var(--txt2)">${pocetMesicu[r] ? czInt(Math.round(celkem[r] / pocetMesicu[r])) : '—'}</td>`).join('');
+
+  el.innerHTML = `
+    <div class="card">
+      <div style="font-weight:600;font-size:1rem;margin-bottom:.8rem">📊 Tržby po rocích
+        <span style="font-size:.75rem;font-weight:400;color:var(--txt2);margin-left:.5rem">celkem / průměr/den</span>
+      </div>
+      <div class="table-wrap">
+        <table style="font-size:.85rem">
+          <thead><tr>
+            <th style="padding:5px 10px">Měsíc</th>
+            ${rokHlavicky}
+          </tr></thead>
+          <tbody>${radky.join('')}</tbody>
+          <tfoot>
+            <tr style="border-top:2px solid var(--border)">
+              <td style="padding:6px 10px;font-weight:700">Celkem rok</td>
+              ${soucetyRow}
+            </tr>
+            <tr>
+              <td style="padding:4px 10px;color:var(--txt2)">Prům./měsíc</td>
+              ${prumeryRow}
+            </tr>
+          </tfoot>
+        </table>
+      </div>
     </div>`;
 }
 
