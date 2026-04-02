@@ -1941,6 +1941,76 @@ def api_dashboard():
         "karty_limit": 1500000,
     })
 
+@app.route("/api/nastenka-rocni-prehled")
+@vyzaduj_prihlaseni
+def api_nastenka_rocni_prehled():
+    """Roční přehled tržeb po měsících pro tabulku na nástěnce."""
+    firma = request.args.get("firma", "")
+    try:
+        import psycopg2 as _pg2
+        db_url = os.environ.get("DATABASE_URL", "")
+        conn = _pg2.connect(db_url)
+        cur = conn.cursor()
+        fw = "AND firma_zkratka=%s" if firma else ""
+        params = [firma] if firma else []
+        cur.execute(f"""
+            SELECT
+                EXTRACT(YEAR FROM NULLIF(datum,'')::date)::int as rok,
+                EXTRACT(MONTH FROM NULLIF(datum,'')::date)::int as mesic,
+                ROUND(SUM(trzba_vcpk)::numeric, 0) as trzba,
+                COUNT(*) as dni
+            FROM reporty
+            WHERE datum IS NOT NULL AND datum != '' {fw}
+            GROUP BY rok, mesic
+            ORDER BY rok, mesic
+        """, params)
+        rows = cur.fetchall()
+        conn.close()
+
+        # Sestav strukturu {rok: {mesic: {trzba, dni, prumer}}}
+        data = {}
+        for rok, mesic, trzba, dni in rows:
+            if rok not in data:
+                data[rok] = {}
+            trzba_f = float(trzba or 0)
+            dni_i = int(dni or 1)
+            data[rok][mesic] = {
+                "trzba": trzba_f,
+                "dni": dni_i,
+                "prumer": round(trzba_f / dni_i, 0) if dni_i else 0
+            }
+
+        return jsonify({"ok": True, "data": data})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+@app.route("/api/nastenka-backup-check")
+@vyzaduj_prihlaseni
+def api_nastenka_backup_check():
+    """Zkontroluje datum poslední GCS zálohy."""
+    try:
+        from google.cloud import storage as gcs
+        bucket_name = os.environ.get("GCS_BUCKET", "faktury-makro-docs")
+        client = gcs.Client()
+        bucket = client.bucket(bucket_name)
+        blobs = sorted(
+            [b for b in bucket.list_blobs(prefix="backups/")],
+            key=lambda b: b.updated, reverse=True
+        )
+        if not blobs:
+            return jsonify({"ok": False, "zprava": "Žádné zálohy nenalezeny", "dnu_od": 999})
+        posledni = blobs[0]
+        import datetime as _dt
+        dnu = (_dt.datetime.now(_dt.timezone.utc) - posledni.updated).days
+        return jsonify({
+            "ok": dnu <= 7,
+            "posledni": posledni.name,
+            "dnu_od": dnu,
+            "zprava": f"Záloha stará {dnu} dní" if dnu > 7 else f"OK — záloha před {dnu} dny"
+        })
+    except Exception as e:
+        return jsonify({"ok": False, "zprava": str(e), "dnu_od": -1})
+
 @app.route("/api/nastenka-check")
 @vyzaduj_prihlaseni
 def api_nastenka_check():
