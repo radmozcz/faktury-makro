@@ -6170,6 +6170,29 @@ def api_reset_drive_zpracovane():
     with get_db() as conn:
         conn.execute("DELETE FROM drive_zpracovane")
     return jsonify({"ok": True})
+@app.route("/api/makro-zaplaceno", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_makro_zaplaceno():
+    """Zpětně označí všechny MAKRO faktury jako zaplaceno."""
+    if session.get("role") != "admin":
+        return jsonify({"error": "Pouze admin"}), 403
+    try:
+        import psycopg2 as _pg2
+        db_url = os.environ.get("DATABASE_URL", "")
+        conn = _pg2.connect(db_url)
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE faktury SET stav='zaplaceno', datum_zaplaceno=datum_vystaveni
+            WHERE dodavatel ILIKE '%MAKRO%'
+            AND stav NOT IN ('zaplaceno','duplikat')
+        """)
+        pocet = cur.rowcount
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "oznaceno": pocet})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/api/smazat-vse-faktury", methods=["POST"])
 @vyzaduj_prihlaseni
 def api_smazat_vse_faktury():
