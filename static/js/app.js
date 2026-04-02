@@ -5696,23 +5696,44 @@ async function nacistPoSplatnosti() {
     const data = await api('/api/parovani/po-splatnosti');
     const items = data.po_splatnosti || [];
     if (!items.length) { el.innerHTML = ''; return; }
+
+    const hlavicka = `
+      <div style="font-size:11px;color:var(--txt2);font-weight:500;display:flex;gap:8px;padding:0 12px 4px;border-bottom:0.5px solid var(--border);margin-bottom:4px">
+        <span style="width:20px"></span>
+        <span style="width:32px"></span>
+        <span style="width:150px">Název</span>
+        <span style="width:200px">Popis</span>
+        <span style="width:80px">VS</span>
+        <span style="width:85px">Splatnost</span>
+        <span style="width:90px">Stav</span>
+        <span style="width:85px;text-align:right">Částka</span>
+        <span style="width:210px"></span>
+      </div>`;
+
     el.innerHTML = `
-      <div class="card" style="border-left:4px solid #E24B4A;border-radius:0 var(--border-radius-lg) var(--border-radius-lg) 0">
-        <div style="font-weight:600;color:#E24B4A;margin-bottom:.8rem">⚠ Po splatnosti (${items.length})</div>
-        <div style="display:flex;flex-direction:column;gap:4px">
+      <div class="card" style="border-left:4px solid #E24B4A;border-radius:0 var(--border-radius-lg) var(--border-radius-lg) 0;font-size:13px">
+        <div style="font-weight:600;color:#E24B4A;margin-bottom:.6rem">⚠ Po splatnosti (${items.length})</div>
+        ${hlavicka}
+        <div style="display:flex;flex-direction:column;gap:3px">
           ${items.map(i => {
-            const prijmy = i.typ === 'vystavena';
+            const prijmy = i.smer === 'prichozi';
             const sipka = prijmy ? '→' : '←';
             const barva = '#E24B4A';
-            const onclick = i.typ === 'faktura' ? `navigateTo('faktury');setTimeout(()=>openFakturaDetail(${i.id}),500)`
-                          : i.typ === 'vystavena' ? `navigateTo('vystavene');setTimeout(()=>openVystEdit(${i.id}),500)`
-                          : i.typ === 'vydaj' ? `navigateTo('vydaje');` : '';
-            return `<div onclick="${onclick}" style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${barva};border-radius:0 6px 6px 0;padding:8px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;transition:background .15s" onmouseover="this.style.background='var(--hover-bg)'" onmouseout="this.style.background='var(--card-bg)'">
-              <span style="font-size:18px;color:${barva};font-weight:500;min-width:20px">${sipka}</span>
-              <span style="flex:1;font-size:.9rem"><span class="badge">${escHtml(i.firma)}</span> ${escHtml(i.popis)}</span>
-              <span style="font-size:.85rem;color:#E24B4A;font-weight:600;white-space:nowrap">po ${i.dnu_po} dní</span>
-              <span style="font-weight:600;white-space:nowrap">${czMoneyFull(i.castka)}</span>
-              <span style="font-size:.8rem;color:var(--txt2)">→</span>
+            const nazev = i.popis.split('|')[1]?.trim() || i.popis;
+            return `<div onclick="parovaniProkliken('${i.typ}',${i.id})" style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${barva};border-radius:0 6px 6px 0;padding:7px 12px;display:flex;align-items:center;gap:8px;cursor:pointer;margin-bottom:2px">
+              <span style="font-size:16px;color:${barva};width:20px;flex-shrink:0">${sipka}</span>
+              <span style="background:#eaf3de;color:#27500a;border-radius:4px;padding:1px 5px;font-size:12px;font-weight:500;width:32px;text-align:center;flex-shrink:0">${escHtml(i.firma||'')}</span>
+              <span title="${escHtml(i.popis)}" style="font-weight:500;width:150px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(nazev)}</span>
+              <span title="${escHtml(i.detail||'')}" style="width:200px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(i.detail||'')}</span>
+              <span style="width:80px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(i.var_sym||'—')}</span>
+              <span style="width:85px;flex-shrink:0;font-size:12px">${czDate(i.datum_splatnosti)}</span>
+              <span style="width:90px;flex-shrink:0"><span style="background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 5px;font-size:11px">po ${i.dnu_po} dní</span></span>
+              <span style="font-weight:500;width:85px;flex-shrink:0;text-align:right">${czMoneyFull(i.castka)}</span>
+              <div style="width:210px;flex-shrink:0;display:flex;gap:4px;justify-content:flex-end;align-items:center" onclick="event.stopPropagation()">
+                <input type="date" id="datSpl_${i.typ}_${i.id}" value="${new Date().toISOString().slice(0,10)}" title="Datum úhrady" style="width:110px;font-size:11px;padding:1px 3px;height:24px">
+                <button style="background:transparent;color:var(--color-text-primary);border:0.5px solid var(--border);border-radius:5px;padding:3px 7px;font-size:12px;cursor:pointer" onclick="parovaniRucne('${i.typ}',${i.id})">🔗</button>
+                <button style="background:#16a34a;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:12px;cursor:pointer" onclick="oznacZaplacenoPoSplatnosti('${i.typ}',${i.id})">✅</button>
+              </div>
             </div>`;
           }).join('')}
         </div>
@@ -5810,6 +5831,19 @@ async function potvrditParovani(pohybId, typ, dokladId) {
     });
     const row = document.getElementById(`par_${typ}_${dokladId}`);
     if (row) { row.style.background = '#d1fae5'; row.innerHTML = `<div style="padding:4px 8px;color:#16a34a;font-weight:600">✅ Zaplaceno (${datum})</div>`; }
+    toast('✅ Zaplaceno!');
+  } catch(e) { toast('❌ Chyba: ' + e.message, true); }
+}
+
+async function oznacZaplacenoPoSplatnosti(typ, dokladId) {
+  const datumEl = document.getElementById(`datSpl_${typ}_${dokladId}`);
+  const datum = datumEl?.value || new Date().toISOString().slice(0,10);
+  try {
+    await api('/api/parovani/potvrdit', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ pohyb_id: null, typ, doklad_id: dokladId, datum_zaplaceno: datum })
+    });
+    nacistPoSplatnosti();
     toast('✅ Zaplaceno!');
   } catch(e) { toast('❌ Chyba: ' + e.message, true); }
 }
