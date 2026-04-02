@@ -5851,15 +5851,25 @@ function parovaniRucne(typ, dokladId) {
   toast('Ruční přiřazení bude k dispozici v další verzi.');
 }
 
+function zvyraznitRadek(rowId) {
+  const el = document.getElementById(rowId);
+  if (!el) return;
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  el.style.transition = 'background 0.3s';
+  el.style.background = '#fef9c3';
+  setTimeout(() => { el.style.background = ''; }, 3000);
+}
+
 function parovaniProkliken(typ, id) {
   if (typ === 'faktura') {
     navigateTo('faktury');
-    setTimeout(() => openFakturaDetail(id), 800);
+    setTimeout(() => { openFakturaDetail(id); setTimeout(() => zvyraznitRadek('faktura_' + id), 400); }, 800);
   } else if (typ === 'vystavena') {
     navigateTo('vystavene');
-    setTimeout(() => openVystEdit(id), 800);
+    setTimeout(() => zvyraznitRadek('vyst_' + id), 800);
   } else if (typ === 'vydaj') {
     navigateTo('vydaje');
+    setTimeout(() => zvyraznitRadek('vydaj_' + id), 800);
   }
 }
 
@@ -6890,7 +6900,7 @@ async function loadVystavene() {
              <button class="btn btn-xs btn-outline" onclick="openVystEdit(${f.id})" title="Upravit">✏️</button>
              <button class="btn btn-xs btn-danger" onclick="smazatVystavenu(${f.id})" title="Smazat">🗑</button>
            </td>` : "";
-      return `<tr style="opacity:${f.duplicita_id ? '0.55' : '1'}">
+      return `<tr id="vyst_${f.id}" style="opacity:${f.duplicita_id ? '0.55' : '1'}">
         <td><span class="badge">${f.firma_zkratka}</span></td>
         <td>${odkaz}${dupBadge}</td><td>${f.datum||"—"}</td><td>${f.datum_splatnosti||"—"}</td>
         <td>${f.odberatel||"—"}</td>
@@ -6951,6 +6961,12 @@ function vystFormHtml(f = {}) {
         <option value="nezaplaceno" ${(f.stav||"nezaplaceno")==="nezaplaceno"?"selected":""}>Nezaplaceno</option>
         <option value="zaplaceno" ${f.stav==="zaplaceno"?"selected":""}>Zaplaceno</option>
       </select>
+    </div>
+    <div class="form-group">
+      <label>Příloha (PDF / foto)</label>
+      ${f.soubor_url ? `<div style="margin-bottom:.4rem"><a href="${f.soubor_url}" target="_blank" class="btn btn-secondary btn-sm">📎 Zobrazit aktuální přílohu</a></div>` : ''}
+      <input type="file" id="vystSouborFile" accept=".pdf,.jpg,.jpeg,.png" class="form-control">
+      <small style="color:var(--txt2)">Nahrajte nový soubor pro nahrazení přílohy</small>
     </div>
     <input type="hidden" id="vystSouborUrl" value="${f.soubor_url||""}">`;
 }
@@ -7084,6 +7100,20 @@ async function saveVystavena(editId = null) {
   const sel = document.getElementById("vystOdbSel").value;
   const odberatel = sel === "__jiny__"
     ? (document.getElementById("vystOdbRucne").value||"").trim() : sel;
+
+  // Nahraj soubor pokud byl vybrán
+  let soubor_url = document.getElementById("vystSouborUrl").value;
+  const souborFile = document.getElementById("vystSouborFile")?.files[0];
+  if (souborFile) {
+    try {
+      const fd = new FormData();
+      fd.append("soubor", souborFile);
+      const uploadRes = await fetch("/api/vystavene-faktury/nahrat", { method: "POST", body: fd });
+      const uploadData = await uploadRes.json();
+      if (uploadData.soubor_url) soubor_url = uploadData.soubor_url;
+    } catch(e) { toast("⚠ Soubor se nepodařilo nahrát: " + e.message, 4000); }
+  }
+
   const payload = {
     firma_zkratka:    document.getElementById("vystFirma").value,
     cislo_faktury:    document.getElementById("vystCislo").value.trim(),
@@ -7093,7 +7123,7 @@ async function saveVystavena(editId = null) {
     popis:            document.getElementById("vystPopis").value.trim(),
     castka:           parseFloat(document.getElementById("vystCastka").value)||0,
     stav:             document.getElementById("vystStav").value,
-    soubor_url:       document.getElementById("vystSouborUrl").value,
+    soubor_url,
   };
   const url    = editId ? `/api/vystavene-faktury/${editId}` : "/api/vystavene-faktury";
   const method = editId ? "PUT" : "POST";
@@ -7103,7 +7133,10 @@ async function saveVystavena(editId = null) {
   } else {
     toast(editId ? "Faktura upravena ✓" : "Faktura uložena ✓");
   }
-  closeModal(); loadVystavene();
+  closeModal();
+  loadVystavene();
+  // Zvýrazni řádek po přesměrování
+  if (editId) setTimeout(() => zvyraznitRadek('vyst_' + editId), 600);
 }
 
 async function toggleVystStav(id,  stavNyni) {
