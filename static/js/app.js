@@ -4160,42 +4160,61 @@ async function renderNastaveni() {
   try { prava = await api("/api/prava"); } catch(e) {}
 
   const SEKCE = [
-    { klic: "faktury_zobrazit",  label: "Faktury — zobrazit" },
-    { klic: "faktury_upravit",   label: "Faktury — přidat / upravit" },
-    { klic: "faktury_smazat",    label: "Faktury — mazat" },
-    { klic: "faktury_export",    label: "Faktury — export" },
-    { klic: "reporty_zobrazit",  label: "Reporty — zobrazit" },
-    { klic: "reporty_upravit",   label: "Reporty — přidat / upravit" },
-    { klic: "vyplaty_zobrazit",  label: "Výplaty — zobrazit" },
-    { klic: "vyplaty_upravit",   label: "Výplaty — upravit" },
-    { klic: "zbozi_zobrazit",    label: "Zboží — zobrazit" },
-    { klic: "vydaje_zobrazit",          label: "Výdaje — zobrazit" },
-    { klic: "vydaje_upravit",           label: "Výdaje — přidat/upravit" },
-    { klic: "vydaje_smazat",            label: "Výdaje — mazat" },
-    { klic: "soukrome_vydaje_zobrazit", label: "Soukromé výdaje — zobrazit" },
-    { klic: "soukrome_vydaje_upravit",  label: "Soukromé výdaje — přidat/upravit" },
-    { klic: "soukrome_vydaje_smazat",   label: "Soukromé výdaje — mazat" },
-    { klic: "naklady_zobrazit",  label: "Náklady — zobrazit" },
-    { klic: "bankovni_vypisy",   label: "Bankovní výpisy" },
-    { klic: "banky_soukrome",    label: "Banky — Radek osobní" },
-    { klic: "nastenka",          label: "Nástěnka — zobrazit" },
-    { klic: "radek_sekce",       label: "Radek — soukromá sekce" },
-    { klic: "statistiky",        label: "Statistiky" },
-    { klic: "nastaveni",         label: "Nastavení" },
-    { klic: "kalkulace",         label: "Kalkulace" },
-    { klic: "upozorneni",        label: "Upozornění (Nástěnka)" },
+    { skupina: "Nástěnka" },
+    { klic: "nastenka",                 label: "zobrazit" },
+    { klic: "upozorneni",               label: "upozornění" },
+    { skupina: "Faktury" },
+    { klic: "faktury_zobrazit",         label: "zobrazit" },
+    { klic: "faktury_upravit",          label: "přidat / upravit" },
+    { klic: "faktury_smazat",           label: "mazat" },
+    { klic: "faktury_export",           label: "export" },
+    { skupina: "Reporty" },
+    { klic: "reporty_zobrazit",         label: "zobrazit" },
+    { klic: "reporty_upravit",          label: "přidat / upravit" },
+    { skupina: "Výdaje" },
+    { klic: "vydaje_zobrazit",          label: "zobrazit" },
+    { klic: "vydaje_upravit",           label: "přidat / upravit" },
+    { klic: "vydaje_smazat",            label: "mazat" },
+    { klic: "naklady_zobrazit",         label: "náklady — zobrazit" },
+    { skupina: "Soukromé výdaje" },
+    { klic: "soukrome_vydaje_zobrazit", label: "zobrazit" },
+    { klic: "soukrome_vydaje_upravit",  label: "přidat / upravit" },
+    { klic: "soukrome_vydaje_smazat",   label: "mazat" },
+    { skupina: "Vystavené faktury" },
+    { klic: "faktury_zobrazit",         label: "zobrazit" },
+    { skupina: "Zboží" },
+    { klic: "zbozi_zobrazit",           label: "zobrazit" },
+    { skupina: "Statistiky" },
+    { klic: "statistiky",               label: "zobrazit" },
+    { skupina: "Kalkulace" },
+    { klic: "kalkulace",                label: "zobrazit" },
+    { skupina: "Výplaty" },
+    { klic: "vyplaty_zobrazit",         label: "zobrazit" },
+    { klic: "vyplaty_upravit",          label: "upravit" },
+    { skupina: "Radek" },
+    { klic: "radek_sekce",              label: "soukromá sekce" },
+    { skupina: "Banky" },
+    { klic: "bankovni_vypisy",          label: "firemní výpisy" },
+    { klic: "banky_soukrome",           label: "Radek osobní" },
+    { skupina: "Nastavení" },
+    { klic: "nastaveni",                label: "zobrazit" },
   ];
 
   const pravaNastaveniRows = SEKCE.map(s => {
+    if (s.skupina) {
+      return `<tr style="background:var(--bg2)">
+        <td colspan="3" style="padding:.4rem .6rem;font-weight:700;font-size:.85rem;color:var(--txt)">${s.skupina}</td>
+      </tr>`;
+    }
     const chkV = (prava.verunka?.[s.klic]) ? "checked" : "";
     const chkU = (prava.ucetni?.[s.klic])  ? "checked" : "";
     return `<tr>
-      <td style="padding:.5rem .5rem">${s.label}</td>
-      <td style="padding:.5rem .5rem;text-align:center">
+      <td style="padding:.35rem .5rem .35rem 1.5rem;color:var(--txt2)">— ${s.label}</td>
+      <td style="padding:.35rem .5rem;text-align:center">
         <input type="checkbox" class="prava-check" data-role="verunka" data-sekce="${s.klic}" ${chkV}
           style="width:18px;height:18px;cursor:pointer">
       </td>
-      <td style="padding:.5rem .5rem;text-align:center">
+      <td style="padding:.35rem .5rem;text-align:center">
         <input type="checkbox" class="prava-check" data-role="ucetni" data-sekce="${s.klic}" ${chkU}
           style="width:18px;height:18px;cursor:pointer">
       </td>
