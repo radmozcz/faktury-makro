@@ -4985,18 +4985,20 @@ Nikdy nevymýšlej data která nemáš."""]
             # Bankovní výpisy
             if "banky" in nactist or je_admin:
                 try:
-                    pg_cur2 = pg
+                    import psycopg2 as _pg2b
+                    conn2 = _pg2b.connect(db_url)
+                    cur2 = conn2.cursor()
                     fw2 = "AND firma_zkratka=%s" if firma else ""
-                    pg_cur2.execute(f"""
+                    cur2.execute(f"""
                         SELECT datum, banka, firma_zkratka, castka, nazev_protiucet, zprava, var_sym
                         FROM bankovni_pohyby
                         WHERE datum >= %s AND datum <= %s {fw2}
                         ORDER BY datum DESC LIMIT 3000
                     """, [rok_od, rok_do] + ([firma] if firma else []))
-                    cols2 = [d[0] for d in pg_cur2.description]
-                    banky_rows = [dict(zip(cols2, r)) for r in pg_cur2.fetchall()]
-                    
-                    kontext_casti.append(f"\nBANKOVNÍ VÝPISY:\n{_safe_json(banky_rows)}")
+                    cols2 = [d[0] for d in cur2.description]
+                    banky_rows = [dict(zip(cols2, r)) for r in cur2.fetchall()]
+                    conn2.close()
+                    kontext_casti.append(f"\nBANKOVNÍ VÝPISY (celkem {len(banky_rows)} pohybů):\n{_safe_json(banky_rows)}")
                 except Exception as be:
                     kontext_casti.append(f"\nBANKOVNÍ VÝPISY: chyba načtení ({be})")
 
