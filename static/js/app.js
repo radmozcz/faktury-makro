@@ -520,10 +520,8 @@ async function renderDashboard() {
     </div>
     <div id="nastenkaBoxiky" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;margin-bottom:1.5rem"></div>
     <div style="border-top:2px solid var(--border);margin:1.2rem 0 .8rem;opacity:.4"></div>
-    <div id="nastenkaSpodek" style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:1rem"></div>
-    <div style="border-top:2px solid var(--border);margin:1.2rem 0 .8rem;opacity:.4"></div>
-    <div id="nastenkaTrzby"></div>
-    <div id="nastenkaBackup" style="margin-top:1rem"></div>`;
+    <div id="nastenkaSpodek" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin-bottom:1rem"></div>
+    <div id="nastenkaBackup" style="margin-top:.5rem"></div>`;
 
   _renderNastenkaBoxiky(check);
   _renderNastenkaSpodek(check, karty_stats);
@@ -650,7 +648,7 @@ function _renderBackupWarning(info) {
 }
 
 function _renderRocniTrzby(data) {
-  const el = document.getElementById("nastenkaTrzby");
+  const el = document.getElementById("nastenkaSpodek");
   if (!el) return;
 
   const mesNames = ["","Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
@@ -690,9 +688,10 @@ function _renderRocniTrzby(data) {
   const soucetyRow = roky.map(r => `<td style="text-align:right;padding:6px 10px;font-weight:700;font-size:1rem">${czInt(celkem[r])}</td>`).join('');
   const prumeryRow = roky.map(r => `<td style="text-align:right;padding:4px 10px;color:var(--txt2)">${pocetMesicu[r] ? czInt(Math.round(celkem[r] / pocetMesicu[r])) : '—'}</td>`).join('');
 
-  el.innerHTML = `
-    <div class="card" style="max-width:100%;overflow-x:auto">
-      <div style="font-weight:600;font-size:1rem;margin-bottom:.8rem">📊 Tržby po rocích
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="card" style="overflow-x:auto">
+      <div style="font-weight:600;font-size:.9rem;margin-bottom:.8rem">📊 Tržby po rocích
         <span style="font-size:.75rem;font-weight:400;color:var(--txt2);margin-left:.5rem">celkem / průměr/den</span>
       </div>
       <table style="font-size:.85rem;width:100%">
@@ -713,6 +712,7 @@ function _renderRocniTrzby(data) {
         </tfoot>
       </table>
     </div>`;
+  el.appendChild(div.firstElementChild);
 }
 
 function _stavBoxiku(stav) {
