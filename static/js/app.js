@@ -118,9 +118,9 @@ async function spustAplikaci() {
   skryjNepovoleneMenu();
   // Pokud nemá přístup na nástěnku, jdi na první povolenou sekci
   if (App.userRole !== "admin" && !maPravo("nastenka")) {
-    const povolene = ["faktury","reporty","vydaje","vystavene","zbozi","statistiky","kalkulace","ai-asistent","vyplaty","banky"];
+    const povolene = ["faktury","reporty","vydaje","vystavene","polozky","statistiky","kalkulace","ai-asistent","vyplaty","banky"];
     const prvni = povolene.find(p => {
-      const menuPrava = {"faktury":"faktury_zobrazit","reporty":"reporty_zobrazit","vydaje":"vydaje_zobrazit","vystavene":"faktury_zobrazit","zbozi":"zbozi_zobrazit","statistiky":"statistiky","kalkulace":"kalkulace","ai-asistent":"ai_asistent","vyplaty":"vyplaty_zobrazit","banky":"bankovni_vypisy"};
+      const menuPrava = {"faktury":"faktury_zobrazit","reporty":"reporty_zobrazit","vydaje":"vydaje_zobrazit","vystavene":"faktury_zobrazit","polozky":"zbozi_zobrazit","statistiky":"statistiky","kalkulace":"kalkulace","ai-asistent":"ai_asistent","vyplaty":"vyplaty_zobrazit","banky":"bankovni_vypisy"};
       return maPravo(menuPrava[p]);
     });
     navigateTo(prvni || "dashboard");
@@ -135,7 +135,7 @@ function skryjNepovoleneMenu() {
     "faktury":    "faktury_zobrazit",
     "nahrat":     "faktury_upravit",
     "rucni":      "faktury_upravit",
-    "polozky":    "faktury_zobrazit",
+    "polozky":    "zbozi_zobrazit",
     "vyplaty":    "vyplaty_zobrazit",
     "reporty":    "reporty_zobrazit",
     "penezenka":  "reporty_zobrazit",
@@ -208,7 +208,7 @@ function navigateTo(page) {
     faktury:    () => App.userRole === "admin" || maPravo("faktury_zobrazit") ? renderFaktury() : navigateTo("dashboard"),
     nahrat:     () => App.userRole === "admin" || maPravo("faktury_upravit") ? renderNahrat() : navigateTo("dashboard"),
     rucni:      () => { navigateTo('nahrat'); setTimeout(()=>switchTab('rucni'),100); },
-    polozky:    () => App.userRole === "admin" || maPravo("faktury_zobrazit") ? renderPolozky() : navigateTo("dashboard"),
+    polozky:    () => App.userRole === "admin" || maPravo("zbozi_zobrazit") ? renderPolozky() : navigateTo("dashboard"),
     vyplaty:    () => App.userRole === "admin" || maPravo("vyplaty_zobrazit") ? renderVyplaty() : navigateTo("dashboard"),
     reporty:    () => App.userRole === "admin" || maPravo("reporty_zobrazit") ? renderReporty() : navigateTo("dashboard"),
     penezenka:  () => App.userRole === "admin" || maPravo("reporty_zobrazit") ? renderPenezenka() : navigateTo("dashboard"),
@@ -242,7 +242,7 @@ function goBack() {
     dashboard:  () => App.userRole === "admin" || maPravo("nastenka") ? renderDashboard() : navigateTo("faktury"),
     faktury:    () => App.userRole === "admin" || maPravo("faktury_zobrazit") ? renderFaktury() : navigateTo("dashboard"),
     nahrat:     () => App.userRole === "admin" || maPravo("faktury_upravit") ? renderNahrat() : navigateTo("dashboard"),
-    polozky:    () => App.userRole === "admin" || maPravo("faktury_zobrazit") ? renderPolozky() : navigateTo("dashboard"),
+    polozky:    () => App.userRole === "admin" || maPravo("zbozi_zobrazit") ? renderPolozky() : navigateTo("dashboard"),
     vyplaty:    () => App.userRole === "admin" || maPravo("vyplaty_zobrazit") ? renderVyplaty() : navigateTo("dashboard"),
     reporty:    () => App.userRole === "admin" || maPravo("reporty_zobrazit") ? renderReporty() : navigateTo("dashboard"),
     penezenka:  () => App.userRole === "admin" || maPravo("reporty_zobrazit") ? renderPenezenka() : navigateTo("dashboard"),
