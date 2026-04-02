@@ -5761,8 +5761,11 @@ async function nacistParovani() {
             return `<div id="par_${n.typ}_${n.id}" style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${barva};border-radius:0 6px 6px 0;padding:8px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
               <span style="font-size:18px;color:${barva};font-weight:500;min-width:20px">${sipka}</span>
               <span class="badge">${escHtml(n.firma||'')}</span>
-              <span style="font-size:.85rem;flex:1"><strong>${escHtml(n.popis)}</strong><br>
-                <small style="color:var(--txt2)">Platba: ${czDate(n.shoda.datum)} | ${czMoneyFull(n.shoda.castka)} | ${escHtml(n.shoda.nazev||'')}</small>
+              <span style="font-size:.85rem;flex:1;cursor:pointer" onclick="parovaniProkliken('${n.typ}',${n.id})">
+                <strong>${escHtml(n.popis)}</strong>
+                ${n.var_sym ? `<span style="margin-left:.4rem;background:#e0f2fe;color:#0369a1;border-radius:4px;padding:.1rem .4rem;font-size:.75rem">VS: ${escHtml(n.var_sym)}</span>` : ''}
+                ${n.detail ? `<br><small style="color:var(--txt2)">${escHtml(n.detail)}</small>` : ''}
+                <br><small style="color:var(--txt2)">Platba: ${czDate(n.shoda.datum)} | ${czMoneyFull(n.shoda.castka)} | ${escHtml(n.shoda.nazev||'')}</small>
               </span>
               <span style="background:${n.shoda.istota==='vs'?'#d1fae5':'#fef3c7'};padding:.15rem .4rem;border-radius:4px;font-size:.75rem;color:#444">${n.shoda.istota==='vs'?'VS ✓':'Částka'}</span>
               <input type="date" id="datPl_${n.typ}_${n.id}" value="${datumPlatby}" class="form-control" style="width:130px;padding:2px 6px;height:28px;font-size:.85rem">
@@ -5779,8 +5782,11 @@ async function nacistParovani() {
             return `<div id="par_${n.typ}_${n.id}" style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${poSplat?'#E24B4A':barva};border-radius:0 6px 6px 0;padding:8px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
               <span style="font-size:18px;color:${poSplat?'#E24B4A':barva};font-weight:500;min-width:20px">${sipka}</span>
               <span class="badge">${escHtml(n.firma||'')}</span>
-              <span style="font-size:.85rem;flex:1"><strong>${escHtml(n.popis)}</strong> | ${czMoneyFull(n.castka)}
+              <span style="font-size:.85rem;flex:1;cursor:pointer" onclick="parovaniProkliken('${n.typ}',${n.id})">
+                <strong>${escHtml(n.popis)}</strong> | ${czMoneyFull(n.castka)}
+                ${n.var_sym ? `<span style="margin-left:.4rem;background:#e0f2fe;color:#0369a1;border-radius:4px;padding:.1rem .4rem;font-size:.75rem">VS: ${escHtml(n.var_sym)}</span>` : ''}
                 ${poSplat ? `<span style="margin-left:.4rem;background:#fee2e2;color:#991b1b;border-radius:4px;padding:.1rem .4rem;font-size:.75rem">po splatnosti</span>` : ''}
+                ${n.detail ? `<br><small style="color:var(--txt2)">${escHtml(n.detail)}</small>` : ''}
               </span>
               <button class="btn btn-secondary btn-sm" onclick="parovaniRucne('${n.typ}',${n.id})">🔗 Přiřadit</button>
               <button class="btn btn-sm" style="background:#16a34a;color:#fff" onclick="oznacZaplaceno('${n.typ}',${n.id})">✅ Zaplaceno</button>
@@ -5822,6 +5828,18 @@ async function oznacZaplaceno(typ, dokladId) {
 
 function parovaniRucne(typ, dokladId) {
   toast('Ruční přiřazení bude k dispozici v další verzi.');
+}
+
+function parovaniProkliken(typ, id) {
+  if (typ === 'faktura') {
+    navigateTo('faktury');
+    setTimeout(() => openFakturaDetail(id), 500);
+  } else if (typ === 'vystavena') {
+    navigateTo('vystavene');
+    setTimeout(() => openVystEdit(id), 500);
+  } else if (typ === 'vydaj') {
+    navigateTo('vydaje');
+  }
 }
 
 // ========== konec PÁROVÁNÍ ==========
