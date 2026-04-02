@@ -520,7 +520,7 @@ async function renderDashboard() {
     </div>
     <div id="nastenkaBoxiky" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;margin-bottom:1.5rem"></div>
     <div style="border-top:2px solid var(--border);margin:1.2rem 0 .8rem;opacity:.4"></div>
-    <div id="nastenkaSpodek" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin-bottom:1rem"></div>
+    <div id="nastenkaSpodek" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin-bottom:1rem;align-items:start"></div>
     <div id="nastenkaBackup" style="margin-top:.5rem"></div>`;
 
   _renderNastenkaBoxiky(check);
@@ -655,9 +655,13 @@ function _renderRocniTrzby(data) {
   const roky = Object.keys(data).map(Number).sort();
   if (!roky.length) { el.innerHTML = ''; return; }
 
-  // Přidej aktuální rok pokud není
+  // Zajisti roky 2023-aktuální
   const aktRok = new Date().getFullYear();
-  if (!roky.includes(aktRok)) roky.push(aktRok);
+  const minRok = 2023;
+  for (let r = minRok; r <= aktRok; r++) {
+    if (!roky.includes(r)) roky.push(r);
+  }
+  roky.sort();
 
   // Celkové součty za rok
   const celkem = {};
@@ -671,42 +675,42 @@ function _renderRocniTrzby(data) {
     }
   });
 
-  const rokHlavicky = roky.map(r => `<th style="text-align:right;padding:5px 10px;min-width:130px">${r}</th>`).join('');
+  const rokHlavicky = roky.map(r => `<th style="text-align:right;padding:4px 6px;white-space:nowrap">${r}</th>`).join('');
 
   const radky = [];
   for (let m = 1; m <= 12; m++) {
     const bunky = roky.map(r => {
       const d = data[String(r)]?.[String(m)] || data[String(r)]?.[m];
-      if (!d) return `<td style="text-align:right;padding:4px 10px;color:var(--txt2)">—</td>`;
-      return `<td style="text-align:right;padding:4px 10px">
+      if (!d) return `<td style="text-align:right;padding:3px 6px;color:var(--txt2)">—</td>`;
+      return `<td style="text-align:right;padding:3px 6px;white-space:nowrap">
         ${czInt(d.trzba)} / ${czInt(d.prumer)}
       </td>`;
     }).join('');
-    radky.push(`<tr><td style="padding:4px 10px;font-weight:500">${mesNames[m]}</td>${bunky}</tr>`);
+    radky.push(`<tr><td style="padding:3px 6px;font-weight:500;white-space:nowrap">${mesNames[m]}</td>${bunky}</tr>`);
   }
 
-  const soucetyRow = roky.map(r => `<td style="text-align:right;padding:6px 10px;font-weight:700;font-size:1rem">${czInt(celkem[r])}</td>`).join('');
-  const prumeryRow = roky.map(r => `<td style="text-align:right;padding:4px 10px;color:var(--txt2)">${pocetMesicu[r] ? czInt(Math.round(celkem[r] / pocetMesicu[r])) : '—'}</td>`).join('');
+  const soucetyRow = roky.map(r => `<td style="text-align:right;padding:4px 6px;font-weight:700">${czInt(celkem[r])}</td>`).join('');
+  const prumeryRow = roky.map(r => `<td style="text-align:right;padding:3px 6px;color:var(--txt2)">${pocetMesicu[r] ? czInt(Math.round(celkem[r] / pocetMesicu[r])) : '—'}</td>`).join('');
 
   const div = document.createElement('div');
   div.innerHTML = `
     <div class="card" style="overflow-x:auto">
-      <div style="font-weight:600;font-size:.9rem;margin-bottom:.8rem">📊 Tržby po rocích
-        <span style="font-size:.75rem;font-weight:400;color:var(--txt2);margin-left:.5rem">celkem / průměr/den</span>
+      <div style="font-weight:600;font-size:.9rem;margin-bottom:.6rem">📊 Tržby po rocích
+        <span style="font-size:.72rem;font-weight:400;color:var(--txt2);margin-left:.4rem">celkem / průměr/den</span>
       </div>
-      <table style="font-size:.85rem;width:100%">
+      <table style="font-size:.8rem;width:100%;border-collapse:collapse">
         <thead><tr>
-          <th style="padding:5px 10px;text-align:left">Měsíc</th>
+          <th style="padding:4px 6px;text-align:left;white-space:nowrap">Měsíc</th>
           ${rokHlavicky}
         </tr></thead>
         <tbody>${radky.join('')}</tbody>
         <tfoot>
           <tr style="border-top:2px solid var(--border)">
-            <td style="padding:6px 10px;font-weight:700">Celkem rok</td>
+            <td style="padding:4px 6px;font-weight:700">Celkem rok</td>
             ${soucetyRow}
           </tr>
           <tr>
-            <td style="padding:4px 10px;color:var(--txt2)">Prům./měsíc</td>
+            <td style="padding:3px 6px;color:var(--txt2)">Prům./měsíc</td>
             ${prumeryRow}
           </tr>
         </tfoot>
