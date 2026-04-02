@@ -681,8 +681,7 @@ function _renderRocniTrzby(data) {
       const d = data[String(r)]?.[String(m)] || data[String(r)]?.[m];
       if (!d) return `<td style="text-align:right;padding:4px 10px;color:var(--txt2)">—</td>`;
       return `<td style="text-align:right;padding:4px 10px">
-        <span style="font-weight:600">${czInt(d.trzba)}</span>
-        <span style="font-size:.75rem;color:var(--txt2);margin-left:4px">/ ${czInt(d.prumer)}</span>
+        ${czInt(d.trzba)} / ${czInt(d.prumer)}
       </td>`;
     }).join('');
     radky.push(`<tr><td style="padding:4px 10px;font-weight:500">${mesNames[m]}</td>${bunky}</tr>`);
@@ -692,29 +691,27 @@ function _renderRocniTrzby(data) {
   const prumeryRow = roky.map(r => `<td style="text-align:right;padding:4px 10px;color:var(--txt2)">${pocetMesicu[r] ? czInt(Math.round(celkem[r] / pocetMesicu[r])) : '—'}</td>`).join('');
 
   el.innerHTML = `
-    <div class="card">
+    <div class="card" style="max-width:100%;overflow-x:auto">
       <div style="font-weight:600;font-size:1rem;margin-bottom:.8rem">📊 Tržby po rocích
         <span style="font-size:.75rem;font-weight:400;color:var(--txt2);margin-left:.5rem">celkem / průměr/den</span>
       </div>
-      <div class="table-wrap">
-        <table style="font-size:.85rem">
-          <thead><tr>
-            <th style="padding:5px 10px">Měsíc</th>
-            ${rokHlavicky}
-          </tr></thead>
-          <tbody>${radky.join('')}</tbody>
-          <tfoot>
-            <tr style="border-top:2px solid var(--border)">
-              <td style="padding:6px 10px;font-weight:700">Celkem rok</td>
-              ${soucetyRow}
-            </tr>
-            <tr>
-              <td style="padding:4px 10px;color:var(--txt2)">Prům./měsíc</td>
-              ${prumeryRow}
-            </tr>
-          </tfoot>
-        </table>
-      </div>
+      <table style="font-size:.85rem;width:100%">
+        <thead><tr>
+          <th style="padding:5px 10px;text-align:left">Měsíc</th>
+          ${rokHlavicky}
+        </tr></thead>
+        <tbody>${radky.join('')}</tbody>
+        <tfoot>
+          <tr style="border-top:2px solid var(--border)">
+            <td style="padding:6px 10px;font-weight:700">Celkem rok</td>
+            ${soucetyRow}
+          </tr>
+          <tr>
+            <td style="padding:4px 10px;color:var(--txt2)">Prům./měsíc</td>
+            ${prumeryRow}
+          </tr>
+        </tfoot>
+      </table>
     </div>`;
 }
 
