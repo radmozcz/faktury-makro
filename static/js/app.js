@@ -668,7 +668,7 @@ function _renderRocniTrzby(data) {
     celkem[r] = 0;
     pocetMesicu[r] = 0;
     for (let m = 1; m <= 12; m++) {
-      const d = data[r]?.[m];
+      const d = data[String(r)]?.[String(m)] || data[String(r)]?.[m];
       if (d) { celkem[r] += d.trzba; pocetMesicu[r]++; }
     }
   });
@@ -678,7 +678,7 @@ function _renderRocniTrzby(data) {
   const radky = [];
   for (let m = 1; m <= 12; m++) {
     const bunky = roky.map(r => {
-      const d = data[r]?.[m];
+      const d = data[String(r)]?.[String(m)] || data[String(r)]?.[m];
       if (!d) return `<td style="text-align:right;padding:4px 10px;color:var(--txt2)">—</td>`;
       return `<td style="text-align:right;padding:4px 10px">
         <span style="font-weight:600">${czInt(d.trzba)}</span>
