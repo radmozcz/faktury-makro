@@ -5747,6 +5747,7 @@ async function nacistParovani() {
         <span style="width:200px">Popis</span>
         <span style="width:80px">VS</span>
         <span style="width:85px">Splatnost</span>
+        <span style="width:90px">Stav</span>
         <span style="width:85px;text-align:right">Částka</span>
         <span style="width:140px"></span>
       </div>`;
@@ -5756,15 +5757,17 @@ async function nacistParovani() {
       const poSplat = n.datum_splatnosti && n.datum_splatnosti < dnes;
       const borderBarva = poSplat ? '#E24B4A' : barva;
       const datumPlatby = n.shoda ? (n.shoda.datum || n.datum || '') : '';
-      const splatnostHtml = poSplat
+      const splatDatum = n.datum_splatnosti ? czDate(n.datum_splatnosti) : '—';
+      const stavHtml = poSplat
         ? `<span style="background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 5px;font-size:11px">po ${Math.round((new Date(dnes)-new Date(n.datum_splatnosti))/86400000)} dní</span>`
-        : `<span style="color:var(--color-text-primary)">${n.datum_splatnosti ? czDate(n.datum_splatnosti) : '—'}</span>`;
+        : `<span style="color:var(--color-text-secondary);font-size:12px">v termínu</span>`;
 
       const tlacitka = withDate
-        ? `<input type="date" id="datPl_${n.typ}_${n.id}" value="${datumPlatby}" style="width:100px;font-size:11px;padding:1px 3px;height:24px;flex-shrink:0">
-           <button style="background:#16a34a;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:12px;cursor:pointer" onclick="potvrditParovani(${n.shoda.pohyb_id},'${n.typ}',${n.id})">✅</button>`
-        : `<button style="background:transparent;color:var(--color-text-primary);border:0.5px solid var(--border);border-radius:5px;padding:3px 7px;font-size:12px;cursor:pointer" onclick="parovaniRucne('${n.typ}',${n.id})">🔗</button>
-           <button style="background:#16a34a;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:12px;cursor:pointer" onclick="oznacZaplaceno('${n.typ}',${n.id})">✅</button>`;
+        ? `<input type="date" id="datPl_${n.typ}_${n.id}" value="${datumPlatby}" title="Datum úhrady" style="width:100px;font-size:11px;padding:1px 3px;height:24px;flex-shrink:0">
+           <button style="background:#16a34a;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:12px;cursor:pointer" title="Potvrdit zaplacení" onclick="potvrditParovani(${n.shoda.pohyb_id},'${n.typ}',${n.id})">✅</button>`
+        : `<input type="date" id="datPl_${n.typ}_${n.id}" value="${dnes}" title="Datum úhrady" style="width:100px;font-size:11px;padding:1px 3px;height:24px;flex-shrink:0">
+           <button style="background:transparent;color:var(--color-text-primary);border:0.5px solid var(--border);border-radius:5px;padding:3px 7px;font-size:12px;cursor:pointer" title="Přiřadit ručně" onclick="parovaniRucne('${n.typ}',${n.id})">🔗</button>
+           <button style="background:#16a34a;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:12px;cursor:pointer" title="Potvrdit zaplacení" onclick="oznacZaplacenoDatum('${n.typ}',${n.id})">✅</button>`;
 
       return `<div id="par_${n.typ}_${n.id}" onclick="parovaniProkliken('${n.typ}',${n.id})" style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${borderBarva};border-radius:0 6px 6px 0;padding:7px 12px;display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin-bottom:3px">
         <span style="font-size:16px;color:${borderBarva};width:20px;flex-shrink:0">${sipka}</span>
@@ -5772,7 +5775,8 @@ async function nacistParovani() {
         <span title="${escHtml(n.popis)}" style="font-weight:500;width:150px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(n.popis.split('|')[1]?.trim() || n.popis)}</span>
         <span title="${escHtml(n.detail||'')}" style="width:200px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(n.detail || n.popis.split('|')[0]?.trim() || '')}</span>
         <span style="width:80px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(n.var_sym||'—')}</span>
-        <span style="width:85px;flex-shrink:0">${splatnostHtml}</span>
+        <span style="width:85px;flex-shrink:0;font-size:12px">${splatDatum}</span>
+        <span style="width:90px;flex-shrink:0">${stavHtml}</span>
         <span style="font-weight:500;width:85px;flex-shrink:0;text-align:right">${czMoneyFull(n.castka)}</span>
         <div style="width:140px;flex-shrink:0;display:flex;gap:4px;justify-content:flex-end" onclick="event.stopPropagation()">${tlacitka}</div>
       </div>`;
@@ -5818,6 +5822,20 @@ async function potvrditParovani(pohybId, typ, dokladId) {
 
 async function oznacZaplaceno(typ, dokladId) {
   const datum = new Date().toISOString().slice(0,10);
+  try {
+    await api('/api/parovani/potvrdit', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ pohyb_id: null, typ, doklad_id: dokladId, datum_zaplaceno: datum })
+    });
+    const row = document.getElementById(`par_${typ}_${dokladId}`);
+    if (row) { row.style.background = '#d1fae5'; row.innerHTML = `<div style="padding:4px 8px;color:#16a34a;font-weight:600">✅ Zaplaceno (${datum})</div>`; }
+    toast('✅ Zaplaceno!');
+  } catch(e) { toast('❌ Chyba: ' + e.message, true); }
+}
+
+async function oznacZaplacenoDatum(typ, dokladId) {
+  const datumEl = document.getElementById(`datPl_${typ}_${dokladId}`);
+  const datum = datumEl?.value || new Date().toISOString().slice(0,10);
   try {
     await api('/api/parovani/potvrdit', {
       method: 'POST', headers: {'Content-Type':'application/json'},
