@@ -521,6 +521,7 @@ async function renderDashboard() {
     <div id="nastenkaBoxiky" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem;margin-bottom:1.5rem"></div>
     <div style="border-top:2px solid var(--border);margin:1.2rem 0 .8rem;opacity:.4"></div>
     <div id="nastenkaSpodek" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:1rem;margin-bottom:1rem;align-items:start"></div>
+    <div id="nastenkaTrzby" style="margin-top:1rem"></div>
     <div id="nastenkaBackup" style="margin-top:.5rem"></div>`;
 
   _renderNastenkaBoxiky(check);
@@ -648,7 +649,7 @@ function _renderBackupWarning(info) {
 }
 
 function _renderRocniTrzby(data) {
-  const el = document.getElementById("nastenkaSpodek");
+  const el = document.getElementById("nastenkaTrzby");
   if (!el) return;
 
   const mesNames = ["","Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
@@ -716,7 +717,7 @@ function _renderRocniTrzby(data) {
         </tfoot>
       </table>
     </div>`;
-  el.appendChild(div.firstElementChild);
+  el.innerHTML = div.innerHTML;
 }
 
 function _stavBoxiku(stav) {
