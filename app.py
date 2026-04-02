@@ -1994,7 +1994,7 @@ def api_nastenka_backup_check():
         client = gcs.Client()
         bucket = client.bucket(bucket_name)
         blobs = sorted(
-            [b for b in bucket.list_blobs(prefix="backups/")],
+            [b for b in bucket.list_blobs(prefix="zalohy/")],
             key=lambda b: b.updated, reverse=True
         )
         if not blobs:
@@ -6177,6 +6177,70 @@ Známá IČO firem: {json.dumps(ico_map)}"""
         print(f"⚠ OCR error: {e}")
         return {}
 
+
+@app.route("/api/auto-zaloha", methods=["POST", "GET"])
+def api_auto_zaloha():
+    """Endpoint pro Cloud Scheduler — automatická noční záloha."""
+    import datetime as _dt_mod, psycopg2 as _pg
+    # Ověření že volání přichází z Cloud Scheduler nebo má správný token
+    token = request.headers.get("X-Zaloha-Token", "") or request.args.get("token", "")
+    ocekavany = os.environ.get("ZALOHA_TOKEN", "auto-zaloha-2026")
+    if token != ocekavany:
+        return jsonify({"error": "Neautorizováno"}), 403
+
+    ts = _dt_mod.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"zaloha_{ts}.sql"
+    try:
+        db_url = os.environ.get("DATABASE_URL", "")
+        conn = _pg.connect(db_url)
+        cur = conn.cursor()
+        cur.execute("SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename")
+        tables = [r[0] for r in cur.fetchall()]
+        lines = ["-- SQL záloha vygenerovaná automaticky", f"-- Datum: {ts}", ""]
+        for tbl in tables:
+            try:
+                cur.execute(f"SELECT * FROM {tbl}")
+                rows = cur.fetchall()
+                cols = [d[0] for d in cur.description]
+                if not rows: continue
+                lines.append(f"-- Tabulka: {tbl}")
+                for row in rows:
+                    vals = []
+                    for v in row:
+                        if v is None: vals.append("NULL")
+                        elif isinstance(v, bool): vals.append("TRUE" if v else "FALSE")
+                        elif isinstance(v, (int, float)): vals.append(str(v))
+                        else: vals.append("'" + str(v).replace("'", "''") + "'")
+                    lines.append(f"INSERT INTO {tbl} ({', '.join(cols)}) VALUES ({', '.join(vals)}) ON CONFLICT DO NOTHING;")
+                lines.append("")
+            except Exception as e:
+                lines.append(f"-- Chyba: {tbl}: {e}")
+        conn.close()
+        sql_data = "\n".join(lines).encode("utf-8")
+    except Exception as e:
+        return jsonify({"error": f"DB chyba: {str(e)}"}), 500
+
+    # Uložit do GCS a smazat staré (ponechat posledních 5)
+    try:
+        bucket = get_gcs_client()
+        if not bucket:
+            return jsonify({"error": "GCS není dostupný"}), 500
+        blob = bucket.blob(f"zalohy/{filename}")
+        blob.upload_from_string(sql_data, content_type="application/sql")
+
+        # Smaž zálohy starší než posledních 5
+        vsechny = sorted(
+            [b for b in bucket.list_blobs(prefix="zalohy/") if b.name.endswith(".sql")],
+            key=lambda b: b.updated, reverse=True
+        )
+        smazano = 0
+        for stara in vsechny[5:]:
+            stara.delete()
+            smazano += 1
+
+        return jsonify({"ok": True, "soubor": filename, "smazano_starych": smazano})
+    except Exception as e:
+        return jsonify({"error": f"GCS chyba: {str(e)}"}), 500
 
 @app.route("/api/zaloha-db")
 @vyzaduj_prihlaseni
