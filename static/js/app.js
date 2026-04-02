@@ -5726,17 +5726,21 @@ async function nacistParovani() {
   el.innerHTML = `<div class="card"><span class="spinner"></span> Načítám párování dokladů…</div>`;
   try {
     const data = await api('/api/parovani/navrh');
-    const navrhy = data.navrhy || [];
     if (data.error) { el.innerHTML = `<div class="card" style="color:var(--danger)">❌ Chyba: ${data.error}</div>`; return; }
-    if (!navrhy.length) { el.innerHTML = '<div class="card" style="color:var(--txt2)">✅ Všechny doklady jsou zaplaceny</div>'; return; }
+    const navrhy = data.navrhy || [];
+    const autoZapl = data.auto_zaplaceno || 0;
 
-    const sparovane = navrhy.filter(n => n.shoda);
-    const nesparovane = navrhy.filter(n => !n.shoda);
+    if (!navrhy.length) {
+      el.innerHTML = `<div class="card" style="color:var(--txt2)">✅ Všechny doklady jsou zaplaceny${autoZapl ? ` (automaticky spárováno: ${autoZapl})` : ''}</div>`;
+      return;
+    }
+
     const dnes = new Date().toISOString().slice(0,10);
 
     function radekBarva(n) {
-      const prijmy = n.smer === 'prichozi';
-      return { sipka: prijmy ? '→' : '←', barva: prijmy ? '#639922' : '#378ADD' };
+      return n.smer === 'prichozi'
+        ? { sipka: '→', barva: '#639922' }
+        : { sipka: '←', barva: '#378ADD' };
     }
 
     const hlavicka = `
@@ -5749,25 +5753,17 @@ async function nacistParovani() {
         <span style="width:85px">Splatnost</span>
         <span style="width:90px">Stav</span>
         <span style="width:85px;text-align:right">Částka</span>
-        <span style="width:140px"></span>
+        <span style="width:210px"></span>
       </div>`;
 
-    function radekHtml(n, withDate) {
+    function radekHtml(n) {
       const {sipka, barva} = radekBarva(n);
       const poSplat = n.datum_splatnosti && n.datum_splatnosti < dnes;
       const borderBarva = poSplat ? '#E24B4A' : barva;
-      const datumPlatby = n.shoda ? (n.shoda.datum || n.datum || '') : '';
       const splatDatum = n.datum_splatnosti ? czDate(n.datum_splatnosti) : '—';
       const stavHtml = poSplat
         ? `<span style="background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 5px;font-size:11px">po ${Math.round((new Date(dnes)-new Date(n.datum_splatnosti))/86400000)} dní</span>`
         : `<span style="color:var(--color-text-secondary);font-size:12px">v termínu</span>`;
-
-      const tlacitka = withDate
-        ? `<input type="date" id="datPl_${n.typ}_${n.id}" value="${datumPlatby}" title="Datum úhrady" style="width:100px;font-size:11px;padding:1px 3px;height:24px;flex-shrink:0">
-           <button style="background:#16a34a;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:12px;cursor:pointer" title="Potvrdit zaplacení" onclick="potvrditParovani(${n.shoda.pohyb_id},'${n.typ}',${n.id})">✅</button>`
-        : `<input type="date" id="datPl_${n.typ}_${n.id}" value="${dnes}" title="Datum úhrady" style="width:100px;font-size:11px;padding:1px 3px;height:24px;flex-shrink:0">
-           <button style="background:transparent;color:var(--color-text-primary);border:0.5px solid var(--border);border-radius:5px;padding:3px 7px;font-size:12px;cursor:pointer" title="Přiřadit ručně" onclick="parovaniRucne('${n.typ}',${n.id})">🔗</button>
-           <button style="background:#16a34a;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:12px;cursor:pointer" title="Potvrdit zaplacení" onclick="oznacZaplacenoDatum('${n.typ}',${n.id})">✅</button>`;
 
       return `<div id="par_${n.typ}_${n.id}" onclick="parovaniProkliken('${n.typ}',${n.id})" style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${borderBarva};border-radius:0 6px 6px 0;padding:7px 12px;display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin-bottom:3px">
         <span style="font-size:16px;color:${borderBarva};width:20px;flex-shrink:0">${sipka}</span>
@@ -5778,7 +5774,11 @@ async function nacistParovani() {
         <span style="width:85px;flex-shrink:0;font-size:12px">${splatDatum}</span>
         <span style="width:90px;flex-shrink:0">${stavHtml}</span>
         <span style="font-weight:500;width:85px;flex-shrink:0;text-align:right">${czMoneyFull(n.castka)}</span>
-        <div style="width:140px;flex-shrink:0;display:flex;gap:4px;justify-content:flex-end" onclick="event.stopPropagation()">${tlacitka}</div>
+        <div style="width:210px;flex-shrink:0;display:flex;gap:4px;justify-content:flex-end;align-items:center" onclick="event.stopPropagation()">
+          <input type="date" id="datPl_${n.typ}_${n.id}" value="${dnes}" title="Datum úhrady" style="width:110px;font-size:11px;padding:1px 3px;height:24px;flex-shrink:0">
+          <button style="background:transparent;color:var(--color-text-primary);border:0.5px solid var(--border);border-radius:5px;padding:3px 7px;font-size:12px;cursor:pointer" title="Přiřadit ručně" onclick="parovaniRucne('${n.typ}',${n.id})">🔗</button>
+          <button style="background:#16a34a;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:12px;cursor:pointer" title="Potvrdit zaplacení" onclick="oznacZaplacenoDatum('${n.typ}',${n.id})">✅</button>
+        </div>
       </div>`;
     }
 
@@ -5789,17 +5789,11 @@ async function nacistParovani() {
             <span style="color:#639922">→</span> čekáme příjem &nbsp;
             <span style="color:#378ADD">←</span> čekáme odchod
           </span>
+          ${autoZapl ? `<span style="margin-left:1rem;background:#d1fae5;color:#065f46;border-radius:4px;padding:2px 8px;font-size:.75rem">✅ Auto-spárováno: ${autoZapl}</span>` : ''}
         </div>
-        ${sparovane.length ? `
-          <div style="font-size:12px;color:#16a34a;font-weight:600;margin-bottom:4px">Nalezena platba v výpisu (${sparovane.length})</div>
-          ${hlavicka}
-          ${sparovane.map(n => radekHtml(n, true)).join('')}
-        ` : ''}
-        ${nesparovane.length ? `
-          <div style="font-size:12px;color:#d97706;font-weight:600;margin:${sparovane.length?'12px':0} 0 4px">Platba nenalezena (${nesparovane.length})</div>
-          ${hlavicka}
-          ${nesparovane.map(n => radekHtml(n, false)).join('')}
-        ` : ''}
+        <div style="font-size:12px;color:#d97706;font-weight:600;margin-bottom:4px">Platba nenalezena (${navrhy.length})</div>
+        ${hlavicka}
+        ${navrhy.map(n => radekHtml(n)).join('')}
       </div>`;
   } catch(e) {
     el.innerHTML = `<div class="card" style="color:var(--danger)">❌ Chyba: ${e.message}</div>`;
