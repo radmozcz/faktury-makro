@@ -4848,11 +4848,15 @@ def api_ai_dotaz():
             nactist.add("penezenka")
         if _je_relevantni(["vystaven","odberatel","bauhaus","fakturace"], dotaz_lower):
             nactist.add("vystavene")
-        if _je_relevantni(["bank","výpis","pohyb","platb","převod","prevod","transakc","raiffa","airbank"], dotaz_lower):
+        if _je_relevantni(["bank","výpis","pohyb","platb","převod","prevod","transakc","raiffa","airbank","utrat","výdaj","vydaj","prosin","říjen","rijen","zari","srpen","cerven","kveten","duben","brezen","unor","leden"], dotaz_lower):
             nactist.add("banky")
         # Pokud nic nedetekováno — načti základní sekce
         if not nactist:
             nactist = {"reporty", "faktury"}
+        # Při výběru Vše vždy přidej banky
+        if rok_raw in ("", "vše", "vse", "Vše", "all"):
+            nactist.add("banky")
+            nactist.add("reporty")
 
     try:
         import psycopg2 as _pg2
@@ -4987,7 +4991,7 @@ Nikdy nevymýšlej data která nemáš."""]
                         SELECT datum, banka, firma_zkratka, castka, nazev_protiucet, zprava, var_sym
                         FROM bankovni_pohyby
                         WHERE datum >= %s AND datum <= %s {fw2}
-                        ORDER BY datum DESC LIMIT 500
+                        ORDER BY datum DESC LIMIT 3000
                     """, [rok_od, rok_do] + ([firma] if firma else []))
                     cols2 = [d[0] for d in pg_cur2.description]
                     banky_rows = [dict(zip(cols2, r)) for r in pg_cur2.fetchall()]
