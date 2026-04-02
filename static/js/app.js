@@ -5704,109 +5704,104 @@ async function nacistPoSplatnosti() {
 async function nacistParovani() {
   const el = document.getElementById('parovaniBox');
   if (!el) return;
-  el.innerHTML = `<div class="card"><span class="spinner"></span> Načítám návrhy párování…</div>`;
+  el.innerHTML = `<div class="card"><span class="spinner"></span> Načítám párování dokladů…</div>`;
   try {
     const data = await api('/api/parovani/navrh');
     const navrhy = data.navrhy || [];
-    if (!navrhy.length) {
-      el.innerHTML = '<div class="card" style="color:var(--txt2)">✅ Žádné nespárované pohyby</div>';
+    if (data.error) {
+      el.innerHTML = `<div class="card" style="color:var(--danger)">❌ Chyba: ${data.error}</div>`;
       return;
     }
-
-    function radekStyl(n) {
-      const poSplatnosti = false;
-      const prijmy = n.castka > 0;
-      const sipka = prijmy ? '→' : '←';
-      const barva = prijmy ? '#639922' : '#378ADD';
-      return { sipka, barva };
+    if (!navrhy.length) {
+      el.innerHTML = '<div class="card" style="color:var(--txt2)">✅ Všechny doklady jsou zaplaceny</div>';
+      return;
     }
-
     const sparovane = navrhy.filter(n => n.shoda);
     const nesparovane = navrhy.filter(n => !n.shoda);
+    const dnes = new Date().toISOString().slice(0,10);
+
+    function radekDoklad(n) {
+      const prijmy = n.smer === 'prichozi';
+      return { sipka: prijmy ? '→' : '←', barva: prijmy ? '#639922' : '#378ADD' };
+    }
 
     el.innerHTML = `
       <div class="card">
-        <div style="font-weight:600;font-size:1.05rem;margin-bottom:1rem">🔗 Párování výpisů
+        <div style="font-weight:600;font-size:1.05rem;margin-bottom:1rem">🔗 Kontrola plateb dokladů
           <span style="font-size:.8rem;font-weight:400;color:var(--txt2);margin-left:.5rem">
-            <span style="color:#639922">→</span> příjmy &nbsp;
-            <span style="color:#378ADD">←</span> výdaje &nbsp;
-            <span style="color:#E24B4A">←→</span> po splatnosti
+            <span style="color:#639922">→</span> čekáme příjem &nbsp;
+            <span style="color:#378ADD">←</span> čekáme odchod
           </span>
         </div>
         ${sparovane.length ? `
-        <div style="font-weight:600;font-size:.9rem;margin-bottom:.5rem;color:#16a34a">Navržené shody (${sparovane.length})</div>
+        <div style="font-weight:600;font-size:.9rem;margin-bottom:.5rem;color:#16a34a">Nalezena platba v výpisu (${sparovane.length})</div>
         <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:1.5rem">
           ${sparovane.map(n => {
-            const {sipka, barva} = radekStyl(n);
-            return `<div id="par_${n.pohyb_id}" style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${barva};border-radius:0 6px 6px 0;padding:8px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            const {sipka, barva} = radekDoklad(n);
+            const datumPlatby = n.shoda.datum || n.datum || '';
+            return `<div id="par_${n.typ}_${n.id}" style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${barva};border-radius:0 6px 6px 0;padding:8px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
               <span style="font-size:18px;color:${barva};font-weight:500;min-width:20px">${sipka}</span>
-              <span class="badge">${escHtml(n.firma_zkratka||'')}</span>
-              <span style="font-size:.85rem;color:var(--txt2);min-width:70px">${czDate(n.datum)}</span>
-              <span style="font-weight:600;min-width:80px">${czMoneyFull(n.castka)}</span>
-              <span style="font-size:.85rem;flex:1">${escHtml(n.nazev_protiucet||'')} → <strong>${escHtml(n.shoda.popis)}</strong></span>
+              <span class="badge">${escHtml(n.firma||'')}</span>
+              <span style="font-size:.85rem;flex:1"><strong>${escHtml(n.popis)}</strong><br>
+                <small style="color:var(--txt2)">Platba: ${czDate(n.shoda.datum)} | ${czMoneyFull(n.shoda.castka)} | ${escHtml(n.shoda.nazev||'')}</small>
+              </span>
               <span style="background:${n.shoda.istota==='vs'?'#d1fae5':'#fef3c7'};padding:.15rem .4rem;border-radius:4px;font-size:.75rem;color:#444">${n.shoda.istota==='vs'?'VS ✓':'Částka'}</span>
-              <input type="date" id="datPl_${n.pohyb_id}" value="${n.datum}" class="form-control" style="width:130px;padding:2px 6px;height:28px;font-size:.85rem">
-              <button class="btn btn-primary btn-sm" onclick="potvrditParovani(${n.pohyb_id},'${n.shoda.typ}',${n.shoda.id})">✅ Potvrdit</button>
+              <input type="date" id="datPl_${n.typ}_${n.id}" value="${datumPlatby}" class="form-control" style="width:130px;padding:2px 6px;height:28px;font-size:.85rem">
+              <button class="btn btn-primary btn-sm" onclick="potvrditParovani(${n.shoda.pohyb_id},'${n.typ}',${n.id})">✅ Zaplaceno</button>
             </div>`;
           }).join('')}
         </div>` : ''}
         ${nesparovane.length ? `
-        <div style="font-weight:600;font-size:.9rem;margin-bottom:.5rem;color:#d97706">Nespárované pohyby (${nesparovane.length})</div>
+        <div style="font-weight:600;font-size:.9rem;margin-bottom:.5rem;color:#d97706">Platba nenalezena (${nesparovane.length})</div>
         <div style="display:flex;flex-direction:column;gap:4px">
           ${nesparovane.map(n => {
-            const {sipka, barva} = radekStyl(n);
-            return `<div id="par_${n.pohyb_id}" style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${barva};border-radius:0 6px 6px 0;padding:8px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              <span style="font-size:18px;color:${barva};font-weight:500;min-width:20px">${sipka}</span>
-              <span class="badge">${escHtml(n.firma_zkratka||'')}</span>
-              <span style="font-size:.85rem;color:var(--txt2);min-width:70px">${czDate(n.datum)}</span>
-              <span style="font-weight:600;min-width:80px">${czMoneyFull(n.castka)}</span>
-              <span style="font-size:.85rem;flex:1">${escHtml(n.nazev_protiucet||'')}${n.var_sym ? ' | VS: '+n.var_sym : ''}</span>
-              <button class="btn btn-secondary btn-sm" onclick="parovaniRucne(${n.pohyb_id},'${n.datum}',${Math.abs(n.castka)})">🔗 Přiřadit</button>
-              <button class="btn btn-sm" style="background:#f59e0b;color:#fff" onclick="parovatBezDokladu(${n.pohyb_id})">📝 Bez dokladu</button>
+            const {sipka, barva} = radekDoklad(n);
+            const poSplat = n.datum_splatnosti && n.datum_splatnosti < dnes;
+            return `<div id="par_${n.typ}_${n.id}" style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${poSplat?'#E24B4A':barva};border-radius:0 6px 6px 0;padding:8px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="font-size:18px;color:${poSplat?'#E24B4A':barva};font-weight:500;min-width:20px">${sipka}</span>
+              <span class="badge">${escHtml(n.firma||'')}</span>
+              <span style="font-size:.85rem;flex:1"><strong>${escHtml(n.popis)}</strong> | ${czMoneyFull(n.castka)}
+                ${poSplat ? `<span style="margin-left:.4rem;background:#fee2e2;color:#991b1b;border-radius:4px;padding:.1rem .4rem;font-size:.75rem">po splatnosti</span>` : ''}
+              </span>
+              <button class="btn btn-secondary btn-sm" onclick="parovaniRucne('${n.typ}',${n.id})">🔗 Přiřadit</button>
+              <button class="btn btn-sm" style="background:#16a34a;color:#fff" onclick="oznacZaplaceno('${n.typ}',${n.id})">✅ Zaplaceno</button>
             </div>`;
           }).join('')}
         </div>` : ''}
       </div>`;
   } catch(e) {
-    el.innerHTML = `<div class="card" style="color:var(--danger)">❌ Chyba při načítání párování: ${e.message}</div>`;
+    el.innerHTML = `<div class="card" style="color:var(--danger)">❌ Chyba: ${e.message}</div>`;
   }
 }
 
 async function potvrditParovani(pohybId, typ, dokladId) {
-  const datumEl = document.getElementById(`datPl_${pohybId}`);
-  const datum = datumEl?.value || '';
+  const datumEl = document.getElementById(`datPl_${typ}_${dokladId}`);
+  const datum = datumEl?.value || new Date().toISOString().slice(0,10);
   try {
     await api('/api/parovani/potvrdit', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
+      method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ pohyb_id: pohybId, typ, doklad_id: dokladId, datum_zaplaceno: datum })
     });
-    const row = document.getElementById(`par_${pohybId}`);
-    if (row) {
-      row.style.background = '#d1fae5';
-      row.innerHTML = `<td colspan="7" style="color:#16a34a;font-weight:600">✅ Spárováno a označeno jako zaplaceno</td>`;
-    }
-    toast('✅ Spárováno!');
+    const row = document.getElementById(`par_${typ}_${dokladId}`);
+    if (row) { row.style.background = '#d1fae5'; row.innerHTML = `<div style="padding:4px 8px;color:#16a34a;font-weight:600">✅ Zaplaceno (${datum})</div>`; }
+    toast('✅ Zaplaceno!');
   } catch(e) { toast('❌ Chyba: ' + e.message, true); }
 }
 
-async function parovatBezDokladu(pohybId) {
+async function oznacZaplaceno(typ, dokladId) {
+  const datum = new Date().toISOString().slice(0,10);
   try {
     await api('/api/parovani/potvrdit', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({ pohyb_id: pohybId, typ: 'bez_dokladu', doklad_id: null, datum_zaplaceno: '' })
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ pohyb_id: null, typ, doklad_id: dokladId, datum_zaplaceno: datum })
     });
-    const row = document.getElementById(`par_${pohybId}`);
-    if (row) {
-      row.style.background = '#fef3c7';
-      row.innerHTML = `<td colspan="5" style="color:#92400e;font-weight:600">📝 Označeno jako bez dokladu</td>`;
-    }
+    const row = document.getElementById(`par_${typ}_${dokladId}`);
+    if (row) { row.style.background = '#d1fae5'; row.innerHTML = `<div style="padding:4px 8px;color:#16a34a;font-weight:600">✅ Zaplaceno (${datum})</div>`; }
+    toast('✅ Zaplaceno!');
   } catch(e) { toast('❌ Chyba: ' + e.message, true); }
 }
 
-function parovaniRucne(pohybId, datum, castka) {
-  // TODO — ruční přiřazení (rozbalovací seznam faktur) — bude dodělán
+function parovaniRucne(typ, dokladId) {
   toast('Ruční přiřazení bude k dispozici v další verzi.');
 }
 
