@@ -5761,7 +5761,7 @@ async function nacistParovani() {
         : `<span style="color:var(--color-text-primary)">${n.datum_splatnosti ? czDate(n.datum_splatnosti) : '—'}</span>`;
 
       const tlacitka = withDate
-        ? `<input type="date" id="datPl_${n.typ}_${n.id}" value="${datumPlatby}" style="width:110px;font-size:12px;padding:1px 4px;height:26px;flex-shrink:0">
+        ? `<input type="date" id="datPl_${n.typ}_${n.id}" value="${datumPlatby}" style="width:100px;font-size:11px;padding:1px 3px;height:24px;flex-shrink:0">
            <button style="background:#16a34a;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:12px;cursor:pointer" onclick="potvrditParovani(${n.shoda.pohyb_id},'${n.typ}',${n.id})">✅</button>`
         : `<button style="background:transparent;color:var(--color-text-primary);border:0.5px solid var(--border);border-radius:5px;padding:3px 7px;font-size:12px;cursor:pointer" onclick="parovaniRucne('${n.typ}',${n.id})">🔗</button>
            <button style="background:#16a34a;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:12px;cursor:pointer" onclick="oznacZaplaceno('${n.typ}',${n.id})">✅</button>`;
@@ -5769,8 +5769,8 @@ async function nacistParovani() {
       return `<div id="par_${n.typ}_${n.id}" onclick="parovaniProkliken('${n.typ}',${n.id})" style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${borderBarva};border-radius:0 6px 6px 0;padding:7px 12px;display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin-bottom:3px">
         <span style="font-size:16px;color:${borderBarva};width:20px;flex-shrink:0">${sipka}</span>
         <span style="background:#eaf3de;color:#27500a;border-radius:4px;padding:1px 5px;font-size:12px;font-weight:500;width:32px;text-align:center;flex-shrink:0">${escHtml(n.firma||'')}</span>
-        <span style="font-weight:500;width:120px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(n.popis.split('|')[1]?.trim() || n.popis)}</span>
-        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(n.detail || n.popis.split('|')[0]?.trim() || '')}</span>
+        <span title="${escHtml(n.popis)}" style="font-weight:500;width:150px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(n.popis.split('|')[1]?.trim() || n.popis)}</span>
+        <span title="${escHtml(n.detail||'')}" style="width:200px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(n.detail || n.popis.split('|')[0]?.trim() || '')}</span>
         <span style="width:80px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(n.var_sym||'—')}</span>
         <span style="width:85px;flex-shrink:0">${splatnostHtml}</span>
         <span style="font-weight:500;width:85px;flex-shrink:0;text-align:right">${czMoneyFull(n.castka)}</span>
