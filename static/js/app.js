@@ -4560,6 +4560,7 @@ function initAiChat() {
             ["vystavene","📤 Vystavené FA"],
             ["vyplaty","💰 Výplaty"],
             ["penezenka","💵 Peněženka"],
+            ["banky","🏦 Banky"],
           ].map(([k,l]) => `<span id="aiSekce_${k}" onclick="aiToggleSekce('${k}')" style="cursor:pointer;display:inline-block;background:var(--bg2);color:var(--txt2);border-radius:20px;padding:.15rem .6rem;font-size:.75rem;font-weight:500;user-select:none">${l}</span>`).join("")}
           <span onclick="aiResetSekce()" style="cursor:pointer;color:var(--txt2);font-size:.75rem;text-decoration:underline;padding:.15rem .3rem">× auto</span>
         </div>
@@ -4597,7 +4598,7 @@ function aiToggleSekce(sekce) {
 function aiResetSekce() {
   const chatEl = document.getElementById("statAiChat");
   if (chatEl) chatEl._sekce = [];
-  ["reporty","faktury","zbozi","vydaje","dokumenty","vystavene","vyplaty","penezenka"].forEach(k => {
+  ["reporty","faktury","zbozi","vydaje","dokumenty","vystavene","vyplaty","penezenka","banky"].forEach(k => {
     const btn = document.getElementById(`aiSekce_${k}`);
     if (btn) { btn.style.background = "var(--bg2)"; btn.style.color = "var(--txt2)"; }
   });
