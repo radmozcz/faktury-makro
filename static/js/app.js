@@ -4619,7 +4619,7 @@ async function odeslitAiDotaz() {
   const hist  = document.getElementById("aiHistorie");
   const dotaz = input?.value?.trim();
   if (!dotaz) return;
-  const rok   = document.getElementById("sRok")?.value || new Date().getFullYear();
+  const rok   = document.getElementById("sRok")?.value ?? new Date().getFullYear();
   const firma = document.getElementById("sFirma")?.value || "";
 
   // Historie konverzace
@@ -4671,7 +4671,7 @@ async function odeslitAiDotaz() {
 }
 
 async function loadPrehledStatistik() {
-  const rok   = document.getElementById("sRok")?.value || new Date().getFullYear();
+  const rok   = document.getElementById("sRok")?.value ?? new Date().getFullYear();
   const firma = document.getElementById("sFirma")?.value || "";
   const el = document.getElementById("statPrehled");
   if (!el) return;
