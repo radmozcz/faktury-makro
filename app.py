@@ -3824,17 +3824,19 @@ def api_parovani_navrh():
 
         # 2. Výdaje — odchozí platba
         pg_cur.execute("""
-            SELECT id, firma_zkratka, dodavatel, castka, datum, datum_splatnosti
+            SELECT id, firma_zkratka, dodavatel, castka, datum, datum_splatnosti,
+                   COALESCE(var_sym,'') as var_sym, COALESCE(popis,'') as popis
             FROM vydaje
             WHERE stav = 'nezaplaceno'
             ORDER BY datum_splatnosti, datum
         """)
         for r in pg_cur.fetchall():
-            vid, firma, dodavatel, castka, datum, dat_spl = r
-            shoda = _hledej_platbu_pg(pg_cur, castka, datum, dat_spl, None, smer='odchozi')
+            vid, firma, dodavatel, castka, datum, dat_spl, var_sym, popis = r
+            shoda = _hledej_platbu_pg(pg_cur, castka, datum, dat_spl, var_sym or None, smer='odchozi')
             navrhy.append({
                 "typ": "vydaj", "id": vid, "firma": firma,
                 "popis": f"Výdaj | {dodavatel}",
+                "detail": popis, "var_sym": var_sym,
                 "castka": castka, "datum": datum, "datum_splatnosti": dat_spl,
                 "smer": "odchozi", "shoda": shoda
             })
@@ -3842,17 +3844,19 @@ def api_parovani_navrh():
         # 3. Vystavené faktury — příchozí platba
         pg_cur.execute("""
             SELECT id, firma_zkratka, odberatel, cislo_faktury, castka,
-                   datum, datum_splatnosti
+                   datum, datum_splatnosti,
+                   COALESCE(var_sym,'') as var_sym, COALESCE(popis,'') as popis
             FROM vystavene_faktury
             WHERE stav = 'nezaplaceno'
             ORDER BY datum_splatnosti, datum
         """)
         for r in pg_cur.fetchall():
-            fid, firma, odberatel, cislo, castka, datum, dat_spl = r
-            shoda = _hledej_platbu_pg(pg_cur, castka, datum, dat_spl, cislo, smer='prichozi')
+            fid, firma, odberatel, cislo, castka, datum, dat_spl, var_sym, popis = r
+            shoda = _hledej_platbu_pg(pg_cur, castka, datum, dat_spl, cislo or var_sym or None, smer='prichozi')
             navrhy.append({
                 "typ": "vystavena", "id": fid, "firma": firma,
                 "popis": f"Vystavená FA č.{cislo or '?'} | {odberatel}",
+                "detail": popis, "var_sym": cislo or var_sym,
                 "castka": castka, "datum": datum, "datum_splatnosti": dat_spl,
                 "smer": "prichozi", "shoda": shoda
             })
