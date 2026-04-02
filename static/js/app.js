@@ -5727,72 +5727,75 @@ async function nacistParovani() {
   try {
     const data = await api('/api/parovani/navrh');
     const navrhy = data.navrhy || [];
-    if (data.error) {
-      el.innerHTML = `<div class="card" style="color:var(--danger)">❌ Chyba: ${data.error}</div>`;
-      return;
-    }
-    if (!navrhy.length) {
-      el.innerHTML = '<div class="card" style="color:var(--txt2)">✅ Všechny doklady jsou zaplaceny</div>';
-      return;
-    }
+    if (data.error) { el.innerHTML = `<div class="card" style="color:var(--danger)">❌ Chyba: ${data.error}</div>`; return; }
+    if (!navrhy.length) { el.innerHTML = '<div class="card" style="color:var(--txt2)">✅ Všechny doklady jsou zaplaceny</div>'; return; }
+
     const sparovane = navrhy.filter(n => n.shoda);
     const nesparovane = navrhy.filter(n => !n.shoda);
     const dnes = new Date().toISOString().slice(0,10);
 
-    function radekDoklad(n) {
+    function radekBarva(n) {
       const prijmy = n.smer === 'prichozi';
       return { sipka: prijmy ? '→' : '←', barva: prijmy ? '#639922' : '#378ADD' };
     }
 
+    const hlavicka = `
+      <div style="font-size:11px;color:var(--txt2);font-weight:500;display:flex;gap:8px;padding:0 12px 4px;border-bottom:0.5px solid var(--border);margin-bottom:4px">
+        <span style="width:20px"></span>
+        <span style="width:32px"></span>
+        <span style="width:120px">Název</span>
+        <span style="flex:1">Popis</span>
+        <span style="width:80px">VS</span>
+        <span style="width:85px">Splatnost</span>
+        <span style="width:85px;text-align:right">Částka</span>
+        <span style="width:140px"></span>
+      </div>`;
+
+    function radekHtml(n, withDate) {
+      const {sipka, barva} = radekBarva(n);
+      const poSplat = n.datum_splatnosti && n.datum_splatnosti < dnes;
+      const borderBarva = poSplat ? '#E24B4A' : barva;
+      const datumPlatby = n.shoda ? (n.shoda.datum || n.datum || '') : '';
+      const splatnostHtml = poSplat
+        ? `<span style="background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 5px;font-size:11px">po ${Math.round((new Date(dnes)-new Date(n.datum_splatnosti))/86400000)} dní</span>`
+        : `<span style="color:var(--color-text-primary)">${n.datum_splatnosti ? czDate(n.datum_splatnosti) : '—'}</span>`;
+
+      const tlacitka = withDate
+        ? `<input type="date" id="datPl_${n.typ}_${n.id}" value="${datumPlatby}" style="width:110px;font-size:12px;padding:1px 4px;height:26px;flex-shrink:0">
+           <button style="background:#16a34a;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:12px;cursor:pointer" onclick="potvrditParovani(${n.shoda.pohyb_id},'${n.typ}',${n.id})">✅</button>`
+        : `<button style="background:transparent;color:var(--color-text-primary);border:0.5px solid var(--border);border-radius:5px;padding:3px 7px;font-size:12px;cursor:pointer" onclick="parovaniRucne('${n.typ}',${n.id})">🔗</button>
+           <button style="background:#16a34a;color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:12px;cursor:pointer" onclick="oznacZaplaceno('${n.typ}',${n.id})">✅</button>`;
+
+      return `<div id="par_${n.typ}_${n.id}" onclick="parovaniProkliken('${n.typ}',${n.id})" style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${borderBarva};border-radius:0 6px 6px 0;padding:7px 12px;display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin-bottom:3px">
+        <span style="font-size:16px;color:${borderBarva};width:20px;flex-shrink:0">${sipka}</span>
+        <span style="background:#eaf3de;color:#27500a;border-radius:4px;padding:1px 5px;font-size:12px;font-weight:500;width:32px;text-align:center;flex-shrink:0">${escHtml(n.firma||'')}</span>
+        <span style="font-weight:500;width:120px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(n.popis.split('|')[1]?.trim() || n.popis)}</span>
+        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(n.detail || n.popis.split('|')[0]?.trim() || '')}</span>
+        <span style="width:80px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(n.var_sym||'—')}</span>
+        <span style="width:85px;flex-shrink:0">${splatnostHtml}</span>
+        <span style="font-weight:500;width:85px;flex-shrink:0;text-align:right">${czMoneyFull(n.castka)}</span>
+        <div style="width:140px;flex-shrink:0;display:flex;gap:4px;justify-content:flex-end" onclick="event.stopPropagation()">${tlacitka}</div>
+      </div>`;
+    }
+
     el.innerHTML = `
-      <div class="card">
-        <div style="font-weight:600;font-size:1.05rem;margin-bottom:1rem">🔗 Kontrola plateb dokladů
-          <span style="font-size:.8rem;font-weight:400;color:var(--txt2);margin-left:.5rem">
+      <div class="card" style="font-size:13px">
+        <div style="font-weight:600;font-size:1rem;margin-bottom:.8rem">🔗 Kontrola plateb dokladů
+          <span style="font-size:.75rem;font-weight:400;color:var(--txt2);margin-left:.5rem">
             <span style="color:#639922">→</span> čekáme příjem &nbsp;
             <span style="color:#378ADD">←</span> čekáme odchod
           </span>
         </div>
         ${sparovane.length ? `
-        <div style="font-weight:600;font-size:.9rem;margin-bottom:.5rem;color:#16a34a">Nalezena platba v výpisu (${sparovane.length})</div>
-        <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:1.5rem">
-          ${sparovane.map(n => {
-            const {sipka, barva} = radekDoklad(n);
-            const datumPlatby = n.shoda.datum || n.datum || '';
-            return `<div id="par_${n.typ}_${n.id}" style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${barva};border-radius:0 6px 6px 0;padding:8px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              <span style="font-size:18px;color:${barva};font-weight:500;min-width:20px">${sipka}</span>
-              <span class="badge">${escHtml(n.firma||'')}</span>
-              <span style="font-size:.85rem;flex:1;cursor:pointer" onclick="parovaniProkliken('${n.typ}',${n.id})">
-                <strong>${escHtml(n.popis)}</strong>
-                ${n.var_sym ? `<span style="margin-left:.4rem;background:#e0f2fe;color:#0369a1;border-radius:4px;padding:.1rem .4rem;font-size:.75rem">VS: ${escHtml(n.var_sym)}</span>` : ''}
-                ${n.detail ? `<br><small style="color:var(--txt2)">${escHtml(n.detail)}</small>` : ''}
-                <br><small style="color:var(--txt2)">Platba: ${czDate(n.shoda.datum)} | ${czMoneyFull(n.shoda.castka)} | ${escHtml(n.shoda.nazev||'')}</small>
-              </span>
-              <span style="background:${n.shoda.istota==='vs'?'#d1fae5':'#fef3c7'};padding:.15rem .4rem;border-radius:4px;font-size:.75rem;color:#444">${n.shoda.istota==='vs'?'VS ✓':'Částka'}</span>
-              <input type="date" id="datPl_${n.typ}_${n.id}" value="${datumPlatby}" class="form-control" style="width:130px;padding:2px 6px;height:28px;font-size:.85rem">
-              <button class="btn btn-primary btn-sm" onclick="potvrditParovani(${n.shoda.pohyb_id},'${n.typ}',${n.id})">✅ Zaplaceno</button>
-            </div>`;
-          }).join('')}
-        </div>` : ''}
+          <div style="font-size:12px;color:#16a34a;font-weight:600;margin-bottom:4px">Nalezena platba v výpisu (${sparovane.length})</div>
+          ${hlavicka}
+          ${sparovane.map(n => radekHtml(n, true)).join('')}
+        ` : ''}
         ${nesparovane.length ? `
-        <div style="font-weight:600;font-size:.9rem;margin-bottom:.5rem;color:#d97706">Platba nenalezena (${nesparovane.length})</div>
-        <div style="display:flex;flex-direction:column;gap:4px">
-          ${nesparovane.map(n => {
-            const {sipka, barva} = radekDoklad(n);
-            const poSplat = n.datum_splatnosti && n.datum_splatnosti < dnes;
-            return `<div id="par_${n.typ}_${n.id}" style="background:var(--card-bg);border:0.5px solid var(--border);border-left:4px solid ${poSplat?'#E24B4A':barva};border-radius:0 6px 6px 0;padding:8px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-              <span style="font-size:18px;color:${poSplat?'#E24B4A':barva};font-weight:500;min-width:20px">${sipka}</span>
-              <span class="badge">${escHtml(n.firma||'')}</span>
-              <span style="font-size:.85rem;flex:1;cursor:pointer" onclick="parovaniProkliken('${n.typ}',${n.id})">
-                <strong>${escHtml(n.popis)}</strong> | ${czMoneyFull(n.castka)}
-                ${n.var_sym ? `<span style="margin-left:.4rem;background:#e0f2fe;color:#0369a1;border-radius:4px;padding:.1rem .4rem;font-size:.75rem">VS: ${escHtml(n.var_sym)}</span>` : ''}
-                ${poSplat ? `<span style="margin-left:.4rem;background:#fee2e2;color:#991b1b;border-radius:4px;padding:.1rem .4rem;font-size:.75rem">po splatnosti</span>` : ''}
-                ${n.detail ? `<br><small style="color:var(--txt2)">${escHtml(n.detail)}</small>` : ''}
-              </span>
-              <button class="btn btn-secondary btn-sm" onclick="parovaniRucne('${n.typ}',${n.id})">🔗 Přiřadit</button>
-              <button class="btn btn-sm" style="background:#16a34a;color:#fff" onclick="oznacZaplaceno('${n.typ}',${n.id})">✅ Zaplaceno</button>
-            </div>`;
-          }).join('')}
-        </div>` : ''}
+          <div style="font-size:12px;color:#d97706;font-weight:600;margin:${sparovane.length?'12px':0} 0 4px">Platba nenalezena (${nesparovane.length})</div>
+          ${hlavicka}
+          ${nesparovane.map(n => radekHtml(n, false)).join('')}
+        ` : ''}
       </div>`;
   } catch(e) {
     el.innerHTML = `<div class="card" style="color:var(--danger)">❌ Chyba: ${e.message}</div>`;
