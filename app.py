@@ -3973,74 +3973,76 @@ def api_parovani_potvrdit():
 @vyzaduj_prihlaseni
 def api_parovani_po_splatnosti():
     """Vrátí všechny nezaplacené doklady po splatnosti ze všech firem."""
-    import datetime as _dt
+    import datetime as _dt, psycopg2 as _pg2
     dnes = _dt.date.today().isoformat()
     vysledky = []
     try:
-        with get_db() as conn:
-            try:
-                rows = conn.execute("""
-                    SELECT id, firma_zkratka, dodavatel, cislo_faktury, celkem_s_dph, datum_splatnosti
-                    FROM faktury
-                    WHERE stav NOT IN ('zaplaceno','duplikat')
-                    AND datum_splatnosti != '' AND datum_splatnosti < ?
-                    ORDER BY datum_splatnosti
-                """, (dnes,)).fetchall()
-                for r in rows:
-                    ds = r["datum_splatnosti"] if isinstance(r, dict) else r[5]
-                    vysledky.append({
-                        "typ": "faktura",
-                        "id": r["id"] if isinstance(r, dict) else r[0],
-                        "firma": r["firma_zkratka"] if isinstance(r, dict) else r[1],
-                        "popis": f"Faktura č.{r['cislo_faktury'] if isinstance(r,dict) else r[3]} | {r['dodavatel'] if isinstance(r,dict) else r[2]}",
-                        "castka": r["celkem_s_dph"] if isinstance(r, dict) else r[4],
-                        "datum_splatnosti": ds,
-                        "dnu_po": ((_dt.date.fromisoformat(dnes) - _dt.date.fromisoformat(ds)).days if ds else 0)
-                    })
-            except Exception: pass
+        db_url = os.environ.get("DATABASE_URL", "")
+        pg_conn = _pg2.connect(db_url)
+        pg_cur = pg_conn.cursor()
 
-            try:
-                rows = conn.execute("""
-                    SELECT id, firma_zkratka, dodavatel, castka, datum_splatnosti
-                    FROM vydaje
-                    WHERE stav = 'nezaplaceno'
-                    AND datum_splatnosti != '' AND datum_splatnosti < ?
-                    ORDER BY datum_splatnosti
-                """, (dnes,)).fetchall()
-                for r in rows:
-                    ds = r["datum_splatnosti"] if isinstance(r, dict) else r[4]
-                    vysledky.append({
-                        "typ": "vydaj",
-                        "id": r["id"] if isinstance(r, dict) else r[0],
-                        "firma": r["firma_zkratka"] if isinstance(r, dict) else r[1],
-                        "popis": f"Výdaj | {r['dodavatel'] if isinstance(r,dict) else r[2]}",
-                        "castka": r["castka"] if isinstance(r, dict) else r[3],
-                        "datum_splatnosti": ds,
-                        "dnu_po": ((_dt.date.fromisoformat(dnes) - _dt.date.fromisoformat(ds)).days if ds else 0)
-                    })
-            except Exception: pass
+        # Faktury (kromě MAKRO)
+        pg_cur.execute("""
+            SELECT id, firma_zkratka, dodavatel, cislo_faktury, celkem_s_dph,
+                   datum_splatnosti, COALESCE(var_sym,'') as var_sym
+            FROM faktury
+            WHERE stav NOT IN ('zaplaceno','duplikat')
+            AND dodavatel NOT ILIKE '%MAKRO%'
+            AND datum_splatnosti != '' AND datum_splatnosti < %s
+            ORDER BY datum_splatnosti
+        """, (dnes,))
+        for r in pg_cur.fetchall():
+            fid, firma, dodavatel, cislo, castka, ds, var_sym = r
+            vysledky.append({
+                "typ": "faktura", "id": fid, "firma": firma,
+                "popis": f"Faktura č.{cislo or '?'} | {dodavatel}",
+                "detail": dodavatel, "var_sym": cislo or var_sym or "",
+                "castka": castka, "datum_splatnosti": ds,
+                "dnu_po": ((_dt.date.fromisoformat(dnes) - _dt.date.fromisoformat(ds)).days if ds else 0),
+                "smer": "odchozi"
+            })
 
-            try:
-                rows = conn.execute("""
-                    SELECT id, firma_zkratka, odberatel, cislo_faktury, castka, datum_splatnosti
-                    FROM vystavene_faktury
-                    WHERE stav = 'nezaplaceno'
-                    AND datum_splatnosti != '' AND datum_splatnosti < ?
-                    ORDER BY datum_splatnosti
-                """, (dnes,)).fetchall()
-                for r in rows:
-                    ds = r["datum_splatnosti"] if isinstance(r, dict) else r[5]
-                    vysledky.append({
-                        "typ": "vystavena",
-                        "id": r["id"] if isinstance(r, dict) else r[0],
-                        "firma": r["firma_zkratka"] if isinstance(r, dict) else r[1],
-                        "popis": f"Vystavená FA č.{r['cislo_faktury'] if isinstance(r,dict) else r[3]} | {r['odberatel'] if isinstance(r,dict) else r[2]}",
-                        "castka": r["castka"] if isinstance(r, dict) else r[4],
-                        "datum_splatnosti": ds,
-                        "dnu_po": ((_dt.date.fromisoformat(dnes) - _dt.date.fromisoformat(ds)).days if ds else 0)
-                    })
-            except Exception: pass
+        # Výdaje
+        pg_cur.execute("""
+            SELECT id, firma_zkratka, dodavatel, castka, datum_splatnosti,
+                   COALESCE(var_sym,'') as var_sym, COALESCE(popis,'') as popis
+            FROM vydaje
+            WHERE stav = 'nezaplaceno'
+            AND datum_splatnosti != '' AND datum_splatnosti < %s
+            ORDER BY datum_splatnosti
+        """, (dnes,))
+        for r in pg_cur.fetchall():
+            vid, firma, dodavatel, castka, ds, var_sym, popis = r
+            vysledky.append({
+                "typ": "vydaj", "id": vid, "firma": firma,
+                "popis": f"Výdaj | {dodavatel}",
+                "detail": popis, "var_sym": var_sym or "",
+                "castka": castka, "datum_splatnosti": ds,
+                "dnu_po": ((_dt.date.fromisoformat(dnes) - _dt.date.fromisoformat(ds)).days if ds else 0),
+                "smer": "odchozi"
+            })
 
+        # Vystavené faktury
+        pg_cur.execute("""
+            SELECT id, firma_zkratka, odberatel, cislo_faktury, castka,
+                   datum_splatnosti, COALESCE(var_sym,'') as var_sym, COALESCE(popis,'') as popis
+            FROM vystavene_faktury
+            WHERE stav = 'nezaplaceno'
+            AND datum_splatnosti != '' AND datum_splatnosti < %s
+            ORDER BY datum_splatnosti
+        """, (dnes,))
+        for r in pg_cur.fetchall():
+            fid, firma, odberatel, cislo, castka, ds, var_sym, popis = r
+            vysledky.append({
+                "typ": "vystavena", "id": fid, "firma": firma,
+                "popis": f"Vystavená FA č.{cislo or '?'} | {odberatel}",
+                "detail": popis, "var_sym": cislo or var_sym or "",
+                "castka": castka, "datum_splatnosti": ds,
+                "dnu_po": ((_dt.date.fromisoformat(dnes) - _dt.date.fromisoformat(ds)).days if ds else 0),
+                "smer": "prichozi"
+            })
+
+        pg_conn.close()
         vysledky.sort(key=lambda x: x.get("datum_splatnosti",""))
     except Exception as e:
         return jsonify({"po_splatnosti": [], "error": str(e)})
