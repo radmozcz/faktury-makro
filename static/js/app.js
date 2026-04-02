@@ -667,12 +667,14 @@ function _renderRocniTrzby(data) {
   // Celkové součty za rok
   const celkem = {};
   const pocetMesicu = {};
+  const celkemDni = {};
   roky.forEach(r => {
     celkem[r] = 0;
     pocetMesicu[r] = 0;
+    celkemDni[r] = 0;
     for (let m = 1; m <= 12; m++) {
       const d = data[String(r)]?.[String(m)] || data[String(r)]?.[m];
-      if (d) { celkem[r] += d.trzba; pocetMesicu[r]++; }
+      if (d) { celkem[r] += d.trzba; pocetMesicu[r]++; celkemDni[r] += d.dni; }
     }
   });
 
@@ -692,6 +694,7 @@ function _renderRocniTrzby(data) {
 
   const soucetyRow = roky.map(r => `<td style="text-align:right;padding:4px 12px;font-weight:700">${czInt(celkem[r])}</td>`).join('');
   const prumeryRow = roky.map(r => `<td style="text-align:right;padding:3px 12px;color:var(--txt2)">${pocetMesicu[r] ? czInt(Math.round(celkem[r] / pocetMesicu[r])) : '—'}</td>`).join('');
+  const prumerDenRow = roky.map(r => `<td style="text-align:right;padding:3px 12px;color:var(--txt2)">${celkemDni[r] ? czInt(Math.round(celkem[r] / celkemDni[r])) : '—'}</td>`).join('');
 
   const div = document.createElement('div');
   div.innerHTML = `
@@ -713,6 +716,10 @@ function _renderRocniTrzby(data) {
           <tr>
             <td style="padding:3px 12px;color:var(--txt2)">Prům./měsíc</td>
             ${prumeryRow}
+          </tr>
+          <tr>
+            <td style="padding:3px 12px;color:var(--txt2)">Prům./den</td>
+            ${prumerDenRow}
           </tr>
         </tfoot>
       </table>
