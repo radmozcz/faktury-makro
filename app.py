@@ -4896,8 +4896,8 @@ Nikdy nevymýšlej data která nemáš."""]
                         vydaje, pk_celkem, burger, burtgulas, pizza_cela, pizza_ctvrt, talire, smena
                     FROM reporty
                     WHERE datum >= %s {fw}
-                    ORDER BY datum DESC LIMIT 90
-                """, [(_dt.date.today() - _dt.timedelta(days=90)).isoformat()] + fp)
+                    ORDER BY datum DESC LIMIT 60
+                """, [(_dt.date.today() - _dt.timedelta(days=60)).isoformat()] + fp)
                 kontext_casti.append(f"\nMĚSÍČNÍ PŘEHLED REPORTŮ:\n{_safe_json(rep)}")
                 kontext_casti.append(f"\nDENNÍ DATA (posledních 90 dní):\n{_safe_json(dny)}")
 
@@ -4930,7 +4930,7 @@ Nikdy nevymýšlej data která nemáš."""]
                         SELECT datum, dodavatel, castka, popis, stav
                         FROM vydaje WHERE typ='provozni'
                         AND datum >= %s AND datum <= %s {fw}
-                        ORDER BY datum DESC LIMIT 500
+                        ORDER BY datum DESC LIMIT 200
                     """, [rok_od, rok_do] + fp)
                     kontext_casti.append(f"\nPROVOZNÍ VÝDAJE:\n{_safe_json(vyd)}")
                 if je_admin:
@@ -4990,10 +4990,10 @@ Nikdy nevymýšlej data která nemáš."""]
                     cur2 = conn2.cursor()
                     fw2 = "AND firma_zkratka=%s" if firma else ""
                     cur2.execute(f"""
-                        SELECT datum, banka, firma_zkratka, castka, nazev_protiucet, zprava, var_sym
+                        SELECT datum, banka, firma_zkratka, ROUND(castka::numeric,2) as castka, nazev_protiucet, var_sym
                         FROM bankovni_pohyby
                         WHERE datum >= %s AND datum <= %s {fw2}
-                        ORDER BY datum DESC LIMIT 3000
+                        ORDER BY datum DESC LIMIT 800
                     """, [rok_od, rok_do] + ([firma] if firma else []))
                     cols2 = [d[0] for d in cur2.description]
                     banky_rows = [dict(zip(cols2, r)) for r in cur2.fetchall()]
@@ -5021,6 +5021,9 @@ Nikdy nevymýšlej data která nemáš."""]
             messages.append({"role": "user", "content": dotaz})
 
         client = anthropic.Anthropic(api_key=api_key)
+        # Ořez kontextu pokud je příliš dlouhý (max ~150k znaků = ~50k tokenů)
+        if len(kontext) > 150000:
+            kontext = kontext[:150000] + "\n\n[Data zkrácena kvůli délce — zobrazena část]"
         msg = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=2000,
