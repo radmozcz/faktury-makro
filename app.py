@@ -6595,6 +6595,44 @@ def ping():
     return "pong", 200
 
 
+def _ensure_pg_columns():
+    """Přidá chybějící sloupce do PostgreSQL tabulek."""
+    try:
+        import psycopg2 as _pg2
+        db_url = os.environ.get("DATABASE_URL", "")
+        if not db_url:
+            return
+        conn = _pg2.connect(db_url)
+        cur = conn.cursor()
+        migrace = [
+            "ALTER TABLE vydaje ADD COLUMN IF NOT EXISTS var_sym TEXT DEFAULT ''",
+            "ALTER TABLE vydaje ADD COLUMN IF NOT EXISTS datum_zaplaceno TEXT DEFAULT ''",
+            "ALTER TABLE faktury ADD COLUMN IF NOT EXISTS var_sym TEXT DEFAULT ''",
+            "ALTER TABLE faktury ADD COLUMN IF NOT EXISTS datum_zaplaceno TEXT DEFAULT ''",
+            "ALTER TABLE vystavene_faktury ADD COLUMN IF NOT EXISTS var_sym TEXT DEFAULT ''",
+            "ALTER TABLE vystavene_faktury ADD COLUMN IF NOT EXISTS datum_zaplaceno TEXT DEFAULT ''",
+            "ALTER TABLE bankovni_pohyby ADD COLUMN IF NOT EXISTS var_sym TEXT DEFAULT ''",
+            "ALTER TABLE bankovni_pohyby ADD COLUMN IF NOT EXISTS sparovano INTEGER DEFAULT 0",
+            "ALTER TABLE bankovni_pohyby ADD COLUMN IF NOT EXISTS sparovano_typ TEXT DEFAULT ''",
+            "ALTER TABLE bankovni_pohyby ADD COLUMN IF NOT EXISTS sparovano_id INTEGER DEFAULT NULL",
+        ]
+        for sql in migrace:
+            try:
+                cur.execute(sql)
+            except Exception:
+                conn.rollback()
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"⚠ _ensure_pg_columns: {e}")
+
+# Spustit migrace při startu
+try:
+    _ensure_pg_columns()
+except Exception:
+    pass
+
+
 
 # ═══════════════════════════════════════════════════════════════
 #  PENĚŽENKA — hotovostní kasa
