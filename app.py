@@ -4792,8 +4792,8 @@ def api_ai_dotaz():
         rok_label = "všechny roky"
     else:
         rok = str(rok_raw)
-        rok_od = rok_od
-        rok_do = rok_do
+        rok_od = f"{rok}-01-01"
+        rok_do = f"{rok}-12-31"
         rok_label = rok
     firma  = data.get("firma", "")
     if not dotaz:
