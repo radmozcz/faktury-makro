@@ -4192,6 +4192,12 @@ async function renderNastaveni() {
         <div style="color:var(--txt2);font-size:.9rem;margin-bottom:.75rem">Smaže všechny faktury a položky. Akce je nevratná!</div>
         <button class="btn" style="background:#c00;color:#fff" onclick="smazatVseFaktury()">🗑️ Smazat všechny faktury</button>
       </div>
+      <div style="border:1px solid #d97706;border-radius:8px;padding:1rem;background:#fffbeb;margin-top:1rem">
+        <div style="font-weight:600;color:#d97706;margin-bottom:.5rem">🏪 MAKRO faktury</div>
+        <div style="color:var(--txt2);font-size:.9rem;margin-bottom:.75rem">Označí všechny existující MAKRO faktury jako zaplaceno (platba proběhla při nákupu).</div>
+        <button class="btn" style="background:#d97706;color:#fff" onclick="makroZaplaceno()">✅ Označit MAKRO faktury jako zaplaceno</button>
+        <span id="makroZaplacenoStatus" style="margin-left:.7rem;font-size:.9rem"></span>
+      </div>
     </div>`;
   loadZalohy();
 }
@@ -4438,6 +4444,19 @@ async function opravDuplicity() {
     }
   } catch (e) {
     toast("Chyba při kontrole duplicit", true);
+  }
+}
+
+async function makroZaplaceno() {
+  const statusEl = document.getElementById('makroZaplacenoStatus');
+  if (!confirm('Označit všechny MAKRO faktury jako zaplaceno?')) return;
+  if (statusEl) statusEl.innerHTML = '<span class="spinner"></span>';
+  try {
+    const res = await api('/api/makro-zaplaceno', { method: 'POST' });
+    if (statusEl) statusEl.textContent = `✅ Označeno ${res.oznaceno} faktur`;
+    toast(`✅ MAKRO faktury označeny jako zaplaceno (${res.oznaceno} ks)`);
+  } catch(e) {
+    if (statusEl) statusEl.textContent = '❌ Chyba: ' + e.message;
   }
 }
 
@@ -6646,6 +6665,12 @@ function _renderVydajForm(formEl, data) {
           <option>hotovost</option><option>karta</option><option>převodem</option>
         </select>
       </div>
+      <div class="form-group"><label class="form-label">VS (variabilní symbol)</label>
+        <input id="vnVarSym" class="form-control" placeholder="např. 2026001" value="${escHtml(data.var_sym||'')}">
+      </div>
+      <div class="form-group"><label class="form-label">Datum splatnosti</label>
+        <input type="date" id="vnDatSpl" class="form-control" value="${data.datum_splatnosti||''}">
+      </div>
       <div class="form-group" style="grid-column:1/-1"><label class="form-label">Popis / účel</label>
         <input id="vnPopis" class="form-control" value="${escHtml(data.poznamka||'')}">
       </div>
@@ -6667,6 +6692,8 @@ async function ulozitVydajZDokladu(soubor_cesta, soubor_url) {
     datum:         document.getElementById("vnDatum").value,
     castka:        parseFloat(document.getElementById("vnCastka").value||0),
     zpusob_uhrady: document.getElementById("vnUhrada").value,
+    var_sym:       document.getElementById("vnVarSym")?.value || "",
+    datum_splatnosti: document.getElementById("vnDatSpl")?.value || "",
     popis:         document.getElementById("vnPopis").value,
     stav:          "zaplaceno",
     soubor_cesta, soubor_url,
