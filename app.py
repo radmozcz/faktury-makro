@@ -3620,31 +3620,32 @@ def api_banky_pohyby():
     do_    = request.args.get("do", "")
     typ    = request.args.get("typ", "")
     clauses, params = [], []
-    if banka: clauses.append("banka=?"); params.append(banka)
+    if banka: clauses.append("banka=%s"); params.append(banka)
     if firma:
-        # Pro soukromé zobraz i záznamy s prázdnou firmou (starší import)
         if firma == "_soukrome":
-            clauses.append("(firma_zkratka=? OR firma_zkratka='' OR firma_zkratka IS NULL)")
+            clauses.append("(firma_zkratka=%s OR firma_zkratka='' OR firma_zkratka IS NULL)")
             params.append(firma)
         else:
-            clauses.append("firma_zkratka=?"); params.append(firma)
-    if od:    clauses.append("datum>=?"); params.append(od)
-    if do_:   clauses.append("datum<=?"); params.append(do_)
+            clauses.append("firma_zkratka=%s"); params.append(firma)
+    if od:    clauses.append("datum>=%s"); params.append(od)
+    if do_:   clauses.append("datum<=%s"); params.append(do_)
     if typ == "prichozi":  clauses.append("castka>0")
     if typ == "odchozi":   clauses.append("castka<0")
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-    with get_db() as conn:
-        rows = conn.execute(
-            f"SELECT * FROM bankovni_pohyby {where} ORDER BY datum DESC, id DESC",
-            params
-        ).fetchall()
-        total_row = conn.execute(
-            f"SELECT COALESCE(SUM(castka),0) as total FROM bankovni_pohyby {where}", params
-        ).fetchone()
-    return jsonify({
-        "pohyby": [dict(r) for r in rows],
-        "celkem": round(_first_val(total_row), 2)
-    })
+    try:
+        import psycopg2 as _pg2
+        db_url = os.environ.get("DATABASE_URL", "")
+        pg_conn = _pg2.connect(db_url)
+        pg_cur = pg_conn.cursor()
+        pg_cur.execute(f"SELECT * FROM bankovni_pohyby {where} ORDER BY datum DESC, id DESC", params)
+        cols = [d[0] for d in pg_cur.description]
+        rows = [dict(zip(cols, r)) for r in pg_cur.fetchall()]
+        pg_cur.execute(f"SELECT COALESCE(SUM(castka),0) FROM bankovni_pohyby {where}", params)
+        total = pg_cur.fetchone()[0] or 0
+        pg_conn.close()
+        return jsonify({"pohyby": rows, "celkem": round(float(total), 2)})
+    except Exception as e:
+        return jsonify({"pohyby": [], "celkem": 0, "error": str(e)})
 
 @app.route("/api/banky/export")
 @vyzaduj_prihlaseni
