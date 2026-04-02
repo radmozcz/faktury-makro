@@ -140,7 +140,7 @@ function skryjNepovoleneMenu() {
   };
   document.querySelectorAll(".nav-item[data-page]").forEach(el => {
     const page = el.dataset.page;
-    if (page === "dashboard") return; // dashboard vidí vždy
+    if (page === "dashboard" && (App.userRole === "admin" || maPravo("nastenka"))) return;
     const pravo = menuPrava[page];
     if (pravo && !maPravo(pravo)) {
       el.style.display = "none";
