@@ -3762,8 +3762,17 @@ def api_banky_debug():
         firmy = [r[0] for r in cur.fetchall()]
         cur.execute("SELECT banka, firma_zkratka, COUNT(*) FROM bankovni_pohyby GROUP BY banka, firma_zkratka ORDER BY banka, firma_zkratka")
         skupiny = [{"banka": r[0], "firma": r[1], "pocet": r[2]} for r in cur.fetchall()]
+        # Reporty a vydaje
+        cur.execute("SELECT MIN(datum), MAX(datum), COUNT(*) FROM reporty")
+        rep = cur.fetchone()
+        cur.execute("SELECT MIN(datum), MAX(datum), COUNT(*) FROM vydaje")
+        vyd = cur.fetchone()
         conn.close()
-        return jsonify({"celkem": celkem, "banky": banky, "firmy": firmy, "skupiny": skupiny})
+        return jsonify({
+            "celkem": celkem, "banky": banky, "firmy": firmy, "skupiny": skupiny,
+            "reporty": {"od": rep[0], "do": rep[1], "pocet": rep[2]},
+            "vydaje": {"od": vyd[0], "do": vyd[1], "pocet": vyd[2]},
+        })
     except Exception as e:
         return jsonify({"error": str(e), "type": type(e).__name__}), 500
 
@@ -4857,7 +4866,11 @@ def api_ai_dotaz():
             cols = [d[0] for d in pg.description]
             return [dict(zip(cols, r)) for r in pg.fetchall()]
         if True:
-            kontext_casti = [f"Jsi analytik restaurace/bistra. Máš přístup k těmto datům za rok {rok_label}{' pro firmu '+firma if firma else ''}. Načtené sekce: {', '.join(sorted(nactist))}."]
+            kontext_casti = [f"""Jsi analytik restaurace/bistra. Máš přístup k datům za {rok_label}{' pro firmu '+firma if firma else ''}.
+Načtené sekce: {', '.join(sorted(nactist))}.
+DŮLEŽITÉ: Pokud se tě ptají na konkrétní období (měsíc, rok), hledej v VŠECH dostupných datech níže — reporty, faktury, výdaje, bankovní výpisy.
+Pokud data pro dané období nejsou v kontextu, řekni to jasně a navrhni co udělat (např. nahrát výpis).
+Nikdy nevymýšlej data která nemáš."""]
 
             # Reporty
             if "reporty" in nactist and (ma_pravo("statistiky") or ma_pravo("reporty")):
