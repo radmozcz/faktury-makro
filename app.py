@@ -4846,14 +4846,22 @@ def api_ai_dotaz():
             nactist = {"reporty", "faktury"}
 
     try:
-        with get_db() as conn:
-            fw = "AND firma_zkratka=%s" if firma else ""
-            fp = [firma] if firma else []
+        import psycopg2 as _pg2
+        db_url = os.environ.get("DATABASE_URL", "")
+        conn = _pg2.connect(db_url)
+        pg = conn.cursor()
+        fw = "AND firma_zkratka=%s" if firma else ""
+        fp = [firma] if firma else []
+        def _q(sql, params=()):
+            pg.execute(sql, params)
+            cols = [d[0] for d in pg.description]
+            return [dict(zip(cols, r)) for r in pg.fetchall()]
+        if True:
             kontext_casti = [f"Jsi analytik restaurace/bistra. Máš přístup k těmto datům za rok {rok_label}{' pro firmu '+firma if firma else ''}. Načtené sekce: {', '.join(sorted(nactist))}."]
 
             # Reporty
             if "reporty" in nactist and (ma_pravo("statistiky") or ma_pravo("reporty")):
-                rep = conn.execute(f"""
+                rep = _q(f"""
                     SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY-MM') as mesic,
                         ROUND(SUM(karty)::numeric,0) as karty,
                         ROUND(SUM(hotovost)::numeric,0) as hotovost,
@@ -4866,7 +4874,7 @@ def api_ai_dotaz():
                     FROM reporty WHERE datum >= %s AND datum <= %s {fw}
                     GROUP BY mesic ORDER BY mesic
                 """, [rok_od, rok_do] + fp).fetchall()
-                dny = conn.execute(f"""
+                dny = _q(f"""
                     SELECT datum, firma_zkratka, karty, hotovost, trzba_vcpk as trzba,
                         vydaje, pk_celkem, burger, burtgulas, pizza_cela, pizza_ctvrt, talire, smena
                     FROM reporty
@@ -4913,33 +4921,33 @@ def api_ai_dotaz():
                         SELECT datum, dodavatel, castka, popis, stav
                         FROM vydaje WHERE typ='soukrome'
                         ORDER BY datum DESC LIMIT 100
-                    """).fetchall()
+                    """)
                     kontext_casti.append(f"\nSOUKROMÉ VÝDAJE:\n{_safe_json(svyd)}")
 
             # Peněženka
             if "penezenka" in nactist and je_admin:
-                pw = conn.execute("""
+                pw = _q(f"""
                     SELECT datum, hotovost, sporeni, poznamka
                     FROM penezenka ORDER BY datum DESC LIMIT 24
-                """).fetchall()
+                """)
                 kontext_casti.append(f"\nPENĚŽENKA:\n{_safe_json(pw)}")
 
             # Dokumenty
             if "dokumenty" in nactist and je_admin:
-                dok = conn.execute("""
+                dok = _q(f"""
                     SELECT datum, nazev, misto, kategorie
                     FROM dokumenty ORDER BY datum DESC
-                """).fetchall()
+                """)
                 kontext_casti.append(f"\nDOKUMENTY:\n{_safe_json(dok)}")
 
             # Vystavené faktury
             if "vystavene" in nactist and ma_pravo("faktury_zobrazit"):
-                vf = conn.execute("""
+                vf = _q(f"""
                     SELECT datum, odberatel, castka, stav, popis
                     FROM vystavene_faktury
                     WHERE datum >= %s AND datum <= %s
                     ORDER BY datum DESC
-                """, [rok_od, rok_do]).fetchall()
+                """, [rok_od, rok_do])
                 kontext_casti.append(f"\nVYSTAVENÉ FAKTURY:\n{_safe_json(vf)}")
 
             # Zboží — při výběru sekce zbozi načti vše, jinak top 100
@@ -4954,16 +4962,13 @@ def api_ai_dotaz():
                     JOIN polozky p ON p.zbozi_id = z.id
                     GROUP BY z.nazev_canonical
                     ORDER BY utraceno DESC {limit_zbozi}
-                """).fetchall()
+                """)
                 kontext_casti.append(f"\nZBOŽÍ{'(vše)' if not limit_zbozi else '(top 100)'}:\n{_safe_json(zbz)}")
 
             # Bankovní výpisy
             if "banky" in nactist or je_admin:
                 try:
-                    import psycopg2 as _pg2
-                    db_url = os.environ.get("DATABASE_URL", "")
-                    pg_conn2 = _pg2.connect(db_url)
-                    pg_cur2 = pg_conn2.cursor()
+                    pg_cur2 = pg
                     fw2 = "AND firma_zkratka=%s" if firma else ""
                     pg_cur2.execute(f"""
                         SELECT datum, banka, firma_zkratka, castka, nazev_protiucet, zprava, var_sym
@@ -4973,11 +4978,12 @@ def api_ai_dotaz():
                     """, [rok_od, rok_do] + ([firma] if firma else []))
                     cols2 = [d[0] for d in pg_cur2.description]
                     banky_rows = [dict(zip(cols2, r)) for r in pg_cur2.fetchall()]
-                    pg_conn2.close()
+                    
                     kontext_casti.append(f"\nBANKOVNÍ VÝPISY:\n{_safe_json(banky_rows)}")
                 except Exception as be:
                     kontext_casti.append(f"\nBANKOVNÍ VÝPISY: chyba načtení ({be})")
 
+        conn.close()
         kontext_casti.append("\nOdpovídej stručně a konkrétně v češtině.\nPokud uživatel žádá export dat (CSV, tabulka, seznam), vrať odpověď ve formátu:\nEXPORT_CSV:nazev_souboru.csv\ndatum,hodnota1,hodnota2\nřádek1...\n\nJinak odpovídej normálně jako text.")
         kontext = "\n".join(kontext_casti)
 
