@@ -4829,13 +4829,15 @@ def api_ai_dotaz():
             nactist.add("penezenka")
         if _je_relevantni(["vystaven","odberatel","bauhaus","fakturace"], dotaz_lower):
             nactist.add("vystavene")
+        if _je_relevantni(["bank","výpis","pohyb","platb","převod","prevod","transakc","raiffa","airbank"], dotaz_lower):
+            nactist.add("banky")
         # Pokud nic nedetekováno — načti základní sekce
         if not nactist:
             nactist = {"reporty", "faktury"}
 
     try:
         with get_db() as conn:
-            fw = "AND firma_zkratka=?" if firma else ""
+            fw = "AND firma_zkratka=%s" if firma else ""
             fp = [firma] if firma else []
             kontext_casti = [f"Jsi analytik restaurace/bistra. Máš přístup k těmto datům za rok {rok}{' pro firmu '+firma if firma else ''}. Načtené sekce: {', '.join(sorted(nactist))}."]
 
@@ -4851,14 +4853,14 @@ def api_ai_dotaz():
                         SUM(burger) as burger, SUM(burtgulas) as burtgulas,
                         SUM(pizza_cela) as pizza_cela, SUM(pizza_ctvrt) as pizza_ctvrt,
                         SUM(talire) as talire, COUNT(*) as dni
-                    FROM reporty WHERE datum >= ? AND datum <= ? {fw}
+                    FROM reporty WHERE datum >= %s AND datum <= %s {fw}
                     GROUP BY mesic ORDER BY mesic
                 """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
                 dny = conn.execute(f"""
                     SELECT datum, firma_zkratka, karty, hotovost, trzba_vcpk as trzba,
                         vydaje, pk_celkem, burger, burtgulas, pizza_cela, pizza_ctvrt, talire, smena
                     FROM reporty
-                    WHERE datum >= ? {fw}
+                    WHERE datum >= %s {fw}
                     ORDER BY datum DESC LIMIT 90
                 """, [(_dt.date.today() - _dt.timedelta(days=90)).isoformat()] + fp).fetchall()
                 kontext_casti.append(f"\nMĚSÍČNÍ PŘEHLED REPORTŮ:\n{_safe_json(rep)}")
@@ -4869,8 +4871,8 @@ def api_ai_dotaz():
                 fakt = conn.execute(f"""
                     SELECT TO_CHAR(NULLIF(datum_vystaveni,'')::date,'YYYY-MM') as mesic,
                         dodavatel, ROUND(SUM(celkem_s_dph)::numeric,0) as castka, COUNT(*) as pocet
-                    FROM faktury WHERE datum_vystaveni >= ? AND datum_vystaveni <= ?
-                    {"AND firma_zkratka=?" if firma else ""}
+                    FROM faktury WHERE datum_vystaveni >= %s AND datum_vystaveni <= %s
+                    {"AND firma_zkratka=%s" if firma else ""}
                     GROUP BY mesic, dodavatel ORDER BY mesic, castka DESC
                 """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
                 kontext_casti.append(f"\nFAKTURY:\n{_safe_json(fakt)}")
@@ -4880,8 +4882,8 @@ def api_ai_dotaz():
                 vypl = conn.execute(f"""
                     SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY-MM') as mesic,
                         jmeno, ROUND(SUM(castka)::numeric,0) as castka
-                    FROM vyplaty WHERE datum >= ? AND datum <= ?
-                    {"AND firma_zkratka=?" if firma else ""}
+                    FROM vyplaty WHERE datum >= %s AND datum <= %s
+                    {"AND firma_zkratka=%s" if firma else ""}
                     GROUP BY mesic, jmeno ORDER BY mesic, jmeno
                 """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
                 kontext_casti.append(f"\nVÝPLATY:\n{_safe_json(vypl)}")
@@ -4892,7 +4894,7 @@ def api_ai_dotaz():
                     vyd = conn.execute(f"""
                         SELECT datum, dodavatel, castka, popis, stav
                         FROM vydaje WHERE typ='provozni'
-                        AND datum >= ? AND datum <= ? {fw}
+                        AND datum >= %s AND datum <= %s {fw}
                         ORDER BY datum DESC LIMIT 500
                     """, [f"{rok}-01-01", f"{rok}-12-31"] + fp).fetchall()
                     kontext_casti.append(f"\nPROVOZNÍ VÝDAJE:\n{_safe_json(vyd)}")
@@ -4925,7 +4927,7 @@ def api_ai_dotaz():
                 vf = conn.execute("""
                     SELECT datum, odberatel, castka, stav, popis
                     FROM vystavene_faktury
-                    WHERE datum >= ? AND datum <= ?
+                    WHERE datum >= %s AND datum <= %s
                     ORDER BY datum DESC
                 """, [f"{rok}-01-01", f"{rok}-12-31"]).fetchall()
                 kontext_casti.append(f"\nVYSTAVENÉ FAKTURY:\n{_safe_json(vf)}")
@@ -4944,6 +4946,27 @@ def api_ai_dotaz():
                     ORDER BY utraceno DESC {limit_zbozi}
                 """).fetchall()
                 kontext_casti.append(f"\nZBOŽÍ{'(vše)' if not limit_zbozi else '(top 100)'}:\n{_safe_json(zbz)}")
+
+            # Bankovní výpisy
+            if "banky" in nactist or je_admin:
+                try:
+                    import psycopg2 as _pg2
+                    db_url = os.environ.get("DATABASE_URL", "")
+                    pg_conn2 = _pg2.connect(db_url)
+                    pg_cur2 = pg_conn2.cursor()
+                    fw2 = "AND firma_zkratka=%s" if firma else ""
+                    pg_cur2.execute(f"""
+                        SELECT datum, banka, firma_zkratka, castka, nazev_protiucet, zprava, var_sym
+                        FROM bankovni_pohyby
+                        WHERE datum >= %s AND datum <= %s {fw2}
+                        ORDER BY datum DESC LIMIT 500
+                    """, [f"{rok}-01-01", f"{rok}-12-31"] + ([firma] if firma else []))
+                    cols2 = [d[0] for d in pg_cur2.description]
+                    banky_rows = [dict(zip(cols2, r)) for r in pg_cur2.fetchall()]
+                    pg_conn2.close()
+                    kontext_casti.append(f"\nBANKOVNÍ VÝPISY:\n{_safe_json(banky_rows)}")
+                except Exception as be:
+                    kontext_casti.append(f"\nBANKOVNÍ VÝPISY: chyba načtení ({be})")
 
         kontext_casti.append("\nOdpovídej stručně a konkrétně v češtině.\nPokud uživatel žádá export dat (CSV, tabulka, seznam), vrať odpověď ve formátu:\nEXPORT_CSV:nazev_souboru.csv\ndatum,hodnota1,hodnota2\nřádek1...\n\nJinak odpovídej normálně jako text.")
         kontext = "\n".join(kontext_casti)
