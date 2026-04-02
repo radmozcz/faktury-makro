@@ -4873,51 +4873,51 @@ def api_ai_dotaz():
                         SUM(talire) as talire, COUNT(*) as dni
                     FROM reporty WHERE datum >= %s AND datum <= %s {fw}
                     GROUP BY mesic ORDER BY mesic
-                """, [rok_od, rok_do] + fp).fetchall()
+                """, [rok_od, rok_do] + fp)
                 dny = _q(f"""
                     SELECT datum, firma_zkratka, karty, hotovost, trzba_vcpk as trzba,
                         vydaje, pk_celkem, burger, burtgulas, pizza_cela, pizza_ctvrt, talire, smena
                     FROM reporty
                     WHERE datum >= %s {fw}
                     ORDER BY datum DESC LIMIT 90
-                """, [(_dt.date.today() - _dt.timedelta(days=90)).isoformat()] + fp).fetchall()
+                """, [(_dt.date.today() - _dt.timedelta(days=90)).isoformat()] + fp)
                 kontext_casti.append(f"\nMĚSÍČNÍ PŘEHLED REPORTŮ:\n{_safe_json(rep)}")
                 kontext_casti.append(f"\nDENNÍ DATA (posledních 90 dní):\n{_safe_json(dny)}")
 
             # Faktury
             if "faktury" in nactist and ma_pravo("faktury"):
-                fakt = conn.execute(f"""
+                fakt = _q(f"""
                     SELECT TO_CHAR(NULLIF(datum_vystaveni,'')::date,'YYYY-MM') as mesic,
                         dodavatel, ROUND(SUM(celkem_s_dph)::numeric,0) as castka, COUNT(*) as pocet
                     FROM faktury WHERE datum_vystaveni >= %s AND datum_vystaveni <= %s
                     {"AND firma_zkratka=%s" if firma else ""}
                     GROUP BY mesic, dodavatel ORDER BY mesic, castka DESC
-                """, [rok_od, rok_do] + fp).fetchall()
+                """, [rok_od, rok_do] + fp)
                 kontext_casti.append(f"\nFAKTURY:\n{_safe_json(fakt)}")
 
             # Výplaty
             if "vyplaty" in nactist and ma_pravo("vyplaty"):
-                vypl = conn.execute(f"""
+                vypl = _q(f"""
                     SELECT TO_CHAR(NULLIF(datum,'')::date,'YYYY-MM') as mesic,
                         jmeno, ROUND(SUM(castka)::numeric,0) as castka
                     FROM vyplaty WHERE datum >= %s AND datum <= %s
                     {"AND firma_zkratka=%s" if firma else ""}
                     GROUP BY mesic, jmeno ORDER BY mesic, jmeno
-                """, [rok_od, rok_do] + fp).fetchall()
+                """, [rok_od, rok_do] + fp)
                 kontext_casti.append(f"\nVÝPLATY:\n{_safe_json(vypl)}")
 
             # Výdaje
             if "vydaje" in nactist:
                 if ma_pravo("vydaje_zobrazit"):
-                    vyd = conn.execute(f"""
+                    vyd = _q(f"""
                         SELECT datum, dodavatel, castka, popis, stav
                         FROM vydaje WHERE typ='provozni'
                         AND datum >= %s AND datum <= %s {fw}
                         ORDER BY datum DESC LIMIT 500
-                    """, [rok_od, rok_do] + fp).fetchall()
+                    """, [rok_od, rok_do] + fp)
                     kontext_casti.append(f"\nPROVOZNÍ VÝDAJE:\n{_safe_json(vyd)}")
                 if je_admin:
-                    svyd = conn.execute("""
+                    svyd = _q("""
                         SELECT datum, dodavatel, castka, popis, stav
                         FROM vydaje WHERE typ='soukrome'
                         ORDER BY datum DESC LIMIT 100
@@ -4953,7 +4953,7 @@ def api_ai_dotaz():
             # Zboží — při výběru sekce zbozi načti vše, jinak top 100
             if "zbozi" in nactist and ma_pravo("zbozi_zobrazit"):
                 limit_zbozi = "" if "zbozi" in sekce_override else "LIMIT 100"
-                zbz = conn.execute(f"""
+                zbz = _q(f"""
                     SELECT z.nazev_canonical,
                         ROUND(SUM(p.celkem_s_dph)::numeric,0) as utraceno,
                         COUNT(DISTINCT p.faktura_id) as nakupu,
