@@ -116,7 +116,17 @@ async function spustAplikaci() {
   await loadConfig();
   setupNav();
   skryjNepovoleneMenu();
-  navigateTo("dashboard");
+  // Pokud nemá přístup na nástěnku, jdi na první povolenou sekci
+  if (App.userRole !== "admin" && !maPravo("nastenka")) {
+    const povolene = ["faktury","reporty","vydaje","vystavene","zbozi","statistiky","kalkulace","ai-asistent","vyplaty","banky"];
+    const prvni = povolene.find(p => {
+      const menuPrava = {"faktury":"faktury_zobrazit","reporty":"reporty_zobrazit","vydaje":"vydaje_zobrazit","vystavene":"faktury_zobrazit","zbozi":"zbozi_zobrazit","statistiky":"statistiky","kalkulace":"kalkulace","ai-asistent":"ai_asistent","vyplaty":"vyplaty_zobrazit","banky":"bankovni_vypisy"};
+      return maPravo(menuPrava[p]);
+    });
+    navigateTo(prvni || "dashboard");
+  } else {
+    navigateTo("dashboard");
+  }
 }
 
 function skryjNepovoleneMenu() {
@@ -140,7 +150,14 @@ function skryjNepovoleneMenu() {
   };
   document.querySelectorAll(".nav-item[data-page]").forEach(el => {
     const page = el.dataset.page;
-    if (page === "dashboard" && (App.userRole === "admin" || maPravo("nastenka"))) return;
+    if (page === "dashboard") {
+      if (App.userRole !== "admin" && !maPravo("nastenka")) {
+        el.style.display = "none";
+      } else {
+        el.style.display = "";
+      }
+      return;
+    }
     const pravo = menuPrava[page];
     if (pravo && !maPravo(pravo)) {
       el.style.display = "none";
