@@ -3803,6 +3803,8 @@ def api_parovani_navrh():
         pg_conn = _pg2.connect(db_url)
         pg_cur = pg_conn.cursor()
 
+        auto_zaplaceno = 0
+
         # 1. Přijaté faktury (kromě MAKRO) — odchozí platba
         pg_cur.execute("""
             SELECT id, firma_zkratka, dodavatel, cislo_faktury, celkem_s_dph,
@@ -3815,12 +3817,18 @@ def api_parovani_navrh():
         for r in pg_cur.fetchall():
             fid, firma, dodavatel, cislo, castka, dat_vys, dat_spl = r
             shoda = _hledej_platbu_pg(pg_cur, castka, dat_vys, dat_spl, cislo, smer='odchozi')
-            navrhy.append({
-                "typ": "faktura", "id": fid, "firma": firma,
-                "popis": f"Faktura č.{cislo or '?'} | {dodavatel}",
-                "castka": castka, "datum": dat_vys, "datum_splatnosti": dat_spl,
-                "smer": "odchozi", "shoda": shoda
-            })
+            if shoda:
+                # Automaticky označ jako zaplaceno
+                pg_cur.execute("UPDATE faktury SET stav='zaplaceno', datum_zaplaceno=%s WHERE id=%s",
+                               (shoda['datum'], fid))
+                auto_zaplaceno += 1
+            else:
+                navrhy.append({
+                    "typ": "faktura", "id": fid, "firma": firma,
+                    "popis": f"Faktura č.{cislo or '?'} | {dodavatel}",
+                    "castka": castka, "datum": dat_vys, "datum_splatnosti": dat_spl,
+                    "smer": "odchozi", "shoda": None
+                })
 
         # 2. Výdaje — odchozí platba
         pg_cur.execute("""
@@ -3833,13 +3841,18 @@ def api_parovani_navrh():
         for r in pg_cur.fetchall():
             vid, firma, dodavatel, castka, datum, dat_spl, var_sym, popis = r
             shoda = _hledej_platbu_pg(pg_cur, castka, datum, dat_spl, var_sym or None, smer='odchozi')
-            navrhy.append({
-                "typ": "vydaj", "id": vid, "firma": firma,
-                "popis": f"Výdaj | {dodavatel}",
-                "detail": popis, "var_sym": var_sym,
-                "castka": castka, "datum": datum, "datum_splatnosti": dat_spl,
-                "smer": "odchozi", "shoda": shoda
-            })
+            if shoda:
+                pg_cur.execute("UPDATE vydaje SET stav='zaplaceno', datum_zaplaceno=%s WHERE id=%s",
+                               (shoda['datum'], vid))
+                auto_zaplaceno += 1
+            else:
+                navrhy.append({
+                    "typ": "vydaj", "id": vid, "firma": firma,
+                    "popis": f"Výdaj | {dodavatel}",
+                    "detail": popis, "var_sym": var_sym,
+                    "castka": castka, "datum": datum, "datum_splatnosti": dat_spl,
+                    "smer": "odchozi", "shoda": None
+                })
 
         # 3. Vystavené faktury — příchozí platba
         pg_cur.execute("""
@@ -3853,19 +3866,26 @@ def api_parovani_navrh():
         for r in pg_cur.fetchall():
             fid, firma, odberatel, cislo, castka, datum, dat_spl, var_sym, popis = r
             shoda = _hledej_platbu_pg(pg_cur, castka, datum, dat_spl, cislo or var_sym or None, smer='prichozi')
-            navrhy.append({
-                "typ": "vystavena", "id": fid, "firma": firma,
-                "popis": f"Vystavená FA č.{cislo or '?'} | {odberatel}",
-                "detail": popis, "var_sym": cislo or var_sym,
-                "castka": castka, "datum": datum, "datum_splatnosti": dat_spl,
-                "smer": "prichozi", "shoda": shoda
-            })
+            if shoda:
+                pg_cur.execute("UPDATE vystavene_faktury SET stav='zaplaceno', datum_zaplaceno=%s WHERE id=%s",
+                               (shoda['datum'], fid))
+                auto_zaplaceno += 1
+            else:
+                navrhy.append({
+                    "typ": "vystavena", "id": fid, "firma": firma,
+                    "popis": f"Vystavená FA č.{cislo or '?'} | {odberatel}",
+                    "detail": popis, "var_sym": cislo or var_sym,
+                    "castka": castka, "datum": datum, "datum_splatnosti": dat_spl,
+                    "smer": "prichozi", "shoda": None
+                })
 
+        if auto_zaplaceno:
+            pg_conn.commit()
         pg_conn.close()
     except Exception as e:
         return jsonify({"navrhy": [], "error": str(e)})
 
-    return jsonify({"navrhy": navrhy})
+    return jsonify({"navrhy": navrhy, "auto_zaplaceno": auto_zaplaceno})
 
 
 def _hledej_platbu_pg(pg_cur, castka, datum, datum_splatnosti, cislo_faktury, smer):
