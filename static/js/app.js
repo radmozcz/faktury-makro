@@ -676,22 +676,22 @@ function _renderRocniTrzby(data) {
     }
   });
 
-  const rokHlavicky = roky.map(r => `<th style="text-align:right;padding:4px 6px;white-space:nowrap">${r}</th>`).join('');
+  const rokHlavicky = roky.map(r => `<th style="text-align:right;padding:4px 12px;white-space:nowrap">${r}</th>`).join('');
 
   const radky = [];
   for (let m = 1; m <= 12; m++) {
     const bunky = roky.map(r => {
       const d = data[String(r)]?.[String(m)] || data[String(r)]?.[m];
-      if (!d) return `<td style="text-align:right;padding:3px 6px;color:var(--txt2)">—</td>`;
-      return `<td style="text-align:right;padding:3px 6px;white-space:nowrap">
+      if (!d) return `<td style="text-align:right;padding:3px 12px;color:var(--txt2)">—</td>`;
+      return `<td style="text-align:right;padding:3px 12px;white-space:nowrap">
         ${czInt(d.trzba)} / ${czInt(d.prumer)}
       </td>`;
     }).join('');
-    radky.push(`<tr><td style="padding:3px 6px;font-weight:500;white-space:nowrap">${mesNames[m]}</td>${bunky}</tr>`);
+    radky.push(`<tr><td style="padding:3px 12px;font-weight:500;white-space:nowrap">${mesNames[m]}</td>${bunky}</tr>`);
   }
 
-  const soucetyRow = roky.map(r => `<td style="text-align:right;padding:4px 6px;font-weight:700">${czInt(celkem[r])}</td>`).join('');
-  const prumeryRow = roky.map(r => `<td style="text-align:right;padding:3px 6px;color:var(--txt2)">${pocetMesicu[r] ? czInt(Math.round(celkem[r] / pocetMesicu[r])) : '—'}</td>`).join('');
+  const soucetyRow = roky.map(r => `<td style="text-align:right;padding:4px 12px;font-weight:700">${czInt(celkem[r])}</td>`).join('');
+  const prumeryRow = roky.map(r => `<td style="text-align:right;padding:3px 12px;color:var(--txt2)">${pocetMesicu[r] ? czInt(Math.round(celkem[r] / pocetMesicu[r])) : '—'}</td>`).join('');
 
   const div = document.createElement('div');
   div.innerHTML = `
@@ -699,19 +699,19 @@ function _renderRocniTrzby(data) {
       <div style="font-weight:600;font-size:.9rem;margin-bottom:.6rem">📊 Tržby po rocích
         <span style="font-size:.72rem;font-weight:400;color:var(--txt2);margin-left:.4rem">celkem / průměr/den</span>
       </div>
-      <table style="font-size:.8rem;width:100%;border-collapse:collapse">
+      <table style="font-size:.8rem;width:auto;border-collapse:collapse">
         <thead><tr>
-          <th style="padding:4px 6px;text-align:left;white-space:nowrap">Měsíc</th>
+          <th style="padding:4px 12px;text-align:left;white-space:nowrap">Měsíc</th>
           ${rokHlavicky}
         </tr></thead>
         <tbody>${radky.join('')}</tbody>
         <tfoot>
           <tr style="border-top:2px solid var(--border)">
-            <td style="padding:4px 6px;font-weight:700">Celkem rok</td>
+            <td style="padding:4px 12px;font-weight:700">Celkem rok</td>
             ${soucetyRow}
           </tr>
           <tr>
-            <td style="padding:3px 6px;color:var(--txt2)">Prům./měsíc</td>
+            <td style="padding:3px 12px;color:var(--txt2)">Prům./měsíc</td>
             ${prumeryRow}
           </tr>
         </tfoot>
