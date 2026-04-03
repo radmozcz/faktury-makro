@@ -866,6 +866,13 @@ def parse_makro_pdf(filepath):
             if "Súpistovaru" in first_despaced and "FAKTURA" not in first_despaced:
                 return None, "Tento soubor je 'Súpis tovaru' (interní doklad MAKRO) – není to daňová faktura. Soubor nebyl nahrán."
 
+            # Naskenované PDF — žádný text → předat Claude API s MAKRO kontextem
+            if not first_text.strip():
+                api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+                if api_key:
+                    return parse_faktura_claude(filepath)
+                return None, "Naskenované PDF — OCR není k dispozici"
+
             # Pokud PDF neobsahuje MAKRO text, předej rovnou Claude
             makro_keywords = ["MAKRO", "makro", "Cash & Carry"]
             if not any(kw in first_text for kw in makro_keywords):
