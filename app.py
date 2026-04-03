@@ -788,6 +788,21 @@ def migrate_db():
             try: conn.execute("ALTER TABLE bankovni_pohyby ADD COLUMN sparovano_id INTEGER DEFAULT NULL")
             except Exception: pass
 
+    # Trvalé příkazy (soukromé výdaje)
+    with get_db() as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS trvale_prikazy (
+            id            SERIAL PRIMARY KEY,
+            lokace        TEXT NOT NULL DEFAULT '',
+            dodavatel     TEXT NOT NULL DEFAULT '',
+            popis         TEXT NOT NULL DEFAULT '',
+            zpusob_uhrady TEXT NOT NULL DEFAULT 'převodem',
+            castka        REAL NOT NULL DEFAULT 0,
+            den_v_mesici  INTEGER NOT NULL DEFAULT 1,
+            aktivni       INTEGER NOT NULL DEFAULT 1,
+            poznamka      TEXT DEFAULT '',
+            created_at    TEXT DEFAULT NOW()
+        )""")
+
     # Dluhy — půjčky kamarádům
     with get_db() as conn:
         conn.execute("""CREATE TABLE IF NOT EXISTS dluhy_osoby (
@@ -6794,22 +6809,6 @@ def api_oprav_sekvence():
         except Exception as e:
             vysledky[tbl] = str(e)
     return jsonify(vysledky)
-@app.route("/admin/smazat-reporty-2023-2024")
-@vyzaduj_prihlaseni
-def smazat_reporty_2023_2024():
-    if session.get("role") != "admin":
-        return "Pouze admin", 403
-    try:
-        import psycopg2 as _pg
-        conn = _pg.connect(os.environ.get("DATABASE_URL", ""))
-        cur = conn.cursor()
-        cur.execute("DELETE FROM reporty WHERE datum >= '2023-01-01' AND datum <= '2024-12-31'")
-        smazano = cur.rowcount
-        conn.commit()
-        conn.close()
-        return f"✅ Smazáno {smazano} záznamů za 2023-2024."
-    except Exception as e:
-        return f"❌ Chyba: {e}", 500
 
 @app.route("/fix-prava-seq")
 def fix_prava_seq():
@@ -7101,6 +7100,162 @@ def api_dluhy_smazat_osobu(oid):
     return jsonify({"ok": True})
 
 
+# ════════════════════════════════════════════════════════════════
+#  TRVALÉ PŘÍKAZY
+# ════════════════════════════════════════════════════════════════
+
+@app.route("/api/trvale-prikazy")
+@vyzaduj_prihlaseni
+def api_trvale_prikazy_seznam():
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM trvale_prikazy ORDER BY den_v_mesici, dodavatel")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return jsonify({"prikazy": [dict(r) for r in rows]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/trvale-prikazy", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_trvale_prikazy_ulozit():
+    data = request.json or {}
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO trvale_prikazy
+                (lokace, dodavatel, popis, zpusob_uhrady, castka, den_v_mesici, aktivni, poznamka)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+            RETURNING id
+        """, (
+            data.get("lokace", ""),
+            data.get("dodavatel", ""),
+            data.get("popis", ""),
+            data.get("zpusob_uhrady", "převodem"),
+            float(data.get("castka", 0)),
+            int(data.get("den_v_mesici", 1)),
+            1,
+            data.get("poznamka", ""),
+        ))
+        nid = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({"ok": True, "id": nid})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/trvale-prikazy/<int:pid>", methods=["PUT"])
+@vyzaduj_prihlaseni
+def api_trvale_prikazy_edit(pid):
+    data = request.json or {}
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE trvale_prikazy SET
+                lokace=%s, dodavatel=%s, popis=%s, zpusob_uhrady=%s,
+                castka=%s, den_v_mesici=%s, aktivni=%s, poznamka=%s
+            WHERE id=%s
+        """, (
+            data.get("lokace", ""),
+            data.get("dodavatel", ""),
+            data.get("popis", ""),
+            data.get("zpusob_uhrady", "převodem"),
+            float(data.get("castka", 0)),
+            int(data.get("den_v_mesici", 1)),
+            int(data.get("aktivni", 1)),
+            data.get("poznamka", ""),
+            pid,
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/trvale-prikazy/<int:pid>", methods=["DELETE"])
+@vyzaduj_prihlaseni
+def api_trvale_prikazy_smazat(pid):
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = conn.cursor()
+        cur.execute("DELETE FROM trvale_prikazy WHERE id=%s", (pid,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/trvale-prikazy/generovat", methods=["POST"])
+@vyzaduj_prihlaseni
+def api_trvale_prikazy_generovat():
+    """Vygeneruje trvalé příkazy jako výdaje pro zadaný rok/měsíc (pokud ještě neexistují)."""
+    data = request.json or {}
+    rok  = int(data.get("rok",  date.today().year))
+    mes  = int(data.get("mesic", date.today().month))
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT * FROM trvale_prikazy WHERE aktivni=1")
+        prikazy = cur.fetchall()
+        vygenerovano = 0
+        preskoceno   = 0
+        for p in prikazy:
+            import calendar as _cal
+            posledni_den = _cal.monthrange(rok, mes)[1]
+            den = min(p["den_v_mesici"], posledni_den)
+            datum_str = f"{rok:04d}-{mes:02d}-{den:02d}"
+            # Zkontrolovat zda výdaj pro tento trvalý příkaz v tomto měsíci již existuje
+            cur2 = conn.cursor()
+            cur2.execute("""
+                SELECT id FROM vydaje
+                WHERE zdroj='trvaly_prikaz'
+                  AND poznamka=%s
+                  AND datum>=%s AND datum<=%s
+            """, (
+                f"TP:{p['id']}",
+                f"{rok:04d}-{mes:02d}-01",
+                f"{rok:04d}-{mes:02d}-{posledni_den:02d}",
+            ))
+            existing = cur2.fetchone()
+            cur2.close()
+            if existing:
+                preskoceno += 1
+                continue
+            cur3 = conn.cursor()
+            cur3.execute("""
+                INSERT INTO vydaje
+                    (firma_zkratka, dodavatel, datum, castka, zpusob_uhrady,
+                     stav, popis, poznamka, zdroj, typ, stitky)
+                VALUES (%s,%s,%s,%s,%s,'nezaplaceno',%s,%s,'trvaly_prikaz','soukrome','🔁 trvalý příkaz')
+            """, (
+                p["lokace"] or "_soukrome",
+                p["dodavatel"],
+                datum_str,
+                p["castka"],
+                p["zpusob_uhrady"],
+                p["popis"],
+                f"TP:{p['id']}",
+            ))
+            cur3.close()
+            vygenerovano += 1
+        conn.commit()
+        conn.close()
+        return jsonify({"ok": True, "vygenerovano": vygenerovano, "preskoceno": preskoceno})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 if __name__ == "__main__":
     print("=" * 55)
     print("  Správa faktur – spouštím server")
@@ -7222,4 +7377,5 @@ def api_dokumenty_url(did):
     url = get_dokument_gcs_url(row["soubor_cesta"]) or row["soubor_url"] or ""
     return jsonify({"url": url})
     
+
 
