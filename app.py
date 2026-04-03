@@ -1127,6 +1127,34 @@ def _ocr_best_orientation(img):
     return best_text
 
 
+def _precti_celkovou_castku_z_pdf(filepath):
+    """Přečte celkovou částku přímo z textu PDF přes pdfplumber.
+    Hledá klíčová slova v pořadí priority. Vrací float nebo None."""
+    if not PDF_SUPPORT:
+        return None
+    try:
+        import re as _re
+        klicova_slova = [
+            r"Celkov[áa]\s*[čc][áa]stka",   # Celková částka (MAKRO, Dekos)
+            r"K\s*[úu]hrad[ěe]",              # K úhradě
+            r"Celkem\s*s\s*DPH",              # Celkem s DPH
+            r"Celkem\s*v[čc]etně\s*DPH",      # Celkem včetně DPH
+        ]
+        with pdfplumber.open(filepath) as _pdf:
+            # Prohledej stránky od poslední
+            for _page in reversed(_pdf.pages):
+                _text = _page.extract_text() or ""
+                for _kw in klicova_slova:
+                    for _line in _text.splitlines():
+                        if _re.search(_kw, _line, _re.IGNORECASE):
+                            _nums = _re.findall(r"(\d{1,3}(?:[\s]\d{3})*[,.]\d{2})", _line)
+                            if _nums:
+                                return _parse_money(_nums[-1])
+    except Exception:
+        pass
+    return None
+
+
 def parse_faktura_claude(filepath):
     """Univerzální parser faktur a účtenek přes Claude API – funguje pro PDF i obrázky."""
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -1135,6 +1163,11 @@ def parse_faktura_claude(filepath):
 
     try:
         ext = filepath.rsplit(".", 1)[-1].lower()
+
+        # Pro PDF zkusit přečíst celkovou částku přímo z textu (spolehlivější než Claude)
+        castka_z_textu = None
+        if ext == "pdf":
+            castka_z_textu = _precti_celkovou_castku_z_pdf(filepath)
 
         # PDF — poslat přímo Claude API (podporuje vícestrankové PDF nativně)
         if ext == "pdf":
@@ -1233,13 +1266,13 @@ PRAVIDLA:
             "datum_vystaveni":  parsed.get("datum_vystaveni") or "",
             "datum_splatnosti": parsed.get("datum_splatnosti") or "",
             "zpusob_uhrady":    parsed.get("zpusob_uhrady") or "",
-            "celkem_s_dph":     float(parsed.get("celkem_s_dph") or 0),
+            "celkem_s_dph":     castka_z_textu if castka_z_textu else float(parsed.get("celkem_s_dph") or 0),
             "polozky": [
                 {
                     "nazev":                   p.get("nazev", ""),
                     "mnozstvi":                float(p.get("mnozstvi", 1) or 1),
                     "jednotka":                p.get("jednotka", "ks"),
-                    "cena_za_jednotku_s_dph":  float(p.get("cena_za_jednotku_s_dph", 0) or 0),
+                    "cena_za_jednotku_s_dph":  float(p.get("cena_za_jednostku_s_dph", 0) or 0),
                     "celkem_s_dph":            float(p.get("celkem_s_dph", 0) or 0),
                 }
                 for p in parsed.get("polozky", [])
