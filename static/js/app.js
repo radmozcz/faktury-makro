@@ -1432,6 +1432,10 @@ function renderNahrat() {
         </div>
         <button class="btn btn-secondary btn-sm" style="margin-top:.5rem" onclick="addPolozkaRow()">+ Přidat položku</button>
         <div style="margin-top:1rem;font-weight:600;font-size:1.05rem" id="totalSum"></div>
+        <div style="margin-top:1rem;padding:1rem;background:#fef9c3;border:2px solid #fbbf24;border-radius:8px">
+          <label style="font-weight:700;color:#92400e;display:block;margin-bottom:.4rem">⚠️ Celková částka faktury (Kč) — zkontrolujte s originálem!</label>
+          <input id="pCelkemFaktury" type="number" step="0.01" class="form-control" style="max-width:200px;font-size:1.1rem;font-weight:700;border-color:#fbbf24" placeholder="0.00">
+        </div>
         <div class="btn-group" style="margin-top:1.2rem">
           <button class="btn btn-primary" onclick="ulozitFakturuMakro()">💾 Uložit fakturu</button>
           <button class="btn btn-secondary" onclick="document.getElementById('parsedForm').style.display='none';document.getElementById('uploadStatus').textContent=''">🗑 Zrušit</button>
@@ -2226,6 +2230,8 @@ async function naplnFormular(data, appendMode = false) {
   document.getElementById("pCislo").value     = data.cislo_faktury || "";
   document.getElementById("pDatVys").value    = data.datum_vystaveni || "";
   document.getElementById("pDatSpl").value    = data.datum_splatnosti || "";
+  if (document.getElementById("pCelkemFaktury"))
+    document.getElementById("pCelkemFaktury").value = data.celkem_s_dph || "";
 
   if (data.firma_zkratka) {
     const sel = document.getElementById("nahratFirma");
@@ -2379,6 +2385,7 @@ async function ulozitFakturuMakro() {
     stav:          "zaplaceno",
     soubor_cesta:  uploadedFilePath || "",
     zdroj:         "makro",
+    celkem_s_dph:  parseFloat(document.getElementById("pCelkemFaktury")?.value || 0),
     polozky,
   };
 
