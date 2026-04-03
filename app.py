@@ -1156,7 +1156,7 @@ def _precti_celkovou_castku_z_pdf(filepath):
             if OCR_SUPPORT:
                 import io as _io
                 for _page in reversed(_pdf.pages):
-                    _pil = _page.to_image(resolution=200).original
+                    _pil = _page.to_image(resolution=150).original
                     _text = pytesseract.image_to_string(_pil, lang="ces+eng")
                     for _line in _text.splitlines():
                         if _re.search(r"celkov.{0,3}\s*.{0,3}stka", _line, _re.IGNORECASE) \
@@ -6943,7 +6943,7 @@ def debug_ocr():
         with pdfplumber.open(filepath) as pdf:
             result_lines.append(f"Stránek: {len(pdf.pages)}")
             page = pdf.pages[-1]
-            pil = page.to_image(resolution=200).original
+            pil = page.to_image(resolution=150).original
             text = pytesseract.image_to_string(pil, lang="ces+eng")
             result_lines.append("--- Řádky s klíčovými slovy ---")
             for line in text.splitlines():
