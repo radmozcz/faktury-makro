@@ -1167,13 +1167,14 @@ def parse_faktura_claude(filepath):
         # PDF — zjistit zda je textové nebo naskenované
         if ext == "pdf":
             castka_z_textu = _precti_celkovou_castku_z_pdf(filepath)
-            # Zkusit převést stránky na obrázky (funguje pro naskenované i textové PDF)
+            # Zkusit převést stránky na obrázky
             if PDF_SUPPORT and OCR_SUPPORT:
                 try:
                     import io as _io
                     content_blocks = []
+                    posledni_strana_b64 = None
                     with pdfplumber.open(filepath) as _pdf:
-                        for _page in _pdf.pages:
+                        for i, _page in enumerate(_pdf.pages):
                             _pil = _page.to_image(resolution=150).original
                             _max = 3000
                             if _pil.width > _max or _pil.height > _max:
@@ -1185,9 +1186,32 @@ def parse_faktura_claude(filepath):
                                 "type": "image",
                                 "source": {"type": "base64", "media_type": "image/jpeg", "data": _b64}
                             })
+                            if i == len(_pdf.pages) - 1:
+                                posledni_strana_b64 = _b64
+
+                    # Pokud pdfplumber nenašel celkovou částku z textu,
+                    # zeptáme se Claude jen na poslední stránku
+                    if not castka_z_textu and posledni_strana_b64 and len(content_blocks) > 1:
+                        try:
+                            _client = anthropic.Anthropic(api_key=api_key)
+                            _resp = _client.messages.create(
+                                model="claude-sonnet-4-20250514",
+                                max_tokens=50,
+                                messages=[{"role": "user", "content": [
+                                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": posledni_strana_b64}},
+                                    {"type": "text", "text": "Na tomto obrázku najdi řádek 'Celková částka' a vrať POUZE číslo z tohoto řádku. Nic jiného nepište, jen číslo například: 4008.87"}
+                                ]}]
+                            )
+                            import re as _re
+                            _txt = _resp.content[0].text.strip().replace(",", ".").replace(" ", "")
+                            _m = _re.search(r"\d+\.\d{2}", _txt)
+                            if _m:
+                                castka_z_textu = float(_m.group())
+                        except Exception:
+                            pass
+
                     content_block = None
                 except Exception:
-                    # Fallback: poslat PDF přímo
                     with open(filepath, "rb") as f:
                         raw = f.read()
                     b64 = base64.standard_b64encode(raw).decode("utf-8")
