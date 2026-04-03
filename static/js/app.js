@@ -2109,9 +2109,9 @@ function vydajeHromadneNahrat(typ = "provozni") {
   if (jeSoukrome) {
     openModal(`📦 Hromadné nahrání — ${nazev}`, `
       <div class="form-group">
-        <label class="form-label">Lokace</label>
+        <label class="form-label">Lokace (volitelně — jinak z faktury)</label>
         <select id="hromadneVolba" class="form-control">
-          <option value="">— nevyplněno —</option>
+          <option value="">— automaticky z faktury —</option>
           <option value="Praha">Praha</option>
           <option value="Třebovle">Třebovle</option>
           <option value="UNI">UNI</option>
@@ -2128,22 +2128,15 @@ function vydajeHromadneNahrat(typ = "provozni") {
           inp.click();">Vybrat soubory →</button>
       </div>`);
   } else {
-    const firmy = App.config?.firmy || ["FP","MR","CFF"];
     openModal(`📦 Hromadné nahrání — ${nazev}`, `
-      <div class="form-group">
-        <label class="form-label">Firma</label>
-        <select id="hromadneVolba" class="firma-select form-control">
-          ${firmy.map(f => `<option value="${f}">${f}</option>`).join("")}
-        </select>
-      </div>
+      <p style="color:var(--txt2);font-size:.9rem">Firma se přiřadí automaticky podle IČO odběratele na faktuře.</p>
       <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
         <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
         <button class="btn btn-primary" onclick="
-          const volba = document.getElementById('hromadneVolba').value;
           closeModal();
           const inp = document.createElement('input');
           inp.type='file'; inp.accept='.pdf,.png,.jpg,.jpeg'; inp.multiple=true;
-          inp.onchange=()=>{ if(inp.files.length) _vydajeHromadneZpracovat(inp.files,'provozni',volba); };
+          inp.onchange=()=>{ if(inp.files.length) _vydajeHromadneZpracovat(inp.files,'provozni',''); };
           inp.click();">Vybrat soubory →</button>
       </div>`);
   }
@@ -2205,28 +2198,21 @@ async function _vydajeHromadneZpracovat(files, typ, firmaVolba) {
 //  HROMADNÉ NAHRÁNÍ — Vystavené faktury
 // ═══════════════════════════════════════════════════════════════
 function vystaveneHromadneNahrat() {
-  const firmy = App.config?.firmy || ["FP","MR","CFF"];
   openModal("📦 Hromadné nahrání — Vystavené faktury", `
-    <div class="form-group">
-      <label class="form-label">Vystavující firma</label>
-      <select id="hromadneVystFirma" class="firma-select form-control">
-        ${firmy.map(f => `<option value="${f}">${f}</option>`).join("")}
-      </select>
-    </div>
+    <p style="color:var(--txt2);font-size:.9rem">Firma se přiřadí automaticky podle IČO na faktuře.</p>
     <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
       <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
       <button class="btn btn-primary" onclick="
-        const firma = document.getElementById('hromadneVystFirma').value;
         closeModal();
         const inp = document.createElement('input');
         inp.type='file'; inp.accept='.pdf,.png,.jpg,.jpeg'; inp.multiple=true;
-        inp.onchange=()=>{ if(inp.files.length) _vystaveneHromadneZpracovat(inp.files, firma); };
+        inp.onchange=()=>{ if(inp.files.length) _vystaveneHromadneZpracovat(inp.files); };
         inp.click();">Vybrat soubory →</button>
     </div>`);
 }
 
-async function _vystaveneHromadneZpracovat(files, firma) {
-  openModal(`📦 Hromadné nahrání — Vystavené faktury (${firma})`, `
+async function _vystaveneHromadneZpracovat(files) {
+  openModal("📦 Hromadné nahrání — Vystavené faktury", `
     <div id="hromadneVystStatus" style="max-height:400px;overflow-y:auto">
       <div>Zpracovávám ${files.length} soubor(ů)...</div>
     </div>
@@ -2252,7 +2238,7 @@ async function _vystaveneHromadneZpracovat(files, firma) {
       if (data.error) { row.innerHTML = `❌ ${file.name} – ${data.error}`; err++; continue; }
 
       const payload = {
-        firma_zkratka:    firma,
+        firma_zkratka:    data.firma_zkratka || "",
         odberatel:        data.odberatel || "",
         cislo_faktury:    data.cislo_faktury || "",
         datum:            data.datum_vystaveni || new Date().toISOString().slice(0,10),
