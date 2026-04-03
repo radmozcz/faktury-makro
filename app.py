@@ -1129,24 +1129,37 @@ def _ocr_best_orientation(img):
 
 def _precti_celkovou_castku_z_pdf(filepath):
     """Přečte celkovou částku přímo z textu PDF přes pdfplumber.
-    Hledá klíčová slova v pořadí priority. Vrací float nebo None."""
+    Pro naskenované PDF použije OCR (Tesseract).
+    Vrací float nebo None."""
     if not PDF_SUPPORT:
         return None
     try:
         import re as _re
         klicova_slova = [
-            r"Celkov[áa]\s*[čc][áa]stka",   # Celková částka (MAKRO, Dekos)
-            r"K\s*[úu]hrad[ěe]",              # K úhradě
-            r"Celkem\s*s\s*DPH",              # Celkem s DPH
-            r"Celkem\s*v[čc]etně\s*DPH",      # Celkem včetně DPH
+            r"celkov[aá]\s*[cč][aá]stka",
+            r"k\s*[uú]hrad[eě]",
+            r"celkem\s*s\s*dph",
         ]
         with pdfplumber.open(filepath) as _pdf:
-            # Prohledej stránky od poslední
+            # Nejdřív zkus textové PDF (stránky od poslední)
             for _page in reversed(_pdf.pages):
                 _text = _page.extract_text() or ""
-                for _kw in klicova_slova:
+                if _text.strip():
+                    for _kw in klicova_slova:
+                        for _line in _text.splitlines():
+                            if _re.search(_kw, _line, _re.IGNORECASE):
+                                _nums = _re.findall(r"(\d{1,3}(?:[\s]\d{3})*[,.]\d{2})", _line)
+                                if _nums:
+                                    return _parse_money(_nums[-1])
+
+            # Naskenované PDF — použij OCR přes Tesseract
+            if OCR_SUPPORT:
+                import io as _io
+                for _page in reversed(_pdf.pages):
+                    _pil = _page.to_image(resolution=200).original
+                    _text = pytesseract.image_to_string(_pil, lang="ces+eng")
                     for _line in _text.splitlines():
-                        if _re.search(_kw, _line, _re.IGNORECASE):
+                        if _re.search(r"celkov.?\s*[cč].?stka", _line, _re.IGNORECASE):
                             _nums = _re.findall(r"(\d{1,3}(?:[\s]\d{3})*[,.]\d{2})", _line)
                             if _nums:
                                 return _parse_money(_nums[-1])
@@ -1188,29 +1201,6 @@ def parse_faktura_claude(filepath):
                             })
                             if i == len(_pdf.pages) - 1:
                                 posledni_strana_b64 = _b64
-
-                    # Pokud pdfplumber nenašel celkovou částku z textu,
-                    # zeptáme se Claude jen na poslední stránku
-                    if not castka_z_textu and posledni_strana_b64 and len(content_blocks) > 1:
-                        try:
-                            _client = anthropic.Anthropic(api_key=api_key)
-                            _resp = _client.messages.create(
-                                model="claude-sonnet-4-20250514",
-                                max_tokens=50,
-                                messages=[{"role": "user", "content": [
-                                    {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": posledni_strana_b64}},
-                                    {"type": "text", "text": "Na tomto obrázku najdi řádek 'Celková částka' a vrať POUZE číslo z tohoto řádku. Nic jiného nepište, jen číslo například: 4008.87"}
-                                ]}]
-                            )
-                            import re as _re
-                            _txt = _resp.content[0].text.strip().replace(",", ".").replace(" ", "")
-                            app.logger.info(f"[CASTKA DEBUG] Claude odpověděl: '{_txt}'")
-                            _m = _re.search(r"\d+\.\d{2}", _txt)
-                            if _m:
-                                castka_z_textu = float(_m.group())
-                                app.logger.info(f"[CASTKA DEBUG] Nalezena částka: {castka_z_textu}")
-                        except Exception as _e:
-                            app.logger.warning(f"[CASTKA DEBUG] Chyba: {_e}")
 
                     content_block = None
                 except Exception:
