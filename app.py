@@ -1259,7 +1259,7 @@ PRAVIDLA:
 - Způsob úhrady: pokud vidíš "karta", "card", "kartou" → "kartou"; "cash", "hotov" → "hotově"
 - Položky: zahrň všechny položky které vidíš na dokladu
 - celkem_s_dph u položky = množství × cena za jednotku
-- CELKOVÁ ČÁSTKA: Hledej pole "Celková částka" na poslední straně — je to číslo na řádku "Celková částka" těsně nad "Platba kartou" nebo "Platba hotově". Toto číslo ber jako celkem_s_dph. NIKDY nesčítej položky ani hodnoty "Strana celkem" nebo "Poslední strana celkem" — ty jsou bez DPH a bez zahrnutí slev. Příklad: pokud vidíš "Celková částka 4 008,87" a "Platba kartou 4 008,87", výsledek je 4008.87.
+- CELKOVÁ ČÁSTKA (celkem_s_dph): Na poslední straně hledej řádek který začíná nebo obsahuje přesně "Celková částka" — číslo na tomto řádku je výsledek. Stejné číslo je pak zopakováno na řádku "Platba kartou" nebo "Platba hotově". IGNORUJ všechny ostatní součty: "Strana celkem", "Poslední strana celkem", "hodnota zboží", "částka daně", čísla v DPH tabulce. Faktura MAKRO: celková částka je vždy nižší než součet položek kvůli slevám CLAP.
 """
 
         client = anthropic.Anthropic(api_key=api_key)
