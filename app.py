@@ -1164,21 +1164,41 @@ def parse_faktura_claude(filepath):
     try:
         ext = filepath.rsplit(".", 1)[-1].lower()
 
-        # Pro PDF zkusit přečíst celkovou částku přímo z textu (spolehlivější než Claude)
-        castka_z_textu = None
+        # PDF — zjistit zda je textové nebo naskenované
         if ext == "pdf":
             castka_z_textu = _precti_celkovou_castku_z_pdf(filepath)
-
-        # PDF — poslat přímo Claude API (podporuje vícestrankové PDF nativně)
-        if ext == "pdf":
-            with open(filepath, "rb") as f:
-                raw = f.read()
-            b64 = base64.standard_b64encode(raw).decode("utf-8")
-            content_block = {
-                "type": "document",
-                "source": {"type": "base64", "media_type": "application/pdf", "data": b64}
-            }
-            content_blocks = None
+            # Zkusit převést stránky na obrázky (funguje pro naskenované i textové PDF)
+            if PDF_SUPPORT and OCR_SUPPORT:
+                try:
+                    import io as _io
+                    content_blocks = []
+                    with pdfplumber.open(filepath) as _pdf:
+                        for _page in _pdf.pages:
+                            _pil = _page.to_image(resolution=150).original
+                            _max = 3000
+                            if _pil.width > _max or _pil.height > _max:
+                                _pil.thumbnail((_max, _max), Image.LANCZOS)
+                            _buf = _io.BytesIO()
+                            _pil.save(_buf, format="JPEG", quality=82)
+                            _b64 = base64.standard_b64encode(_buf.getvalue()).decode("utf-8")
+                            content_blocks.append({
+                                "type": "image",
+                                "source": {"type": "base64", "media_type": "image/jpeg", "data": _b64}
+                            })
+                    content_block = None
+                except Exception:
+                    # Fallback: poslat PDF přímo
+                    with open(filepath, "rb") as f:
+                        raw = f.read()
+                    b64 = base64.standard_b64encode(raw).decode("utf-8")
+                    content_block = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}}
+                    content_blocks = None
+            else:
+                with open(filepath, "rb") as f:
+                    raw = f.read()
+                b64 = base64.standard_b64encode(raw).decode("utf-8")
+                content_block = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}}
+                content_blocks = None
         else:
             # Obrázek (JPG, PNG...)
             media_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
