@@ -4377,7 +4377,7 @@ def api_report_import_xlsx():
 
         rows_to_insert = []
         for sheet_name in wb.sheetnames:
-            if sheet_name not in ("2025", "2026"):
+            if sheet_name not in ("2023", "2024", "2025", "2026"):
                 continue
             year = int(sheet_name)
             ws = wb[sheet_name]
