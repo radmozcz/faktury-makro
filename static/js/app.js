@@ -2144,7 +2144,7 @@ function vydajeHromadneNahrat(typ = "provozni") {
 
 async function _vydajeHromadneZpracovat(files, typ, firmaVolba) {
   const jeSoukrome = typ === "soukrome";
-  openModal(`📦 Hromadné nahrání — ${jeSoukrome ? "Soukromé výdaje" : "Výdaje"} (${firmaVolba || "—"})`, `
+  openModal(`📦 Hromadné nahrání — ${jeSoukrome ? "Soukromé výdaje" : "Výdaje"}`, `
     <div id="hromadneVydajeStatus" style="max-height:400px;overflow-y:auto">
       <div>Zpracovávám ${files.length} soubor(ů)...</div>
     </div>
@@ -2162,30 +2162,33 @@ async function _vydajeHromadneZpracovat(files, typ, firmaVolba) {
     statusEl.appendChild(row);
 
     try {
+      // Krok 1: nahrát a rozpoznat (stejně jako doVydajNahrat)
       const fd = new FormData();
       fd.append("soubor", file);
-      fd.append("typ", typ);
+      if (firmaVolba) fd.append("firma_zkratka", firmaVolba);
       const r = await fetch("/api/vydaje/nahrat", { method: "POST", body: fd });
       const data = await r.json();
 
       if (data.error) { row.innerHTML = `❌ ${file.name} – ${data.error}`; err++; continue; }
 
+      // Krok 2: uložit (stejně jako ulozitVydajZDokladu)
       const payload = {
-        firma_zkratka: firmaVolba || (jeSoukrome ? "_soukrome" : ""),
+        firma_zkratka: firmaVolba || data.firma_zkratka || "",
         dodavatel:     data.dodavatel || "",
         datum:         data.datum || new Date().toISOString().slice(0,10),
-        castka:        data.castka || 0,
-        zpusob_uhrady: data.zpusob_uhrady || "převodem",
-        stav:          "nezaplaceno",
-        popis:         data.popis || "",
-        poznamka:      data.poznamka || "",
+        castka:        parseFloat(data.castka) || 0,
+        zpusob_uhrady: data.zpusob_uhrady || "hotovost",
+        var_sym:       data.var_sym || "",
+        datum_splatnosti: data.datum_splatnosti || "",
+        popis:         data.poznamka || "",
+        stav:          "zaplaceno",
         soubor_cesta:  data.soubor_cesta || "",
         soubor_url:    data.soubor_gcs_url || "",
         zdroj:         "hromadne",
         typ:           typ,
       };
       await api("/api/vydaje", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload) });
-      row.innerHTML = `✅ ${file.name} – uloženo (${czMoneyFull(payload.castka)})`;
+      row.innerHTML = `✅ ${file.name} – uloženo ${payload.firma_zkratka ? `(${payload.firma_zkratka}, ` : "("}${czMoneyFull(payload.castka)})`;
       ok++;
     } catch(e) {
       row.innerHTML = `❌ ${file.name} – ${e.message}`; err++;
