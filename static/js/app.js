@@ -2166,29 +2166,32 @@ async function _vydajeHromadneZpracovat(files, typ, firmaVolba) {
       const fd = new FormData();
       fd.append("soubor", file);
       if (firmaVolba) fd.append("firma_zkratka", firmaVolba);
-      const r = await fetch("/api/vydaje/nahrat", { method: "POST", body: fd });
+      const r = await fetch("/api/vydaje/nahrat", {method:"POST", body:fd});
       const data = await r.json();
 
-      if (data.error) { row.innerHTML = `❌ ${file.name} – ${data.error}`; err++; continue; }
+      if (data.error && !data.soubor_cesta) {
+        row.innerHTML = `❌ ${file.name} – ${data.error}`; err++;
+        continue;
+      }
 
       // Krok 2: uložit (stejně jako ulozitVydajZDokladu)
       const payload = {
-        firma_zkratka: firmaVolba || data.firma_zkratka || "",
-        dodavatel:     data.dodavatel || "",
-        datum:         data.datum || new Date().toISOString().slice(0,10),
-        castka:        parseFloat(data.castka) || 0,
-        zpusob_uhrady: data.zpusob_uhrady || "hotovost",
-        var_sym:       data.var_sym || "",
+        firma_zkratka:    firmaVolba || data.firma_zkratka || "",
+        dodavatel:        data.dodavatel || "",
+        datum:            data.datum || new Date().toISOString().slice(0,10),
+        castka:           parseFloat(data.castka) || 0,
+        zpusob_uhrady:    data.zpusob_uhrady || "hotovost",
+        var_sym:          data.var_sym || "",
         datum_splatnosti: data.datum_splatnosti || "",
-        popis:         data.poznamka || "",
-        stav:          "zaplaceno",
-        soubor_cesta:  data.soubor_cesta || "",
-        soubor_url:    data.soubor_gcs_url || "",
-        zdroj:         "hromadne",
-        typ:           typ,
+        popis:            data.poznamka || "",
+        stav:             "zaplaceno",
+        soubor_cesta:     data.soubor_cesta || "",
+        soubor_url:       data.soubor_gcs_url || "",
+        zdroj:            "hromadne",
+        typ:              typ,
       };
-      await api("/api/vydaje", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload) });
-      row.innerHTML = `✅ ${file.name} – uloženo ${payload.firma_zkratka ? `(${payload.firma_zkratka}, ` : "("}${czMoneyFull(payload.castka)})`;
+      await api("/api/vydaje", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
+      row.innerHTML = `✅ ${file.name} – uloženo ${payload.firma_zkratka ? "(" + payload.firma_zkratka + ", " : "("}${czMoneyFull(payload.castka)})`;
       ok++;
     } catch(e) {
       row.innerHTML = `❌ ${file.name} – ${e.message}`; err++;
@@ -2233,15 +2236,18 @@ async function _vystaveneHromadneZpracovat(files) {
     statusEl.appendChild(row);
 
     try {
-      // Krok 1: nahrát soubor a spustit OCR (stejně jako spustVystOCR)
+      // Krok 1: nahrát a rozpoznat
       const fd = new FormData();
       fd.append("soubor", file);
-      const r = await fetch("/api/vystavene-faktury/nahrat", { method: "POST", body: fd });
+      const r = await fetch("/api/vystavene-faktury/nahrat", {method:"POST", body:fd});
       const data = await r.json();
 
-      if (data.error) { row.innerHTML = `❌ ${file.name} – ${data.error}`; err++; continue; }
+      if (data.error && !data.soubor_url) {
+        row.innerHTML = `❌ ${file.name} – ${data.error}`; err++;
+        continue;
+      }
 
-      // Krok 2: uložit se stejnými poli jako saveVystavena
+      // Krok 2: uložit — stejně jako saveVystavena
       const payload = {
         firma_zkratka:    data.firma_zkratka || "",
         cislo_faktury:    data.cislo_faktury || "",
@@ -2251,7 +2257,7 @@ async function _vystaveneHromadneZpracovat(files) {
         popis:            data.popis || "",
         castka:           parseFloat(data.castka) || 0,
         stav:             "ceka",
-        soubor_url:       data.soubor_url || data.soubor_gcs_url || "",
+        soubor_url:       data.soubor_url || "",
       };
       const res = await api("/api/vystavene-faktury", {
         method: "POST",
@@ -2260,9 +2266,9 @@ async function _vystaveneHromadneZpracovat(files) {
       });
 
       if (res.duplicita) {
-        row.innerHTML = `⚠️ ${file.name} – <span style="color:orange">duplikát FA #${res.duplicita.id} (${czMoneyFull(payload.castka)}) — uloženo</span>`;
+        row.innerHTML = `⚠️ ${file.name} – duplikát FA #${res.duplicita.id} (${czMoneyFull(payload.castka)}) — uloženo`;
       } else {
-        row.innerHTML = `✅ ${file.name} – uloženo ${payload.firma_zkratka ? `(${payload.firma_zkratka}, ` : "("}${czMoneyFull(payload.castka)})`;
+        row.innerHTML = `✅ ${file.name} – uloženo${payload.firma_zkratka ? " (" + payload.firma_zkratka + "," : " ("}${czMoneyFull(payload.castka)})`;
       }
       ok++;
     } catch(e) {
