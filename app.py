@@ -1204,11 +1204,13 @@ def parse_faktura_claude(filepath):
                             )
                             import re as _re
                             _txt = _resp.content[0].text.strip().replace(",", ".").replace(" ", "")
+                            app.logger.info(f"[CASTKA DEBUG] Claude odpověděl: '{_txt}'")
                             _m = _re.search(r"\d+\.\d{2}", _txt)
                             if _m:
                                 castka_z_textu = float(_m.group())
-                        except Exception:
-                            pass
+                                app.logger.info(f"[CASTKA DEBUG] Nalezena částka: {castka_z_textu}")
+                        except Exception as _e:
+                            app.logger.warning(f"[CASTKA DEBUG] Chyba: {_e}")
 
                     content_block = None
                 except Exception:
