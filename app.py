@@ -1152,22 +1152,22 @@ def _precti_celkovou_castku_z_pdf(filepath):
                                 if _nums:
                                     return _parse_money(_nums[-1])
 
-            # Naskenované PDF — použij OCR přes Tesseract
+            # Naskenované PDF — použij OCR přes Tesseract jen na poslední stránce
             if OCR_SUPPORT:
                 import io as _io
-                for _page in reversed(_pdf.pages):
-                    _pil = _page.to_image(resolution=150).original
-                    _text = pytesseract.image_to_string(_pil, lang="ces+eng")
-                    for _line in _text.splitlines():
-                        if _re.search(r"celkov.{0,3}\s*.{0,3}stka", _line, _re.IGNORECASE) \
-                                and "strana" not in _line.lower() \
-                                and "stran" not in _line.lower():
-                            _nums = _re.findall(r"(\d{1,3}(?:[\s]\d{3})*[,.]\d{2})", _line)
-                            if _nums:
-                                app.logger.info(f"[OCR CASTKA] Nalezeno: '{_line}' -> {_parse_money(_nums[-1])}")
-                                return _parse_money(_nums[-1])
-                            else:
-                                app.logger.info(f"[OCR CASTKA] Řádek nalezen ale bez čísel: '{_line}'")
+                _page = _pdf.pages[-1]
+                _pil = _page.to_image(resolution=150).original
+                _text = pytesseract.image_to_string(_pil, lang="ces+eng")
+                for _line in _text.splitlines():
+                    if _re.search(r"celkov.{0,3}\s*.{0,3}stka", _line, _re.IGNORECASE) \
+                            and "strana" not in _line.lower() \
+                            and "stran" not in _line.lower():
+                        _nums = _re.findall(r"(\d{1,3}(?:[\s]\d{3})*[,.]\d{2})", _line)
+                        if _nums:
+                            app.logger.info(f"[OCR CASTKA] Nalezeno: '{_line}' -> {_parse_money(_nums[-1])}")
+                            return _parse_money(_nums[-1])
+                        else:
+                            app.logger.info(f"[OCR CASTKA] Řádek nalezen ale bez čísel: '{_line}'")
     except Exception as _ex:
         app.logger.warning(f"[OCR CASTKA] Chyba: {_ex}")
     app.logger.info("[OCR CASTKA] Nic nenalezeno, vrací None")
