@@ -219,6 +219,7 @@ function navigateTo(page) {
     banky:      () => App.userRole === "admin" || maPravo("bankovni_vypisy") ? renderBanky() : navigateTo("dashboard"),
     vydaje:          () => App.userRole === "admin" || maPravo("vydaje_zobrazit") ? renderVydaje() : navigateTo("dashboard"),
     soukrome_vydaje: () => App.userRole === "admin" || maPravo("soukrome_vydaje_zobrazit") ? renderVydaje("soukrome") : navigateTo("dashboard"),
+    trvale_prikazy:  () => App.userRole === "admin" || maPravo("soukrome_vydaje_zobrazit") ? renderTrvalePrikazy() : navigateTo("dashboard"),
     vystavene:       () => App.userRole === "admin" || maPravo("faktury_zobrazit") ? renderVystavene() : navigateTo("dashboard"),
     radek:           () => App.userRole === "admin" || maPravo("radek_sekce") ? renderRadek() : navigateTo("dashboard"),
     dokumenty:       renderDokumenty,
@@ -253,6 +254,7 @@ function goBack() {
     banky:      () => App.userRole === "admin" || maPravo("bankovni_vypisy") ? renderBanky() : navigateTo("dashboard"),
     vydaje:          () => App.userRole === "admin" || maPravo("vydaje_zobrazit") ? renderVydaje() : navigateTo("dashboard"),
     soukrome_vydaje: () => App.userRole === "admin" || maPravo("soukrome_vydaje_zobrazit") ? renderVydaje("soukrome") : navigateTo("dashboard"),
+    trvale_prikazy:  () => App.userRole === "admin" || maPravo("soukrome_vydaje_zobrazit") ? renderTrvalePrikazy() : navigateTo("dashboard"),
     vystavene:       () => App.userRole === "admin" || maPravo("faktury_zobrazit") ? renderVystavene() : navigateTo("dashboard"),
     radek:           () => App.userRole === "admin" || maPravo("radek_sekce") ? renderRadek() : navigateTo("dashboard"),
     dokumenty:       renderDokumenty,
@@ -6588,8 +6590,9 @@ async function loadVydaje() {
           <td><span class="badge">${escHtml(v.firma_zkratka)}</span></td>
           <td>${escHtml(v.dodavatel||"—")}</td>
           <td style="font-size:.9rem">
+            ${v.zdroj === 'trvaly_prikaz' ? `<span title="Trvalý příkaz" style="font-size:.8rem;margin-right:.3rem">🔁</span>` : ""}
             ${v.popis?`<strong>${escHtml(v.popis)}</strong>`:""} 
-            ${v.poznamka?`<small style="color:var(--txt2)">${escHtml(v.poznamka)}</small>`:""}
+            ${v.poznamka && v.zdroj !== 'trvaly_prikaz' ?`<small style="color:var(--txt2)">${escHtml(v.poznamka)}</small>`:""}
             ${stitkyHtml ? `<div style="margin-top:.2rem">${stitkyHtml}</div>` : ""}
             ${v.duplicita_id ? `<div style="margin-top:.2rem"><span style="background:#fff7ed;color:#f59e0b;border:1px solid #f59e0b;border-radius:4px;padding:.1rem .4rem;font-size:.75rem;cursor:pointer" onclick="event.stopPropagation();openVydajEdit(${v.duplicita_id})">⚠️ duplicita #${v.duplicita_id}</span></div>` : ""}
           </td>
@@ -8119,6 +8122,182 @@ async function smazatDluhOsobu(oid, jmeno) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+//  TRVALÉ PŘÍKAZY
+// ═══════════════════════════════════════════════════════════════
+async function renderTrvalePrikazy() {
+  document.getElementById("mainContent").innerHTML = `
+    <div class="page-header">
+      <h1 class="page-title">🔁 Trvalé příkazy</h1>
+      <div class="btn-group">
+        <button class="btn btn-primary btn-sm" onclick="tpNovy()">＋ Přidat příkaz</button>
+        <button class="btn btn-secondary btn-sm" onclick="tpGenerovat()">⚡ Generovat tento měsíc</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="table-wrap" id="tpList"><div class="loading-center"><span class="spinner"></span></div></div>
+    </div>`;
+  await tpLoad();
+}
+
+async function tpLoad() {
+  const el = document.getElementById("tpList");
+  if (!el) return;
+  const data = await api("/api/trvale-prikazy").catch(() => ({ prikazy: [] }));
+  const pp = data.prikazy || [];
+  if (!pp.length) {
+    el.innerHTML = `<p style="color:var(--txt2);padding:1rem">Zatím žádné trvalé příkazy. Přidejte první kliknutím na ＋ Přidat příkaz.</p>`;
+    return;
+  }
+  const celkem = pp.filter(p => p.aktivni).reduce((s, p) => s + p.castka, 0);
+  el.innerHTML = `
+    <div style="margin-bottom:.75rem;color:var(--txt2);font-size:.9rem">
+      Aktivních příkazů: <strong>${pp.filter(p=>p.aktivni).length}</strong> &nbsp;|&nbsp;
+      Celkem měsíčně: <strong style="color:var(--red)">${czMoneyFull(celkem)}</strong>
+    </div>
+    <table>
+      <thead><tr>
+        <th>Den</th><th>Dodavatel</th><th>Popis / účel</th>
+        <th>Způsob úhrady</th><th style="text-align:right">Částka</th>
+        <th>Aktivní</th><th></th>
+      </tr></thead>
+      <tbody>
+        ${pp.map(p => `
+        <tr style="opacity:${p.aktivni ? '1' : '.5'}">
+          <td style="font-weight:600;text-align:center">${p.den_v_mesici}.</td>
+          <td>${escHtml(p.dodavatel || "—")}</td>
+          <td style="font-size:.9rem">
+            ${p.popis ? `<strong>${escHtml(p.popis)}</strong>` : ""}
+            ${p.poznamka ? `<br><small style="color:var(--txt2)">${escHtml(p.poznamka)}</small>` : ""}
+          </td>
+          <td><span class="badge" style="background:#f3f4f6">${escHtml(p.zpusob_uhrady || "")}</span></td>
+          <td style="text-align:right;font-weight:600;color:var(--red)">${czMoneyFull(p.castka)}</td>
+          <td style="text-align:center">
+            <input type="checkbox" ${p.aktivni ? "checked" : ""} title="Aktivní/neaktivní"
+              onchange="tpToggleAktivni(${p.id}, this.checked)">
+          </td>
+          <td onclick="event.stopPropagation()" style="white-space:nowrap">
+            <button class="btn btn-sm" onclick="tpEdit(${p.id})" title="Upravit">✏</button>
+            <button class="btn btn-sm" style="color:#dc2626" onclick="tpSmazat(${p.id})" title="Smazat">🗑</button>
+          </td>
+        </tr>`).join("")}
+      </tbody>
+    </table>`;
+}
+
+function tpFormHtml(p = {}) {
+  return `
+    <div class="form-group">
+      <label class="form-label">Den v měsíci</label>
+      <input type="number" id="tpDen" class="form-control" min="1" max="31" value="${p.den_v_mesici || 1}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Dodavatel</label>
+      <input type="text" id="tpDodavatel" class="form-control" value="${escHtml(p.dodavatel || "")}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Popis / účel</label>
+      <input type="text" id="tpPopis" class="form-control" value="${escHtml(p.popis || "")}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Lokace</label>
+      <select id="tpLokace" class="form-control">
+        ${["Praha","Třebovle","UNI",""].map(l => `<option value="${l}" ${(p.lokace||"") === l ? "selected" : ""}>${l || "— nevyplněno —"}</option>`).join("")}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Způsob úhrady</label>
+      <select id="tpUhrada" class="form-control">
+        ${["převodem","hotovost","inkaso","AirBank","RB"].map(u => `<option ${(p.zpusob_uhrady||"převodem") === u ? "selected" : ""}>${u}</option>`).join("")}
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Částka (Kč)</label>
+      <input type="number" id="tpCastka" class="form-control" step="0.01" min="0" value="${p.castka || ""}">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Poznámka (volitelně)</label>
+      <input type="text" id="tpPoznamka" class="form-control" value="${escHtml(p.poznamka || "")}">
+    </div>`;
+}
+
+function tpNovy() {
+  openModal("Nový trvalý příkaz", `
+    ${tpFormHtml()}
+    <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
+      <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
+      <button class="btn btn-primary" onclick="tpUlozit(null)">💾 Uložit</button>
+    </div>`);
+}
+
+function tpEdit(id) {
+  api("/api/trvale-prikazy").then(data => {
+    const p = (data.prikazy || []).find(x => x.id === id);
+    if (!p) return;
+    openModal("Upravit trvalý příkaz", `
+      ${tpFormHtml(p)}
+      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
+        <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
+        <button class="btn btn-primary" onclick="tpUlozit(${id})">💾 Uložit</button>
+      </div>`);
+  });
+}
+
+async function tpUlozit(id) {
+  const payload = {
+    lokace:        document.getElementById("tpLokace")?.value || "",
+    dodavatel:     document.getElementById("tpDodavatel")?.value || "",
+    popis:         document.getElementById("tpPopis")?.value || "",
+    zpusob_uhrady: document.getElementById("tpUhrada")?.value || "převodem",
+    castka:        parseFloat(document.getElementById("tpCastka")?.value || "0"),
+    den_v_mesici:  parseInt(document.getElementById("tpDen")?.value || "1"),
+    poznamka:      document.getElementById("tpPoznamka")?.value || "",
+    aktivni:       1,
+  };
+  if (!payload.dodavatel && !payload.popis) { toast("⚠ Vyplňte alespoň dodavatele nebo popis."); return; }
+  if (!payload.castka || payload.castka <= 0) { toast("⚠ Zadejte částku."); return; }
+  const url    = id ? `/api/trvale-prikazy/${id}` : "/api/trvale-prikazy";
+  const method = id ? "PUT" : "POST";
+  await api(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+  closeModal();
+  toast(id ? "✅ Příkaz upraven" : "✅ Příkaz přidán");
+  tpLoad();
+}
+
+async function tpToggleAktivni(id, aktivni) {
+  const data = await api("/api/trvale-prikazy").then(d => (d.prikazy || []).find(x => x.id === id));
+  if (!data) return;
+  await api(`/api/trvale-prikazy/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...data, aktivni: aktivni ? 1 : 0 }),
+  });
+  tpLoad();
+}
+
+async function tpSmazat(id) {
+  if (!confirm("Smazat tento trvalý příkaz?\n(Již vygenerované výdaje zůstanou zachovány.)")) return;
+  await api(`/api/trvale-prikazy/${id}`, { method: "DELETE" });
+  toast("Smazáno");
+  tpLoad();
+}
+
+async function tpGenerovat() {
+  const dnes = new Date();
+  const rok  = dnes.getFullYear();
+  const mes  = dnes.getMonth() + 1;
+  const r = await api("/api/trvale-prikazy/generovat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ rok, mesic: mes }),
+  });
+  if (r.ok) {
+    toast(`✅ Vygenerováno: ${r.vygenerovano}, přeskočeno (již existuje): ${r.preskoceno}`);
+  } else {
+    toast("❌ Chyba: " + (r.error || "neznámá"));
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 //  RADEK — rozcestník
 // ═══════════════════════════════════════════════════════════════
 function renderRadek() {
@@ -8128,6 +8307,10 @@ function renderRadek() {
       <div class="radek-box" onclick="navigateTo('soukrome_vydaje')">
         <div class="radek-box-icon">🏠</div>
         Soukromé výdaje
+      </div>
+      <div class="radek-box" onclick="navigateTo('trvale_prikazy')">
+        <div class="radek-box-icon">🔁</div>
+        Trvalé příkazy
       </div>
       <div class="radek-box" onclick="navigateTo('penezenka')">
         <div class="radek-box-icon">💵</div>
@@ -8341,4 +8524,5 @@ async function dokNahled(id) {
   if (data.url) window.open(data.url, "_blank");
   else alert("Soubor není dostupný");
 }
+
 
