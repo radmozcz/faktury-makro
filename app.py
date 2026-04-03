@@ -3345,21 +3345,23 @@ def api_vystavene_ulozit():
         return jsonify({"error": "Přístup zamítnut"}), 403
     d = request.json or {}
     duplicita = None
-    if d.get("cislo_faktury") and d.get("datum"):
-        with get_db() as conn:
-            row = conn.execute(
+    try:
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        if d.get("cislo_faktury") and d.get("datum"):
+            cur.execute(
                 """SELECT id, firma_zkratka, datum, castka FROM vystavene_faktury
-                   WHERE cislo_faktury=? AND datum=? AND ABS(castka-?)< 0.01""",
+                   WHERE cislo_faktury=%s AND datum=%s AND ABS(castka-%s)< 0.01""",
                 (d.get("cislo_faktury"), d.get("datum"), float(d.get("castka",0)))
-            ).fetchone()
+            )
+            row = cur.fetchone()
             if row:
                 duplicita = {"id": row["id"], "firma": row["firma_zkratka"],
                              "datum": row["datum"], "castka": row["castka"]}
-    with get_db() as conn:
-        conn.execute(
+        cur.execute(
             """INSERT INTO vystavene_faktury
                (firma_zkratka, cislo_faktury, datum, datum_splatnosti, odberatel, popis, castka, stav, soubor_url, duplicita_id)
-               VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING id""",
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
             (d.get("firma_zkratka",""), d.get("cislo_faktury",""),
              d.get("datum",""), d.get("datum_splatnosti",""),
              d.get("odberatel",""), d.get("popis",""),
@@ -3368,6 +3370,11 @@ def api_vystavene_ulozit():
              d.get("soubor_url",""),
              duplicita["id"] if duplicita else None)
         )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
     return jsonify({"ok": True, "duplicita": duplicita})
 
 @app.route("/api/vystavene-faktury/<int:fid>", methods=["PUT"])
