@@ -1145,7 +1145,7 @@ def parse_faktura_claude(filepath):
                     _page = _pdf.pages[0]
                     _pil = _page.to_image(resolution=200).original
                     # Otočit o 90° — kompenzace skeneru
-                    _pil_rotated = _pil.rotate(90, expand=True)
+                    _pil_rotated = _pil.rotate(-90, expand=True)
                     # Zmenšit pokud přesahuje limit Claude API (8000px)
                     _max = 3500
                     if _pil_rotated.width > _max or _pil_rotated.height > _max:
@@ -1183,7 +1183,7 @@ def parse_faktura_claude(filepath):
                 try:
                     import io as _io
                     _img = Image.open(filepath)
-                    _img_rotated = _img.rotate(90, expand=True)
+                    _img_rotated = _img.rotate(-90, expand=True)
                     # Zmenšit pokud přesahuje limit Claude API (8000px)
                     _max = 3500
                     if _img_rotated.width > _max or _img_rotated.height > _max:
