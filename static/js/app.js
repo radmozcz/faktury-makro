@@ -2099,6 +2099,131 @@ function nacistNaskenoany() {
   inp.onchange = () => { if (inp.files[0]) uploadFile(inp.files[0]); };
 }
 
+// ═══════════════════════════════════════════════════════════════
+//  HROMADNÉ NAHRÁNÍ — Výdaje a Soukromé výdaje
+// ═══════════════════════════════════════════════════════════════
+function vydajeHromadneNahrat(typ = "provozni") {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = ".pdf,.png,.jpg,.jpeg";
+  inp.multiple = true;
+  inp.onchange = () => { if (inp.files.length) _vydajeHromadneZpracovat(inp.files, typ); };
+  inp.click();
+}
+
+async function _vydajeHromadneZpracovat(files, typ) {
+  const jeSoukrome = typ === "soukrome";
+  openModal(`📦 Hromadné nahrání — ${jeSoukrome ? "Soukromé výdaje" : "Výdaje"}`, `
+    <div id="hromadneVydajeStatus" style="max-height:400px;overflow-y:auto">
+      <div>Zpracovávám ${files.length} soubor(ů)...</div>
+    </div>
+    <div style="margin-top:1rem;text-align:right">
+      <button class="btn btn-secondary" onclick="closeModal();loadVydaje()">Zavřít</button>
+    </div>`);
+
+  const statusEl = document.getElementById("hromadneVydajeStatus");
+  let ok = 0, err = 0, dup = 0;
+
+  for (const file of Array.from(files)) {
+    const row = document.createElement("div");
+    row.style.cssText = "padding:.3rem 0;border-bottom:1px solid var(--border);font-size:.9rem";
+    row.innerHTML = `<span class="spinner"></span> ${file.name}`;
+    statusEl.appendChild(row);
+
+    try {
+      const fd = new FormData();
+      fd.append("soubor", file);
+      fd.append("typ", typ);
+      const r = await fetch("/api/vydaje/nahrat", { method: "POST", body: fd });
+      const data = await r.json();
+
+      if (data.error) { row.innerHTML = `❌ ${file.name} – ${data.error}`; err++; continue; }
+
+      const payload = {
+        firma_zkratka:   data.firma_zkratka || (jeSoukrome ? "_soukrome" : ""),
+        dodavatel:       data.dodavatel || "",
+        datum:           data.datum || new Date().toISOString().slice(0,10),
+        castka:          data.castka || 0,
+        zpusob_uhrady:   data.zpusob_uhrady || "převodem",
+        stav:            "nezaplaceno",
+        popis:           data.popis || "",
+        poznamka:        data.poznamka || "",
+        soubor_cesta:    data.soubor_cesta || "",
+        soubor_url:      data.soubor_gcs_url || "",
+        zdroj:           "hromadne",
+        typ:             typ,
+      };
+      await api("/api/vydaje", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload) });
+      row.innerHTML = `✅ ${file.name} – uloženo (${czMoneyFull(payload.castka)})`;
+      ok++;
+    } catch(e) {
+      row.innerHTML = `❌ ${file.name} – ${e.message}`; err++;
+    }
+  }
+  statusEl.insertAdjacentHTML("afterbegin", `<div style="font-weight:600;margin-bottom:.5rem;padding:.5rem;background:var(--green-pale);border-radius:4px">Hotovo: ✅ ${ok} uloženo, ❌ ${err} chyb</div>`);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  HROMADNÉ NAHRÁNÍ — Vystavené faktury
+// ═══════════════════════════════════════════════════════════════
+function vystaveneHromadneNahrat() {
+  const inp = document.createElement("input");
+  inp.type = "file";
+  inp.accept = ".pdf,.png,.jpg,.jpeg";
+  inp.multiple = true;
+  inp.onchange = () => { if (inp.files.length) _vystaveneHromadneZpracovat(inp.files); };
+  inp.click();
+}
+
+async function _vystaveneHromadneZpracovat(files) {
+  openModal("📦 Hromadné nahrání — Vystavené faktury", `
+    <div id="hromadneVystStatus" style="max-height:400px;overflow-y:auto">
+      <div>Zpracovávám ${files.length} soubor(ů)...</div>
+    </div>
+    <div style="margin-top:1rem;text-align:right">
+      <button class="btn btn-secondary" onclick="closeModal();loadVystavene()">Zavřít</button>
+    </div>`);
+
+  const statusEl = document.getElementById("hromadneVystStatus");
+  let ok = 0, err = 0;
+
+  for (const file of Array.from(files)) {
+    const row = document.createElement("div");
+    row.style.cssText = "padding:.3rem 0;border-bottom:1px solid var(--border);font-size:.9rem";
+    row.innerHTML = `<span class="spinner"></span> ${file.name}`;
+    statusEl.appendChild(row);
+
+    try {
+      const fd = new FormData();
+      fd.append("soubor", file);
+      const r = await fetch("/api/vystavene-faktury/nahrat", { method: "POST", body: fd });
+      const data = await r.json();
+
+      if (data.error) { row.innerHTML = `❌ ${file.name} – ${data.error}`; err++; continue; }
+
+      const payload = {
+        firma_zkratka:   data.firma_zkratka || "",
+        odberatel:       data.odberatel || "",
+        cislo_faktury:   data.cislo_faktury || "",
+        datum:           data.datum_vystaveni || new Date().toISOString().slice(0,10),
+        datum_splatnosti: data.datum_splatnosti || "",
+        celkem_s_dph:    data.celkem_s_dph || 0,
+        zpusob_uhrady:   data.zpusob_uhrady || "převodem",
+        stav:            "ceka",
+        soubor_cesta:    data.soubor_cesta || "",
+        soubor_url:      data.soubor_gcs_url || "",
+        zdroj:           "hromadne",
+      };
+      await api("/api/vystavene-faktury", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload) });
+      row.innerHTML = `✅ ${file.name} – uloženo (${czMoneyFull(payload.celkem_s_dph)})`;
+      ok++;
+    } catch(e) {
+      row.innerHTML = `❌ ${file.name} – ${e.message}`; err++;
+    }
+  }
+  statusEl.insertAdjacentHTML("afterbegin", `<div style="font-weight:600;margin-bottom:.5rem;padding:.5rem;background:var(--green-pale);border-radius:4px">Hotovo: ✅ ${ok} uloženo, ❌ ${err} chyb</div>`);
+}
+
 function nacistNaskenoanyVydaj() {
   const inp = document.getElementById('vydajFileInputNask');
   if (!inp) return;
@@ -6394,7 +6519,8 @@ async function renderVydaje(typ = "provozni") {
 const tlacitka = (maPravo(pravoUpravit)
   ? `<button class="btn btn-primary btn-sm" onclick="${jeSoukrome ? 'renderSoukromeNahrat()' : `openVydajNahrat('${typ}')`}">📋 Nahrát doklad</button>
      <button class="btn btn-sm" onclick="openVydajRucni()">✏ Ruční zadání</button>
-     <button class="btn btn-sm" onclick="openVydajNahrat('${typ}');setTimeout(()=>otevritSkenerModal(skenerCallbackVydaj, document.getElementById('vNahratFirma')?.value||''),300)">📷 Skener</button>`
+     <button class="btn btn-sm" onclick="openVydajNahrat('${typ}');setTimeout(()=>otevritSkenerModal(skenerCallbackVydaj, document.getElementById('vNahratFirma')?.value||''),300)">📷 Skener</button>
+     <button class="btn btn-sm" onclick="vydajeHromadneNahrat('${typ}')">📦 Hromadné nahrání</button>`
   : "") + (jeSoukrome ? `<button class="btn btn-sm" style="background:#b45309;color:#fff" onclick="oznacDuplicityVydaje()">🔍 Najít duplicity</button>` : "") + exportButtons;
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
@@ -6994,7 +7120,8 @@ async function renderVystavene() {
   const tlacitka = muzeEditovat
     ? `<button class="btn btn-primary btn-sm" onclick="openVystNahrat()">📄 Nahrát PDF</button>
        <button class="btn btn-sm" onclick="openVystRucni()">✏️ Ruční zadání</button>
-       <button class="btn btn-sm" onclick="openVystNahrat();setTimeout(()=>otevritSkenerModal(skenerCallbackVystavene,''),300)">📷 Skener</button>`
+       <button class="btn btn-sm" onclick="openVystNahrat();setTimeout(()=>otevritSkenerModal(skenerCallbackVystavene,''),300)">📷 Skener</button>
+       <button class="btn btn-sm" onclick="vystaveneHromadneNahrat()">📦 Hromadné nahrání</button>`
     : "";
   document.getElementById("mainContent").innerHTML = `
     <div class="page-header">
