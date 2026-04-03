@@ -1183,11 +1183,9 @@ def parse_faktura_claude(filepath):
     try:
         ext = filepath.rsplit(".", 1)[-1].lower()
 
-        # PDF — zjistit zda je textové nebo naskenované
+        # PDF — poslat přímo Claude jako dokument
         if ext == "pdf":
-            castka_z_textu = _precti_celkovou_castku_z_pdf(filepath)
-            app.logger.info(f"[PARSE] castka_z_textu = {castka_z_textu}")
-            # Poslat PDF přímo Claude jako dokument
+            castka_z_textu = None  # OCR vypnuto - příliš pomalé na Cloud Run
             with open(filepath, "rb") as f:
                 raw = f.read()
             b64 = base64.standard_b64encode(raw).decode("utf-8")
@@ -1253,7 +1251,7 @@ PRAVIDLA:
 - Způsob úhrady: pokud vidíš "karta", "card", "kartou" → "kartou"; "cash", "hotov" → "hotově"
 - Položky: zahrň všechny položky které vidíš na dokladu
 - celkem_s_dph u položky = množství × cena za jednotku
-- CELKOVÁ ČÁSTKA (celkem_s_dph): Na poslední straně hledej řádek který začíná nebo obsahuje přesně "Celková částka" — číslo na tomto řádku je výsledek. Stejné číslo je pak zopakováno na řádku "Platba kartou" nebo "Platba hotově". IGNORUJ všechny ostatní součty: "Strana celkem", "Poslední strana celkem", "hodnota zboží", "částka daně", čísla v DPH tabulce. Faktura MAKRO: celková částka je vždy nižší než součet položek kvůli slevám CLAP.
+- CELKOVÁ ČÁSTKA (celkem_s_dph): Hledej pole "Celková částka" — je to JEDINÝ řádek s tímto textem na celém dokumentu. U MAKRO faktur je na poslední straně pod tabulkou DPH, těsně nad "Platba kartou/hotově". IGNORUJ: "Strana celkem bez DPH", "Poslední strana celkem bez DPH", čísla v tabulce DPH (hodnota zboží, částka daně, Celkem v DPH tabulce). Správná celková částka je VŽDY nižší než součet položek kvůli slevám CLAP.
 """
 
         client = anthropic.Anthropic(api_key=api_key)
