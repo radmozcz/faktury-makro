@@ -6794,6 +6794,23 @@ def api_oprav_sekvence():
         except Exception as e:
             vysledky[tbl] = str(e)
     return jsonify(vysledky)
+@app.route("/admin/smazat-reporty-2023-2024")
+@vyzaduj_prihlaseni
+def smazat_reporty_2023_2024():
+    if session.get("role") != "admin":
+        return "Pouze admin", 403
+    try:
+        import psycopg2 as _pg
+        conn = _pg.connect(os.environ.get("DATABASE_URL", ""))
+        cur = conn.cursor()
+        cur.execute("DELETE FROM reporty WHERE datum >= '2023-01-01' AND datum <= '2024-12-31'")
+        smazano = cur.rowcount
+        conn.commit()
+        conn.close()
+        return f"✅ Smazáno {smazano} záznamů za 2023-2024."
+    except Exception as e:
+        return f"❌ Chyba: {e}", 500
+
 @app.route("/fix-prava-seq")
 def fix_prava_seq():
     if not _USE_PG:
