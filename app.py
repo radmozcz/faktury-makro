@@ -1164,9 +1164,13 @@ def _precti_celkovou_castku_z_pdf(filepath):
                                 and "stran" not in _line.lower():
                             _nums = _re.findall(r"(\d{1,3}(?:[\s]\d{3})*[,.]\d{2})", _line)
                             if _nums:
+                                app.logger.info(f"[OCR CASTKA] Nalezeno: '{_line}' -> {_parse_money(_nums[-1])}")
                                 return _parse_money(_nums[-1])
-    except Exception:
-        pass
+                            else:
+                                app.logger.info(f"[OCR CASTKA] Řádek nalezen ale bez čísel: '{_line}'")
+    except Exception as _ex:
+        app.logger.warning(f"[OCR CASTKA] Chyba: {_ex}")
+    app.logger.info("[OCR CASTKA] Nic nenalezeno, vrací None")
     return None
 
 
