@@ -1159,7 +1159,9 @@ def _precti_celkovou_castku_z_pdf(filepath):
                     _pil = _page.to_image(resolution=200).original
                     _text = pytesseract.image_to_string(_pil, lang="ces+eng")
                     for _line in _text.splitlines():
-                        if _re.search(r"celkov.{0,3}\s*.{0,3}stka", _line, _re.IGNORECASE):
+                        if _re.search(r"celkov.{0,3}\s*.{0,3}stka", _line, _re.IGNORECASE) \
+                                and "strana" not in _line.lower() \
+                                and "stran" not in _line.lower():
                             _nums = _re.findall(r"(\d{1,3}(?:[\s]\d{3})*[,.]\d{2})", _line)
                             if _nums:
                                 return _parse_money(_nums[-1])
@@ -1308,7 +1310,7 @@ PRAVIDLA:
                     "nazev":                   p.get("nazev", ""),
                     "mnozstvi":                float(p.get("mnozstvi", 1) or 1),
                     "jednotka":                p.get("jednotka", "ks"),
-                    "cena_za_jednotku_s_dph":  float(p.get("cena_za_jednostku_s_dph", 0) or 0),
+                    "cena_za_jednotku_s_dph":  float(p.get("cena_za_jednotku_s_dph", 0) or 0),
                     "celkem_s_dph":            float(p.get("celkem_s_dph", 0) or 0),
                 }
                 for p in parsed.get("polozky", [])
