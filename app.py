@@ -3278,8 +3278,9 @@ def _vydaje_ocr(fpath, fname, gcs_url, firma):
 - datum: datum nákupu ve formátu YYYY-MM-DD
 - castka: celková částka v Kč (číslo bez měny)
 - poznamka: krátký popis co bylo nakoupeno (max 80 znaků)
+- var_sym: variabilní symbol nebo číslo faktury (číslo nebo text, např. 4861657011)
 - firma_zkratka: zkratka kupujícího/odběratele: IČO 19436521 nebo Food Plus → FP, IČO 08163629 nebo MR plus → MR, IČO 09762906 nebo Clever food factory → CFF, jinak prázdný string
-Odpověz POUZE jako JSON: {"dodavatel":"...","datum":"...","castka":0,"poznamka":"...","firma_zkratka":"..."}"""}
+Odpověz POUZE jako JSON: {"dodavatel":"...","datum":"...","castka":0,"poznamka":"...","var_sym":"...","firma_zkratka":"..."}"""}
         ]
         resp = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY","")).messages.create(
             model="claude-sonnet-4-20250514", max_tokens=300,
@@ -3298,6 +3299,7 @@ Odpověz POUZE jako JSON: {"dodavatel":"...","datum":"...","castka":0,"poznamka"
         "poznamka":       parsed.get("poznamka", ""),
         "soubor_cesta":   fname,
         "soubor_gcs_url": gcs_url,
+        "var_sym":         parsed.get("var_sym", "") or "",
         "firma_zkratka":  firma or parsed.get("firma_zkratka", ""),
     })
 
