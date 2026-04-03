@@ -6422,8 +6422,28 @@ const tlacitka = (maPravo(pravoUpravit)
   // Uložit aktuální typ pro loadVydaje
   window._vydajTyp = typ;
   aplikujRokFiltr('vRok','vOd','vDo', null);
+  if (jeSoukrome) tpAutoGenerovat();
   loadVydajeNezaplacene();
   loadVydaje();
+}
+
+async function tpAutoGenerovat() {
+  const dnes = new Date();
+  const rok  = dnes.getFullYear();
+  const mes  = dnes.getMonth() + 1;
+  // Tiché generování na pozadí — žádná hláška uživateli
+  try {
+    await api("/api/trvale-prikazy/generovat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rok, mesic: mes }),
+    });
+    // Po generování znovu načíst seznam (příkazy se mohly přidat)
+    loadVydajeNezaplacene();
+    loadVydaje();
+  } catch(e) {
+    // Tiché selhání — neruší uživatele
+  }
 }
 
 async function loadVydajeNezaplacene() {
@@ -8176,7 +8196,7 @@ async function tpLoad() {
               onchange="tpToggleAktivni(${p.id}, this.checked)">
           </td>
           <td onclick="event.stopPropagation()" style="white-space:nowrap">
-            <button class="btn btn-sm" onclick="tpEdit(${p.id})" title="Upravit">✏</button>
+            <button class="btn btn-sm" onclick="tpEdit(${p.id})" title="Upravit">✏️</button>
             <button class="btn btn-sm" style="color:#dc2626" onclick="tpSmazat(${p.id})" title="Smazat">🗑</button>
           </td>
         </tr>`).join("")}
