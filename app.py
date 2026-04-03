@@ -1135,18 +1135,45 @@ def parse_faktura_claude(filepath):
 
     try:
         ext = filepath.rsplit(".", 1)[-1].lower()
-        with open(filepath, "rb") as f:
-            raw = f.read()
-        b64 = base64.standard_b64encode(raw).decode("utf-8")
 
-        if ext == "pdf":
-            media_type = "application/pdf"
-            source_type = "base64"
+        # Pro naskenované PDF: vytáhnout stránku jako obrázek a otočit o 90°
+        # (skener NETUM SD-2000 skenuje na šířku → stránky jsou otočené)
+        if ext == "pdf" and PDF_SUPPORT and OCR_SUPPORT:
+            try:
+                import io as _io
+                with pdfplumber.open(filepath) as _pdf:
+                    _page = _pdf.pages[0]
+                    _pil = _page.to_image(resolution=200).original
+                    # Otočit o 90° — kompenzace skeneru
+                    _pil_rotated = _pil.rotate(90, expand=True)
+                    _buf = _io.BytesIO()
+                    _pil_rotated.save(_buf, format="JPEG", quality=90)
+                    b64 = base64.standard_b64encode(_buf.getvalue()).decode("utf-8")
+                    content_block = {
+                        "type": "image",
+                        "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}
+                    }
+            except Exception:
+                # Fallback: poslat PDF přímo
+                with open(filepath, "rb") as f:
+                    raw = f.read()
+                b64 = base64.standard_b64encode(raw).decode("utf-8")
+                content_block = {
+                    "type": "document",
+                    "source": {"type": "base64", "media_type": "application/pdf", "data": b64}
+                }
+        elif ext == "pdf":
+            with open(filepath, "rb") as f:
+                raw = f.read()
+            b64 = base64.standard_b64encode(raw).decode("utf-8")
             content_block = {
                 "type": "document",
-                "source": {"type": "base64", "media_type": media_type, "data": b64}
+                "source": {"type": "base64", "media_type": "application/pdf", "data": b64}
             }
         else:
+            with open(filepath, "rb") as f:
+                raw = f.read()
+            b64 = base64.standard_b64encode(raw).decode("utf-8")
             media_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
                          "bmp": "image/bmp", "tiff": "image/tiff", "webp": "image/webp"}
             media_type = media_map.get(ext, "image/jpeg")
