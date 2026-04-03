@@ -1171,12 +1171,25 @@ def parse_faktura_claude(filepath):
                 "source": {"type": "base64", "media_type": "application/pdf", "data": b64}
             }
         else:
-            with open(filepath, "rb") as f:
-                raw = f.read()
-            b64 = base64.standard_b64encode(raw).decode("utf-8")
+            # Obrázek (JPG, PNG...) — otočit o 90° kvůli skeneru NETUM
             media_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
                          "bmp": "image/bmp", "tiff": "image/tiff", "webp": "image/webp"}
             media_type = media_map.get(ext, "image/jpeg")
+            if OCR_SUPPORT and ext in ("jpg", "jpeg", "png", "bmp", "tiff"):
+                try:
+                    import io as _io
+                    _img = Image.open(filepath)
+                    _img_rotated = _img.rotate(90, expand=True)
+                    _buf = _io.BytesIO()
+                    _img_rotated.save(_buf, format="JPEG", quality=90)
+                    b64 = base64.standard_b64encode(_buf.getvalue()).decode("utf-8")
+                    media_type = "image/jpeg"
+                except Exception:
+                    with open(filepath, "rb") as f:
+                        b64 = base64.standard_b64encode(f.read()).decode("utf-8")
+            else:
+                with open(filepath, "rb") as f:
+                    b64 = base64.standard_b64encode(f.read()).decode("utf-8")
             content_block = {
                 "type": "image",
                 "source": {"type": "base64", "media_type": media_type, "data": b64}
