@@ -1156,6 +1156,7 @@ def parse_faktura_claude(filepath):
             }
 
         prompt = """Jsi expert na čtení faktur a účtenek. Přečti tento doklad VELMI PEČLIVĚ.
+DŮLEŽITÉ: Dokument může být otočený o 90, 180 nebo 270 stupňů — přečti ho správně bez ohledu na orientaci.
 Odpověz POUZE platným JSON objektem, žádný jiný text, žádné backticky, žádné komentáře.
 
 Formát odpovědi:
