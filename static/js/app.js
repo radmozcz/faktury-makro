@@ -2204,21 +2204,28 @@ async function _vydajeHromadneZpracovat(files, typ, firmaVolba) {
 //  HROMADNÉ NAHRÁNÍ — Vystavené faktury
 // ═══════════════════════════════════════════════════════════════
 function vystaveneHromadneNahrat() {
+  const firmy = App.config?.firmy || ["FP","MR","CFF"];
   openModal("📦 Hromadné nahrání — Vystavené faktury", `
-    <p style="color:var(--txt2);font-size:.9rem">Firma se přiřadí automaticky podle IČO na faktuře.</p>
+    <div class="form-group">
+      <label class="form-label">Naše firma (vystavitel)</label>
+      <select id="hromadneVystFirma" class="firma-select form-control">
+        ${firmy.map(f => `<option value="${f}">${f}</option>`).join("")}
+      </select>
+    </div>
     <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
       <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
       <button class="btn btn-primary" onclick="
+        const firma = document.getElementById('hromadneVystFirma').value;
         closeModal();
         const inp = document.createElement('input');
         inp.type='file'; inp.accept='.pdf,.png,.jpg,.jpeg'; inp.multiple=true;
-        inp.onchange=()=>{ if(inp.files.length) _vystaveneHromadneZpracovat(inp.files); };
+        inp.onchange=()=>{ if(inp.files.length) _vystaveneHromadneZpracovat(inp.files, firma); };
         inp.click();">Vybrat soubory →</button>
     </div>`);
 }
 
-async function _vystaveneHromadneZpracovat(files) {
-  openModal("📦 Hromadné nahrání — Vystavené faktury", `
+async function _vystaveneHromadneZpracovat(files, firma) {
+  openModal(`📦 Hromadné nahrání — Vystavené faktury (${firma})`, `
     <div id="hromadneVystStatus" style="max-height:400px;overflow-y:auto">
       <div>Zpracovávám ${files.length} soubor(ů)...</div>
     </div>
@@ -2236,7 +2243,6 @@ async function _vystaveneHromadneZpracovat(files) {
     statusEl.appendChild(row);
 
     try {
-      // Krok 1: nahrát a rozpoznat
       const fd = new FormData();
       fd.append("soubor", file);
       const r = await fetch("/api/vystavene-faktury/nahrat", {method:"POST", body:fd});
@@ -2247,9 +2253,8 @@ async function _vystaveneHromadneZpracovat(files) {
         continue;
       }
 
-      // Krok 2: uložit — stejně jako saveVystavena
       const payload = {
-        firma_zkratka:    data.firma_zkratka || "",
+        firma_zkratka:    firma,
         cislo_faktury:    data.cislo_faktury || "",
         datum:            data.datum || new Date().toISOString().slice(0,10),
         datum_splatnosti: data.datum_splatnosti || "",
@@ -2268,7 +2273,7 @@ async function _vystaveneHromadneZpracovat(files) {
       if (res.duplicita) {
         row.innerHTML = `⚠️ ${file.name} – duplikát FA #${res.duplicita.id} (${czMoneyFull(payload.castka)}) — uloženo`;
       } else {
-        row.innerHTML = `✅ ${file.name} – uloženo${payload.firma_zkratka ? " (" + payload.firma_zkratka + "," : " ("}${czMoneyFull(payload.castka)})`;
+        row.innerHTML = `✅ ${file.name} – uloženo (${firma}, ${czMoneyFull(payload.castka)})`;
       }
       ok++;
     } catch(e) {
