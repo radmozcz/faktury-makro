@@ -2230,6 +2230,7 @@ async function _vystaveneHromadneZpracovat(files) {
     statusEl.appendChild(row);
 
     try {
+      // Krok 1: nahrát soubor a spustit OCR (stejně jako spustVystOCR)
       const fd = new FormData();
       fd.append("soubor", file);
       const r = await fetch("/api/vystavene-faktury/nahrat", { method: "POST", body: fd });
@@ -2237,21 +2238,29 @@ async function _vystaveneHromadneZpracovat(files) {
 
       if (data.error) { row.innerHTML = `❌ ${file.name} – ${data.error}`; err++; continue; }
 
+      // Krok 2: uložit se stejnými poli jako saveVystavena
       const payload = {
         firma_zkratka:    data.firma_zkratka || "",
-        odberatel:        data.odberatel || "",
         cislo_faktury:    data.cislo_faktury || "",
-        datum:            data.datum_vystaveni || new Date().toISOString().slice(0,10),
+        datum:            data.datum || new Date().toISOString().slice(0,10),
         datum_splatnosti: data.datum_splatnosti || "",
-        celkem_s_dph:     data.celkem_s_dph || 0,
-        zpusob_uhrady:    data.zpusob_uhrady || "převodem",
+        odberatel:        data.odberatel || "",
+        popis:            data.popis || "",
+        castka:           parseFloat(data.castka) || 0,
         stav:             "ceka",
-        soubor_cesta:     data.soubor_cesta || "",
-        soubor_url:       data.soubor_gcs_url || "",
-        zdroj:            "hromadne",
+        soubor_url:       data.soubor_url || data.soubor_gcs_url || "",
       };
-      await api("/api/vystavene-faktury", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload) });
-      row.innerHTML = `✅ ${file.name} – uloženo (${czMoneyFull(payload.celkem_s_dph)})`;
+      const res = await api("/api/vystavene-faktury", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(payload)
+      });
+
+      if (res.duplicita) {
+        row.innerHTML = `⚠️ ${file.name} – <span style="color:orange">duplikát FA #${res.duplicita.id} (${czMoneyFull(payload.castka)}) — uloženo</span>`;
+      } else {
+        row.innerHTML = `✅ ${file.name} – uloženo ${payload.firma_zkratka ? `(${payload.firma_zkratka}, ` : "("}${czMoneyFull(payload.castka)})`;
+      }
       ok++;
     } catch(e) {
       row.innerHTML = `❌ ${file.name} – ${e.message}`; err++;
