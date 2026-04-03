@@ -1136,7 +1136,7 @@ def _precti_celkovou_castku_z_pdf(filepath):
     try:
         import re as _re
         klicova_slova = [
-            r"celkov[aá]\s*[cč][aá]stka",
+            r"celkov.{0,3}\s*.{0,3}stka",
             r"k\s*[uú]hrad[eě]",
             r"celkem\s*s\s*dph",
         ]
@@ -1159,7 +1159,7 @@ def _precti_celkovou_castku_z_pdf(filepath):
                     _pil = _page.to_image(resolution=200).original
                     _text = pytesseract.image_to_string(_pil, lang="ces+eng")
                     for _line in _text.splitlines():
-                        if _re.search(r"celkov.?\s*[cč].?stka", _line, _re.IGNORECASE):
+                        if _re.search(r"celkov.{0,3}\s*.{0,3}stka", _line, _re.IGNORECASE):
                             _nums = _re.findall(r"(\d{1,3}(?:[\s]\d{3})*[,.]\d{2})", _line)
                             if _nums:
                                 return _parse_money(_nums[-1])
