@@ -1189,7 +1189,6 @@ Formát odpovědi:
   "celkem_s_dph": číslo (celková částka včetně DPH),
   "polozky": [
     {
-    {
       "nazev": "název položky",
       "mnozstvi": číslo,
       "jednotka": "ks/kg/l/...",
@@ -1207,6 +1206,7 @@ PRAVIDLA:
 - Způsob úhrady: pokud vidíš "karta", "card", "kartou" → "kartou"; "cash", "hotov" → "hotově"
 - Položky: zahrň všechny položky které vidíš na dokladu
 - celkem_s_dph u položky = množství × cena za jednotku
+- CELKOVÁ ČÁSTKA: vždy ber hodnotu z pole "Celková částka" nebo "Celkem s DPH" na POSLEDNÍ straně dokumentu — NIKDY nesčítej položky sám, faktura může obsahovat slevy a srážky které snižují výslednou částku
 """
 
         client = anthropic.Anthropic(api_key=api_key)
