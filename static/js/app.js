@@ -6922,6 +6922,13 @@ function _vydajModal(titul, v, onSave, typ) {
       <div class="form-group" style="grid-column:1/-1"><label class="form-label">Štítky</label>
         <input id="evStitky" class="form-control" value="${escHtml(v.stitky||'')}" placeholder="např. auto, pojistka, Věrka (oddělte čárkou)">
       </div>
+      <div class="form-group" style="grid-column:1/-1">
+        <label class="form-label">Originál dokladu</label>
+        <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+          ${v.soubor_url ? `<a href="${v.soubor_url}" target="_blank" class="btn btn-sm btn-secondary">📎 Zobrazit originál</a>` : `<span style="color:var(--txt2);font-size:.85rem">Žádný originál</span>`}
+          <input type="file" id="evSouborNovy" accept=".pdf,.png,.jpg,.jpeg" style="font-size:.85rem">
+        </div>
+      </div>
     </div>
     <div style="margin-top:1rem">
       <label class="form-label">Položky</label>
@@ -6996,6 +7003,19 @@ async function openVydajEdit(id) {
   if (!v) return;
   _vydajModal("Upravit výdaj", v, async function() {
     const payload = _vydajGetPayload();
+    // Nahrát nový soubor pokud byl vybrán
+    const souborInput = document.getElementById("evSouborNovy");
+    if (souborInput?.files?.length) {
+      try {
+        const fd = new FormData();
+        fd.append("soubor", souborInput.files[0]);
+        fd.append("typ", typ);
+        const r = await fetch("/api/vydaje/nahrat", {method:"POST", body:fd});
+        const d = await r.json();
+        if (d.soubor_gcs_url) payload.soubor_url = d.soubor_gcs_url;
+        if (d.soubor_cesta) payload.soubor_cesta = d.soubor_cesta;
+      } catch(e) { toast("⚠ Soubor se nepodařilo nahrát: " + e.message, 4000); }
+    }
     await api(`/api/vydaje/${id}`, { method:"PUT", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
     toast("Uloženo ✓"); closeModal(); loadVydaje(); loadVydajeNezaplacene();
   }, typ);
