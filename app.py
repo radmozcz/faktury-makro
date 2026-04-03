@@ -3452,7 +3452,8 @@ Odpověz POUZE platným JSON objektem, žádný jiný text ani backticky.
   "datum_splatnosti": "datum splatnosti YYYY-MM-DD nebo null",
   "castka": číslo (celková částka v Kč bez symbolu),
   "odberatel": "název odběratele",
-  "popis": "stručný popis předmětu plnění max 100 znaků"
+  "popis": "stručný popis předmětu plnění max 100 znaků",
+  "firma_zkratka": "zkratka vystavitele: pokud vidíš Food Plus → FP, MR plus nebo MRplus → MR, Clever food factory → CFF, jinak prázdný string"
 }"""}
             ]}]
         )
@@ -3470,6 +3471,7 @@ Odpověz POUZE platným JSON objektem, žádný jiný text ani backticky.
         "castka":           float(parsed.get("castka") or 0),
         "odberatel":        parsed.get("odberatel") or "",
         "popis":            parsed.get("popis") or "",
+        "firma_zkratka":    parsed.get("firma_zkratka") or "",
         "soubor_url":       soubor_url,
     })
 
