@@ -1186,6 +1186,7 @@ def parse_faktura_claude(filepath):
         # PDF — zjistit zda je textové nebo naskenované
         if ext == "pdf":
             castka_z_textu = _precti_celkovou_castku_z_pdf(filepath)
+            app.logger.info(f"[PARSE] castka_z_textu = {castka_z_textu}")
             # Zkusit převést stránky na obrázky
             if PDF_SUPPORT and OCR_SUPPORT:
                 try:
@@ -1302,6 +1303,7 @@ PRAVIDLA:
         parsed = json.loads(text)
 
         # Normalizace výstupu
+        app.logger.info(f"[PARSE] Finální castka_z_textu={castka_z_textu}, claude_castka={parsed.get('celkem_s_dph')}")
         result = {
             "dodavatel":        parsed.get("dodavatel", ""),
             "cislo_faktury":    parsed.get("cislo_faktury") or "",
