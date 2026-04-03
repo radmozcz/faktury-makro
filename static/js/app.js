@@ -6776,7 +6776,7 @@ async function loadVydaje() {
       <thead><tr>
         <th>Stav</th><th>Datum</th><th>${jeSoukrome ? "Lokace" : "Firma"}</th><th>Dodavatel</th>
         <th>Popis / účel</th><th>Položky</th>
-        <th>Způsob úhrady</th><th>Uhrazeno</th><th style="text-align:right">Částka</th><th>Doklad</th><th></th>
+        <th>VS</th><th>Způsob úhrady</th><th>Uhrazeno</th><th style="text-align:right">Částka</th><th>Doklad</th><th></th>
       </tr></thead>
       <tbody>
         ${filtrovaneVydaje.length ? filtrovaneVydaje.map(v=>{
@@ -6804,6 +6804,7 @@ async function loadVydaje() {
           <td style="font-size:.82rem;color:var(--txt2)">
             ${(v.polozky||[]).map(p=>`${escHtml(p.nazev)} ${czMoneyFull(p.castka)}`).join("<br>")||"—"}
           </td>
+          <td style="font-size:.82rem;color:var(--txt2)">${escHtml(v.var_sym||"—")}</td>
           <td><span class="badge" style="background:#f3f4f6">${escHtml(v.zpusob_uhrady||"")}</span></td>
           <td style="font-size:.85rem;color:var(--txt2)">
             ${v.datum_uhrady ? `${czDate(v.datum_uhrady)}${v.banka_uhrady ? `<br><small>${escHtml(v.banka_uhrady)}</small>` : ""}` : "—"}
@@ -6891,6 +6892,9 @@ function _vydajModal(titul, v, onSave, typ) {
       <div class="form-group"><label class="form-label">Částka (Kč) *</label>
         <input type="number" step="0.01" id="evCastka" class="form-control" value="${v.castka||''}">
       </div>
+      <div class="form-group"><label class="form-label">VS (variabilní symbol)</label>
+        <input id="evVarSym" class="form-control" value="${escHtml(v.var_sym||'')}" placeholder="např. 2026001">
+      </div>
       <div class="form-group"><label class="form-label">Způsob úhrady</label>
         <select id="evUhrada" class="form-control">
           ${["hotovost","karta","převodem"].map(u=>`<option ${(v.zpusob_uhrady||'hotovost')===u?'selected':''}>${u}</option>`).join("")}
@@ -6968,6 +6972,7 @@ function _vydajGetPayload() {
     datum:            document.getElementById("evDatum").value,
     datum_splatnosti: document.getElementById("evDatumSpl").value,
     castka:           parseFloat(document.getElementById("evCastka").value||0),
+    var_sym:          document.getElementById("evVarSym")?.value.trim() || "",
     zpusob_uhrady:    document.getElementById("evUhrada").value,
     stav:             document.getElementById("evStav").value,
     datum_uhrady:     document.getElementById("evDatumUhrady")?.value || "",
