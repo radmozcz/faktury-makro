@@ -1136,24 +1136,26 @@ def parse_faktura_claude(filepath):
     try:
         ext = filepath.rsplit(".", 1)[-1].lower()
 
-        # Naskenované PDF — převést na obrázek pro Claude API
+        # Naskenované PDF — převést všechny stránky na obrázky pro Claude API
         if ext == "pdf" and PDF_SUPPORT and OCR_SUPPORT:
             try:
                 import io as _io
+                content_blocks = []
                 with pdfplumber.open(filepath) as _pdf:
-                    _page = _pdf.pages[0]
-                    _pil = _page.to_image(resolution=200).original
-                    # Zmenšit pokud přesahuje limit Claude API (8000px)
-                    _max = 3500
-                    if _pil.width > _max or _pil.height > _max:
-                        _pil.thumbnail((_max, _max), Image.LANCZOS)
-                    _buf = _io.BytesIO()
-                    _pil.save(_buf, format="JPEG", quality=85)
-                    b64 = base64.standard_b64encode(_buf.getvalue()).decode("utf-8")
-                    content_block = {
-                        "type": "image",
-                        "source": {"type": "base64", "media_type": "image/jpeg", "data": b64}
-                    }
+                    for _page in _pdf.pages:
+                        _pil = _page.to_image(resolution=200).original
+                        # Zmenšit pokud přesahuje limit Claude API (8000px)
+                        _max = 3500
+                        if _pil.width > _max or _pil.height > _max:
+                            _pil.thumbnail((_max, _max), Image.LANCZOS)
+                        _buf = _io.BytesIO()
+                        _pil.save(_buf, format="JPEG", quality=85)
+                        _b64 = base64.standard_b64encode(_buf.getvalue()).decode("utf-8")
+                        content_blocks.append({
+                            "type": "image",
+                            "source": {"type": "base64", "media_type": "image/jpeg", "data": _b64}
+                        })
+                content_block = None  # použijeme content_blocks níže
             except Exception:
                 # Fallback: poslat PDF přímo
                 with open(filepath, "rb") as f:
@@ -1163,6 +1165,7 @@ def parse_faktura_claude(filepath):
                     "type": "document",
                     "source": {"type": "base64", "media_type": "application/pdf", "data": b64}
                 }
+                content_blocks = None
         elif ext == "pdf":
             with open(filepath, "rb") as f:
                 raw = f.read()
@@ -1171,8 +1174,9 @@ def parse_faktura_claude(filepath):
                 "type": "document",
                 "source": {"type": "base64", "media_type": "application/pdf", "data": b64}
             }
+            content_blocks = None
         else:
-            # Obrázek (JPG, PNG...) — otočit o 90° kvůli skeneru NETUM
+            # Obrázek (JPG, PNG...)
             media_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
                          "bmp": "image/bmp", "tiff": "image/tiff", "webp": "image/webp"}
             media_type = media_map.get(ext, "image/jpeg")
@@ -1198,6 +1202,7 @@ def parse_faktura_claude(filepath):
                 "type": "image",
                 "source": {"type": "base64", "media_type": media_type, "data": b64}
             }
+            content_blocks = None
 
         prompt = """Jsi expert na čtení faktur a účtenek. Přečti tento doklad VELMI PEČLIVĚ.
 DŮLEŽITÉ: Dokument může být otočený o 90, 180 nebo 270 stupňů — přečti ho správně bez ohledu na orientaci.
@@ -1234,13 +1239,15 @@ PRAVIDLA:
 """
 
         client = anthropic.Anthropic(api_key=api_key)
+        # Sestavit obsah zprávy - buď více stránek (content_blocks) nebo jeden blok
+        if content_blocks:
+            msg_content = content_blocks + [{"type": "text", "text": prompt}]
+        else:
+            msg_content = [content_block, {"type": "text", "text": prompt}]
         message = client.messages.create(
             model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            messages=[{
-                "role": "user",
-                "content": [content_block, {"type": "text", "text": prompt}]
-            }]
+            max_tokens=4000,
+            messages=[{"role": "user", "content": msg_content}]
         )
 
         text = message.content[0].text.strip()
