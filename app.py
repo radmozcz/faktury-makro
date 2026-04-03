@@ -1146,8 +1146,12 @@ def parse_faktura_claude(filepath):
                     _pil = _page.to_image(resolution=200).original
                     # Otočit o 90° — kompenzace skeneru
                     _pil_rotated = _pil.rotate(90, expand=True)
+                    # Zmenšit pokud přesahuje limit Claude API (8000px)
+                    _max = 3500
+                    if _pil_rotated.width > _max or _pil_rotated.height > _max:
+                        _pil_rotated.thumbnail((_max, _max), Image.LANCZOS)
                     _buf = _io.BytesIO()
-                    _pil_rotated.save(_buf, format="JPEG", quality=90)
+                    _pil_rotated.save(_buf, format="JPEG", quality=85)
                     b64 = base64.standard_b64encode(_buf.getvalue()).decode("utf-8")
                     content_block = {
                         "type": "image",
@@ -1180,8 +1184,12 @@ def parse_faktura_claude(filepath):
                     import io as _io
                     _img = Image.open(filepath)
                     _img_rotated = _img.rotate(90, expand=True)
+                    # Zmenšit pokud přesahuje limit Claude API (8000px)
+                    _max = 3500
+                    if _img_rotated.width > _max or _img_rotated.height > _max:
+                        _img_rotated.thumbnail((_max, _max), Image.LANCZOS)
                     _buf = _io.BytesIO()
-                    _img_rotated.save(_buf, format="JPEG", quality=90)
+                    _img_rotated.save(_buf, format="JPEG", quality=85)
                     b64 = base64.standard_b64encode(_buf.getvalue()).decode("utf-8")
                     media_type = "image/jpeg"
                 except Exception:
