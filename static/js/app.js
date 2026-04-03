@@ -2103,17 +2103,55 @@ function nacistNaskenoany() {
 //  HROMADNÉ NAHRÁNÍ — Výdaje a Soukromé výdaje
 // ═══════════════════════════════════════════════════════════════
 function vydajeHromadneNahrat(typ = "provozni") {
-  const inp = document.createElement("input");
-  inp.type = "file";
-  inp.accept = ".pdf,.png,.jpg,.jpeg";
-  inp.multiple = true;
-  inp.onchange = () => { if (inp.files.length) _vydajeHromadneZpracovat(inp.files, typ); };
-  inp.click();
+  const jeSoukrome = typ === "soukrome";
+  const nazev = jeSoukrome ? "Soukromé výdaje" : "Výdaje";
+
+  if (jeSoukrome) {
+    openModal(`📦 Hromadné nahrání — ${nazev}`, `
+      <div class="form-group">
+        <label class="form-label">Lokace</label>
+        <select id="hromadneVolba" class="form-control">
+          <option value="">— nevyplněno —</option>
+          <option value="Praha">Praha</option>
+          <option value="Třebovle">Třebovle</option>
+          <option value="UNI">UNI</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
+        <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
+        <button class="btn btn-primary" onclick="
+          const volba = document.getElementById('hromadneVolba').value;
+          closeModal();
+          const inp = document.createElement('input');
+          inp.type='file'; inp.accept='.pdf,.png,.jpg,.jpeg'; inp.multiple=true;
+          inp.onchange=()=>{ if(inp.files.length) _vydajeHromadneZpracovat(inp.files,'soukrome',volba); };
+          inp.click();">Vybrat soubory →</button>
+      </div>`);
+  } else {
+    const firmy = App.config?.firmy || ["FP","MR","CFF"];
+    openModal(`📦 Hromadné nahrání — ${nazev}`, `
+      <div class="form-group">
+        <label class="form-label">Firma</label>
+        <select id="hromadneVolba" class="firma-select form-control">
+          ${firmy.map(f => `<option value="${f}">${f}</option>`).join("")}
+        </select>
+      </div>
+      <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
+        <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
+        <button class="btn btn-primary" onclick="
+          const volba = document.getElementById('hromadneVolba').value;
+          closeModal();
+          const inp = document.createElement('input');
+          inp.type='file'; inp.accept='.pdf,.png,.jpg,.jpeg'; inp.multiple=true;
+          inp.onchange=()=>{ if(inp.files.length) _vydajeHromadneZpracovat(inp.files,'provozni',volba); };
+          inp.click();">Vybrat soubory →</button>
+      </div>`);
+  }
 }
 
-async function _vydajeHromadneZpracovat(files, typ) {
+async function _vydajeHromadneZpracovat(files, typ, firmaVolba) {
   const jeSoukrome = typ === "soukrome";
-  openModal(`📦 Hromadné nahrání — ${jeSoukrome ? "Soukromé výdaje" : "Výdaje"}`, `
+  openModal(`📦 Hromadné nahrání — ${jeSoukrome ? "Soukromé výdaje" : "Výdaje"} (${firmaVolba || "—"})`, `
     <div id="hromadneVydajeStatus" style="max-height:400px;overflow-y:auto">
       <div>Zpracovávám ${files.length} soubor(ů)...</div>
     </div>
@@ -2122,7 +2160,7 @@ async function _vydajeHromadneZpracovat(files, typ) {
     </div>`);
 
   const statusEl = document.getElementById("hromadneVydajeStatus");
-  let ok = 0, err = 0, dup = 0;
+  let ok = 0, err = 0;
 
   for (const file of Array.from(files)) {
     const row = document.createElement("div");
@@ -2140,18 +2178,18 @@ async function _vydajeHromadneZpracovat(files, typ) {
       if (data.error) { row.innerHTML = `❌ ${file.name} – ${data.error}`; err++; continue; }
 
       const payload = {
-        firma_zkratka:   data.firma_zkratka || (jeSoukrome ? "_soukrome" : ""),
-        dodavatel:       data.dodavatel || "",
-        datum:           data.datum || new Date().toISOString().slice(0,10),
-        castka:          data.castka || 0,
-        zpusob_uhrady:   data.zpusob_uhrady || "převodem",
-        stav:            "nezaplaceno",
-        popis:           data.popis || "",
-        poznamka:        data.poznamka || "",
-        soubor_cesta:    data.soubor_cesta || "",
-        soubor_url:      data.soubor_gcs_url || "",
-        zdroj:           "hromadne",
-        typ:             typ,
+        firma_zkratka: firmaVolba || (jeSoukrome ? "_soukrome" : ""),
+        dodavatel:     data.dodavatel || "",
+        datum:         data.datum || new Date().toISOString().slice(0,10),
+        castka:        data.castka || 0,
+        zpusob_uhrady: data.zpusob_uhrady || "převodem",
+        stav:          "nezaplaceno",
+        popis:         data.popis || "",
+        poznamka:      data.poznamka || "",
+        soubor_cesta:  data.soubor_cesta || "",
+        soubor_url:    data.soubor_gcs_url || "",
+        zdroj:         "hromadne",
+        typ:           typ,
       };
       await api("/api/vydaje", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload) });
       row.innerHTML = `✅ ${file.name} – uloženo (${czMoneyFull(payload.castka)})`;
@@ -2167,16 +2205,28 @@ async function _vydajeHromadneZpracovat(files, typ) {
 //  HROMADNÉ NAHRÁNÍ — Vystavené faktury
 // ═══════════════════════════════════════════════════════════════
 function vystaveneHromadneNahrat() {
-  const inp = document.createElement("input");
-  inp.type = "file";
-  inp.accept = ".pdf,.png,.jpg,.jpeg";
-  inp.multiple = true;
-  inp.onchange = () => { if (inp.files.length) _vystaveneHromadneZpracovat(inp.files); };
-  inp.click();
+  const firmy = App.config?.firmy || ["FP","MR","CFF"];
+  openModal("📦 Hromadné nahrání — Vystavené faktury", `
+    <div class="form-group">
+      <label class="form-label">Vystavující firma</label>
+      <select id="hromadneVystFirma" class="firma-select form-control">
+        ${firmy.map(f => `<option value="${f}">${f}</option>`).join("")}
+      </select>
+    </div>
+    <div style="display:flex;gap:.5rem;justify-content:flex-end;margin-top:1rem">
+      <button class="btn btn-secondary" onclick="closeModal()">Zrušit</button>
+      <button class="btn btn-primary" onclick="
+        const firma = document.getElementById('hromadneVystFirma').value;
+        closeModal();
+        const inp = document.createElement('input');
+        inp.type='file'; inp.accept='.pdf,.png,.jpg,.jpeg'; inp.multiple=true;
+        inp.onchange=()=>{ if(inp.files.length) _vystaveneHromadneZpracovat(inp.files, firma); };
+        inp.click();">Vybrat soubory →</button>
+    </div>`);
 }
 
-async function _vystaveneHromadneZpracovat(files) {
-  openModal("📦 Hromadné nahrání — Vystavené faktury", `
+async function _vystaveneHromadneZpracovat(files, firma) {
+  openModal(`📦 Hromadné nahrání — Vystavené faktury (${firma})`, `
     <div id="hromadneVystStatus" style="max-height:400px;overflow-y:auto">
       <div>Zpracovávám ${files.length} soubor(ů)...</div>
     </div>
@@ -2202,17 +2252,17 @@ async function _vystaveneHromadneZpracovat(files) {
       if (data.error) { row.innerHTML = `❌ ${file.name} – ${data.error}`; err++; continue; }
 
       const payload = {
-        firma_zkratka:   data.firma_zkratka || "",
-        odberatel:       data.odberatel || "",
-        cislo_faktury:   data.cislo_faktury || "",
-        datum:           data.datum_vystaveni || new Date().toISOString().slice(0,10),
+        firma_zkratka:    firma,
+        odberatel:        data.odberatel || "",
+        cislo_faktury:    data.cislo_faktury || "",
+        datum:            data.datum_vystaveni || new Date().toISOString().slice(0,10),
         datum_splatnosti: data.datum_splatnosti || "",
-        celkem_s_dph:    data.celkem_s_dph || 0,
-        zpusob_uhrady:   data.zpusob_uhrady || "převodem",
-        stav:            "ceka",
-        soubor_cesta:    data.soubor_cesta || "",
-        soubor_url:      data.soubor_gcs_url || "",
-        zdroj:           "hromadne",
+        celkem_s_dph:     data.celkem_s_dph || 0,
+        zpusob_uhrady:    data.zpusob_uhrady || "převodem",
+        stav:             "ceka",
+        soubor_cesta:     data.soubor_cesta || "",
+        soubor_url:       data.soubor_gcs_url || "",
+        zdroj:            "hromadne",
       };
       await api("/api/vystavene-faktury", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(payload) });
       row.innerHTML = `✅ ${file.name} – uloženo (${czMoneyFull(payload.celkem_s_dph)})`;
