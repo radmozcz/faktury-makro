@@ -3088,7 +3088,7 @@ def api_vydaje_list():
 @vyzaduj_prihlaseni
 def api_vydaje_ulozit():
     data = request.json or {}
-    if not data.get("firma_zkratka"):
+    if not data.get("firma_zkratka") and data.get("typ") != "soukrome":
         return jsonify({"error": "Chybí firma"}), 400
     polozky = data.get("polozky", [])
     try:
