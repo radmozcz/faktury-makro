@@ -6927,6 +6927,32 @@ def fix_prava_seq():
 def ping():
     return "pong", 200
 
+@app.route("/debug-ocr")
+def debug_ocr():
+    """Dočasný debug endpoint - testuje OCR na poslední nahraté FA"""
+    if not OCR_SUPPORT or not PDF_SUPPORT:
+        return f"OCR: {OCR_SUPPORT}, PDF: {PDF_SUPPORT}", 200
+    try:
+        import glob, io
+        # Najít poslední PDF v uploads
+        pdfs = sorted(glob.glob(os.path.join(UPLOAD_DIR, "*.pdf")))
+        if not pdfs:
+            return "Žádné PDF nenalezeno", 200
+        filepath = pdfs[-1]
+        result_lines = [f"Soubor: {os.path.basename(filepath)}"]
+        with pdfplumber.open(filepath) as pdf:
+            result_lines.append(f"Stránek: {len(pdf.pages)}")
+            page = pdf.pages[-1]
+            pil = page.to_image(resolution=200).original
+            text = pytesseract.image_to_string(pil, lang="ces+eng")
+            result_lines.append("--- Řádky s klíčovými slovy ---")
+            for line in text.splitlines():
+                if any(kw in line.lower() for kw in ["celkov", "castka", "strana", "celkem"]):
+                    result_lines.append(repr(line))
+        return "<br>".join(result_lines), 200
+    except Exception as e:
+        return f"Chyba: {e}", 500
+
 
 def _ensure_pg_columns():
     """Přidá chybějící sloupce do PostgreSQL tabulek."""
@@ -7480,5 +7506,3 @@ def api_dokumenty_url(did):
     
 
 
-
-# build trigger
