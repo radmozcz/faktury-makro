@@ -1298,6 +1298,56 @@ PRAVIDLA:
         return None, str(e)
 
 
+def parse_vystavena_faktura_claude(filepath):
+    """Parser pro naše VYSTAVENÉ faktury — vrátí odberatele, vystavitele, částku, popis."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return None, "ANTHROPIC_API_KEY není nastaven"
+    try:
+        ext = filepath.rsplit(".", 1)[-1].lower()
+        with open(filepath, "rb") as f:
+            raw = f.read()
+        b64 = base64.standard_b64encode(raw).decode("utf-8")
+        if ext == "pdf":
+            block = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}}
+        else:
+            mt = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
+            block = {"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}}
+        ico_map = json.loads(os.environ.get("ICO_MAP_JSON", "{}"))
+        prompt = f"""Analyzuj tuto VYSTAVENOU fakturu a extrahuj tato pole.
+Odpověz POUZE platným JSON objektem, žádný jiný text ani backticky.
+
+Pojmy:
+- VYSTAVITEL = firma která fakturu vystavila (prodávající, dodavatel služby)
+- ODBĚRATEL = firma nebo osoba která fakturu dostala (kupující, příjemce)
+
+{{
+  "vystavitel": "název firmy která fakturu VYSTAVILA",
+  "ico_vystavitele": "IČO vystavitele nebo null",
+  "odberatel": "název odběratele (kdo fakturu PŘIJAL / komu je určena)",
+  "ico_odberatele": "IČO odběratele nebo null",
+  "cislo_faktury": "číslo faktury nebo VS nebo null",
+  "datum_vystaveni": "YYYY-MM-DD nebo null",
+  "datum_splatnosti": "YYYY-MM-DD nebo null",
+  "castka": číslo (celková částka k úhradě včetně DPH v Kč),
+  "popis": "stručný popis předmětu plnění nebo účelu faktury (max 100 znaků)"
+}}
+
+Známá IČO našich firem (vystavitelů): {json.dumps(ico_map)}"""
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model="claude-sonnet-4-20250514", max_tokens=600,
+            messages=[{"role": "user", "content": [block, {"type": "text", "text": prompt}]}]
+        )
+        text = msg.content[0].text.strip()
+        text = re.sub(r"^```json\s*", "", text)
+        text = re.sub(r"```$", "", text).strip()
+        parsed = json.loads(text)
+        return parsed, None
+    except Exception as e:
+        return None, str(e)
+
+
 def parse_makro_image(filepath):
     if not OCR_SUPPORT:
         return None, "pytesseract/Pillow není nainstalován"
@@ -3425,34 +3475,29 @@ def api_vystavene_nahrat_path():
     return _vystavene_ocr(fpath, soubor_url)
 
 def _vystavene_ocr(fpath, soubor_url=""):
-    # Použijeme stejný vyladěný parser jako Nahrát fakturu
-    parsed, err = parse_faktura_claude(fpath)
+    # Použijeme specializovaný parser pro vystavené faktury
+    parsed, err = parse_vystavena_faktura_claude(fpath)
     if parsed is None:
         app.logger.warning(f"OCR vystavene failed: {err}")
         return jsonify({"error": err or "OCR selhalo", "soubor_url": soubor_url}), 200
 
     ico_map = json.loads(os.environ.get("ICO_MAP_JSON", "{}"))
 
-    # firma_zkratka = vystavitel (naše firma) — hledáme podle IČO dodavatele
-    ico_dod = str(parsed.get("ico_dodavatele") or "")
-    firma_vystavitel = ico_map.get(ico_dod, "")
-    # fallback — zkusit název dodavatele
+    # firma_zkratka = vystavitel (naše firma FP/MR/CFF)
+    ico_vys = str(parsed.get("ico_vystavitele") or "")
+    firma_vystavitel = ico_map.get(ico_vys, "")
     if not firma_vystavitel:
-        dod = (parsed.get("dodavatel") or "").lower()
-        if "food plus" in dod: firma_vystavitel = "FP"
-        elif "mrplus" in dod or "mr plus" in dod: firma_vystavitel = "MR"
-        elif "clever food" in dod: firma_vystavitel = "CFF"
-
-    # odberatel = kupující na faktuře
-    ico_odb = str(parsed.get("ico_odberatele") or "")
-    odberatel = parsed.get("odberatel") or parsed.get("dodavatel") or ""
+        vys = (parsed.get("vystavitel") or "").lower()
+        if "food plus" in vys: firma_vystavitel = "FP"
+        elif "mrplus" in vys or "mr plus" in vys: firma_vystavitel = "MR"
+        elif "clever food" in vys: firma_vystavitel = "CFF"
 
     return jsonify({
         "cislo_faktury":    parsed.get("cislo_faktury") or "",
         "datum":            parsed.get("datum_vystaveni") or "",
         "datum_splatnosti": parsed.get("datum_splatnosti") or "",
-        "castka":           float(parsed.get("celkem_s_dph") or 0),
-        "odberatel":        odberatel,
+        "castka":           float(parsed.get("castka") or 0),
+        "odberatel":        parsed.get("odberatel") or "",
         "popis":            parsed.get("popis") or "",
         "firma_zkratka":    firma_vystavitel,
         "soubor_url":       soubor_url,
