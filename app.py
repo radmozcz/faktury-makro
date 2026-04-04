@@ -3292,6 +3292,9 @@ Odpověz POUZE jako JSON: {"dodavatel":"...","datum":"...","castka":0,"poznamka"
         parsed = _json.loads(text)
     except Exception as e:
         parsed = {}
+        ocr_err = str(e)
+    else:
+        ocr_err = ""
     return jsonify({
         "dodavatel":      parsed.get("dodavatel", ""),
         "datum":          parsed.get("datum", ""),
@@ -3301,6 +3304,7 @@ Odpověz POUZE jako JSON: {"dodavatel":"...","datum":"...","castka":0,"poznamka"
         "soubor_gcs_url": gcs_url,
         "var_sym":         parsed.get("var_sym", "") or "",
         "firma_zkratka":  firma or parsed.get("firma_zkratka", ""),
+        "ocr_error":      ocr_err,
     })
 
 # ── API: VYSTAVENÉ FAKTURY ────────────────────────────────────────────────────
