@@ -5435,34 +5435,56 @@ def api_nahrat():
     if gcs_url:
         data["soubor_gcs_url"] = gcs_url
 
+    # Detekce duplicity podle čísla faktury
     if data.get("cislo_faktury"):
-        with get_db() as conn:
-            row = conn.execute("""
+        try:
+            conn_dup = psycopg2.connect(os.environ["DATABASE_URL"])
+            cur_dup = conn_dup.cursor()
+            cur_dup.execute("""
                 SELECT id, firma_zkratka, datum_vystaveni, celkem_s_dph
                 FROM faktury
-                WHERE cislo_faktury = ?
-                AND datum_vystaveni = ?
-                AND ABS(celkem_s_dph - ?) < 1.0
-            """, (data["cislo_faktury"], data.get("datum_vystaveni",""), float(data.get("celkem_s_dph", 0)))).fetchone()
+                WHERE cislo_faktury = %s
+                AND datum_vystaveni = %s
+                AND ABS(celkem_s_dph - %s) < 1.0
+                LIMIT 1
+            """, (data["cislo_faktury"], data.get("datum_vystaveni",""), float(data.get("celkem_s_dph", 0))))
+            row = cur_dup.fetchone()
             if row:
                 data["duplicita"] = {
-                    "id": row["id"],
-                    "firma": row["firma_zkratka"],
-                    "datum": row["datum_vystaveni"],
-                    "celkem": row["celkem_s_dph"]
+                    "id": row[0],
+                    "firma": row[1],
+                    "datum": str(row[2]) if row[2] else "",
+                    "celkem": float(row[3]) if row[3] else 0
                 }
+            cur_dup.close()
+            conn_dup.close()
+        except Exception as e:
+            app.logger.warning(f"Duplicita check failed: {e}")
 
-    # Obsahová duplicita (stejné datum + částka + položky, ignoruje číslo faktury)
-    if not data.get("duplicita") and data.get("datum_vystaveni") and data.get("polozky"):
-        with get_db() as conn:
-            obs_dup = _najdi_obsahovou_duplicitu(
-                conn, data.get("datum_vystaveni",""),
-                float(data.get("celkem_s_dph", 0)),
-                data.get("polozky", [])
-            )
-            if obs_dup:
-                data["duplicita"] = obs_dup
-                data["duplicita"]["typ"] = "obsahova"
+    # Obsahová duplicita (stejné datum + částka) — jen pokud ještě není číslem nalezena
+    if not data.get("duplicita") and data.get("datum_vystaveni") and data.get("celkem_s_dph"):
+        try:
+            conn_dup = psycopg2.connect(os.environ["DATABASE_URL"])
+            cur_dup = conn_dup.cursor()
+            cur_dup.execute("""
+                SELECT id, firma_zkratka, datum_vystaveni, celkem_s_dph, cislo_faktury
+                FROM faktury
+                WHERE datum_vystaveni = %s AND ABS(celkem_s_dph - %s) < 1.0
+                LIMIT 1
+            """, (data.get("datum_vystaveni",""), float(data.get("celkem_s_dph", 0))))
+            row = cur_dup.fetchone()
+            if row:
+                data["duplicita"] = {
+                    "id": row[0],
+                    "firma": row[1],
+                    "datum": str(row[2]) if row[2] else "",
+                    "celkem": float(row[3]) if row[3] else 0,
+                    "typ": "obsahova"
+                }
+            cur_dup.close()
+            conn_dup.close()
+        except Exception as e:
+            app.logger.warning(f"Obsahova duplicita check failed: {e}")
 
     return jsonify(data)
 
