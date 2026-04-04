@@ -2162,23 +2162,22 @@ async function _vydajeHromadneZpracovat(files, typ, firmaVolba) {
     statusEl.appendChild(row);
 
     try {
-      // Krok 1: nahrát a rozpoznat (stejně jako doVydajNahrat)
+      // Krok 1: OCR
       const fd = new FormData();
       fd.append("soubor", file);
       if (firmaVolba) fd.append("firma_zkratka", firmaVolba);
       const r = await fetch("/api/vydaje/nahrat", {method:"POST", body:fd});
+      if (!r.ok) { row.innerHTML = `❌ ${file.name} – server chyba ${r.status}`; err++; continue; }
       const data = await r.json();
+      if (data.error && !data.soubor_cesta) { row.innerHTML = `❌ ${file.name} – ${data.error}`; err++; continue; }
 
-      if (data.error && !data.soubor_cesta) {
-        row.innerHTML = `❌ ${file.name} – ${data.error}`; err++;
-        continue;
-      }
-
-      // Krok 2: uložit (stejně jako ulozitVydajZDokladu)
+      // Krok 2: uložit — vždy, i když OCR nic nenašlo
+      const dnes = new Date(); 
+      const dnesStr = `${dnes.getFullYear()}-${String(dnes.getMonth()+1).padStart(2,'0')}-${String(dnes.getDate()).padStart(2,'0')}`;
       const payload = {
         firma_zkratka:    firmaVolba || data.firma_zkratka || "UNI",
         dodavatel:        data.dodavatel || "",
-        datum:            data.datum || new Date().toISOString().slice(0,10),
+        datum:            data.datum || dnesStr,
         castka:           parseFloat(data.castka) || 0,
         zpusob_uhrady:    data.zpusob_uhrady || "hotovost",
         var_sym:          data.var_sym || "",
@@ -2190,9 +2189,11 @@ async function _vydajeHromadneZpracovat(files, typ, firmaVolba) {
         zdroj:            "hromadne",
         typ:              typ,
       };
-      await api("/api/vydaje", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
+      const r2 = await fetch("/api/vydaje", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
+      if (!r2.ok) { const e2 = await r2.json(); row.innerHTML = `❌ ${file.name} – uložení selhalo: ${e2.error||r2.status}`; err++; continue; }
       const ocrWarn = data.ocr_error ? ` ⚠️ OCR: ${data.ocr_error}` : "";
-      row.innerHTML = `✅ ${file.name} – uloženo ${payload.firma_zkratka ? "(" + payload.firma_zkratka + ", " : "("}${czMoneyFull(payload.castka)})${ocrWarn}`;
+      const firma = payload.firma_zkratka ? `${payload.firma_zkratka}, ` : "";
+      row.innerHTML = `✅ ${file.name} – uloženo (${firma}${czMoneyFull(payload.castka)})${ocrWarn}`;
       ok++;
     } catch(e) {
       row.innerHTML = `❌ ${file.name} – ${e.message}`; err++;
