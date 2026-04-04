@@ -3270,20 +3270,28 @@ def _vydaje_ocr(fpath, fname, gcs_url, firma):
         ext = fname.rsplit(".", 1)[-1].lower()
         mt = "application/pdf" if ext == "pdf" else f"image/{ext if ext in ['jpeg','jpg','png','gif','webp'] else 'jpeg'}"
         if mt == "image/jpg": mt = "image/jpeg"
+        ico_map = json.loads(os.environ.get("ICO_MAP_JSON", "{}"))
+        ico_popis = ", ".join([f"IČO {k} nebo {['Food Plus','MR plus','Clever food factory'][i]} → {v}" for i,(k,v) in enumerate(ico_map.items())])
         msg_content = [
             {"type": "image" if not mt.startswith("application") else "document",
              "source": {"type": "base64", "media_type": mt, "data": b64}},
-            {"type": "text", "text": """Analyzuj tento doklad/účtenku a extrahuj:
-- dodavatel: název obchodu/firmy
-- datum: datum nákupu ve formátu YYYY-MM-DD
-- castka: celková částka v Kč (číslo bez měny)
-- poznamka: krátký popis co bylo nakoupeno (max 80 znaků)
-- var_sym: variabilní symbol nebo číslo faktury (číslo nebo text, např. 4861657011)
-- firma_zkratka: zkratka kupujícího/odběratele: IČO 19436521 nebo Food Plus → FP, IČO 08163629 nebo MR plus → MR, IČO 09762906 nebo Clever food factory → CFF, jinak prázdný string
-Odpověz POUZE jako JSON: {"dodavatel":"...","datum":"...","castka":0,"poznamka":"...","var_sym":"...","firma_zkratka":"..."}"""}
+            {"type": "text", "text": f"""Analyzuj tento doklad nebo fakturu a extrahuj tato pole.
+Odpověz POUZE platným JSON, žádný jiný text.
+
+Pravidla:
+- dodavatel: název firmy/obchodu která doklad VYSTAVILA (prodávající), ne kdo platil
+- datum: datum vystavení nebo nákupu ve formátu YYYY-MM-DD (hledej "datum vystavení", "datum", "dne" apod.)
+- castka: CELKOVÁ částka k úhradě včetně DPH v Kč jako číslo bez měny a bez mezer (hledej "celkem", "k úhradě", "total")
+- poznamka: stručný popis co bylo nakoupeno nebo účel faktury (max 80 znaků)
+- var_sym: variabilní symbol nebo číslo faktury (hledej "variabilní symbol", "VS", "číslo faktury", "faktura č.")
+- datum_splatnosti: datum splatnosti ve formátu YYYY-MM-DD nebo prázdný string
+- zpusob_uhrady: způsob úhrady — jedna z hodnot: "hotovost", "karta", "převodem" (hledej "způsob úhrady", "forma úhrady")
+- firma_zkratka: zkratka KUPUJÍCÍHO/odběratele podle IČO: {ico_popis}; jinak prázdný string
+
+{{"dodavatel":"...","datum":"...","castka":0,"poznamka":"...","var_sym":"...","datum_splatnosti":"...","zpusob_uhrady":"...","firma_zkratka":"..."}}"""}
         ]
         resp = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY","")).messages.create(
-            model="claude-sonnet-4-20250514", max_tokens=300,
+            model="claude-sonnet-4-20250514", max_tokens=500,
             messages=[{"role": "user", "content": msg_content}]
         )
         import json as _json
