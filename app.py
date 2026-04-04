@@ -3425,52 +3425,36 @@ def api_vystavene_nahrat_path():
     return _vystavene_ocr(fpath, soubor_url)
 
 def _vystavene_ocr(fpath, soubor_url=""):
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return jsonify({"error": "ANTHROPIC_API_KEY není nastaven", "soubor_url": soubor_url}), 200
-    try:
-        ext = fpath.rsplit(".", 1)[-1].lower()
-        with open(fpath, "rb") as fh:
-            raw = fh.read()
-        b64 = base64.standard_b64encode(raw).decode("utf-8")
-        if ext == "pdf":
-            content_block = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}}
-        else:
-            media_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
-            content_block = {"type": "image", "source": {"type": "base64", "media_type": media_map.get(ext, "image/jpeg"), "data": b64}}
-        client = anthropic.Anthropic(api_key=api_key)
-        msg = client.messages.create(
-            model="claude-sonnet-4-20250514", max_tokens=500,
-            messages=[{"role": "user", "content": [
-                content_block,
-                {"type": "text", "text": """Analyzuj tuto vystavenou fakturu a extrahuj tyto hodnoty.
-Odpověz POUZE platným JSON objektem, žádný jiný text ani backticky.
-{
-  "cislo_faktury": "číslo faktury (text)",
-  "datum": "datum vystavení YYYY-MM-DD nebo null",
-  "datum_splatnosti": "datum splatnosti YYYY-MM-DD nebo null",
-  "castka": číslo (celková částka v Kč bez symbolu),
-  "odberatel": "název odběratele",
-  "popis": "stručný popis předmětu plnění max 100 znaků",
-  "firma_zkratka": "zkratka vystavitele: pokud vidíš Food Plus → FP, MR plus nebo MRplus → MR, Clever food factory → CFF, jinak prázdný string"
-}"""}
-            ]}]
-        )
-        text = msg.content[0].text.strip()
-        text = re.sub(r"^```json\s*", "", text)
-        text = re.sub(r"```$", "", text).strip()
-        parsed = json.loads(text)
-    except Exception as e:
-        app.logger.warning(f"OCR vystavene failed: {e}")
-        return jsonify({"error": str(e), "soubor_url": soubor_url}), 200
+    # Použijeme stejný vyladěný parser jako Nahrát fakturu
+    parsed, err = parse_faktura_claude(fpath)
+    if parsed is None:
+        app.logger.warning(f"OCR vystavene failed: {err}")
+        return jsonify({"error": err or "OCR selhalo", "soubor_url": soubor_url}), 200
+
+    ico_map = json.loads(os.environ.get("ICO_MAP_JSON", "{}"))
+
+    # firma_zkratka = vystavitel (naše firma) — hledáme podle IČO dodavatele
+    ico_dod = str(parsed.get("ico_dodavatele") or "")
+    firma_vystavitel = ico_map.get(ico_dod, "")
+    # fallback — zkusit název dodavatele
+    if not firma_vystavitel:
+        dod = (parsed.get("dodavatel") or "").lower()
+        if "food plus" in dod: firma_vystavitel = "FP"
+        elif "mrplus" in dod or "mr plus" in dod: firma_vystavitel = "MR"
+        elif "clever food" in dod: firma_vystavitel = "CFF"
+
+    # odberatel = kupující na faktuře
+    ico_odb = str(parsed.get("ico_odberatele") or "")
+    odberatel = parsed.get("odberatel") or parsed.get("dodavatel") or ""
+
     return jsonify({
         "cislo_faktury":    parsed.get("cislo_faktury") or "",
-        "datum":            parsed.get("datum") or "",
+        "datum":            parsed.get("datum_vystaveni") or "",
         "datum_splatnosti": parsed.get("datum_splatnosti") or "",
-        "castka":           float(parsed.get("castka") or 0),
-        "odberatel":        parsed.get("odberatel") or "",
+        "castka":           float(parsed.get("celkem_s_dph") or 0),
+        "odberatel":        odberatel,
         "popis":            parsed.get("popis") or "",
-        "firma_zkratka":    parsed.get("firma_zkratka") or "",
+        "firma_zkratka":    firma_vystavitel,
         "soubor_url":       soubor_url,
     })
 
