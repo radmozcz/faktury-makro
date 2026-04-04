@@ -1710,6 +1710,15 @@ async function otevritSkenerModal(callback, firma = '') {
           <input type="checkbox" id="skenerViceStran" onchange="skenerToggleViceStran()">
           Více stran
         </label>
+        <label style="display:flex;align-items:center;gap:.4rem;font-size:.95rem">
+          🔄
+          <select id="skenerRotace" class="form-control" style="width:auto;padding:.2rem .4rem;font-size:.9rem">
+            <option value="0">Bez rotace</option>
+            <option value="90" selected>Otočit 90°</option>
+            <option value="180">Otočit 180°</option>
+            <option value="270">Otočit 270°</option>
+          </select>
+        </label>
       </div>
       <div style="position:relative;display:inline-block;max-width:100%">
         <video id="skenerVideo" autoplay playsinline
@@ -1820,6 +1829,22 @@ async function skenerVyfotit() {
   const viceStran = document.getElementById('skenerViceStran')?.checked;
   if (!video || !canvas) return;
 
+  // Pomocná funkce — otočí blob obrázku o daný počet stupňů (90, 180, 270)
+  async function rotujBlob(srcBlob, stupne) {
+    const bitmap = await createImageBitmap(srcBlob);
+    const rad = stupne * Math.PI / 180;
+    const swap = stupne === 90 || stupne === 270;
+    const w = swap ? bitmap.height : bitmap.width;
+    const h = swap ? bitmap.width : bitmap.height;
+    const offscreen = document.createElement('canvas');
+    offscreen.width = w; offscreen.height = h;
+    const ctx = offscreen.getContext('2d');
+    ctx.translate(w / 2, h / 2);
+    ctx.rotate(rad);
+    ctx.drawImage(bitmap, -bitmap.width / 2, -bitmap.height / 2);
+    return new Promise(res => offscreen.toBlob(res, 'image/jpeg', 0.97));
+  }
+
   let blob;
   try {
     // Zkus ImageCapture API — dostane plné rozlišení z kamery (8MP)
@@ -1840,6 +1865,13 @@ async function skenerVyfotit() {
     canvas.height = video.videoHeight || 1080;
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
     blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.97));
+  }
+
+  // Rotace podle nastavení
+  const rotaceEl = document.getElementById('skenerRotace');
+  const rotaceStupne = parseInt(rotaceEl?.value || '0');
+  if (rotaceStupne !== 0) {
+    blob = await rotujBlob(blob, rotaceStupne);
   }
 
   if (viceStran) {
