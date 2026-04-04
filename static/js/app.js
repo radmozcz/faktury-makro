@@ -2176,7 +2176,7 @@ async function _vydajeHromadneZpracovat(files, typ, firmaVolba) {
 
       // Krok 2: uložit (stejně jako ulozitVydajZDokladu)
       const payload = {
-        firma_zkratka:    firmaVolba || data.firma_zkratka || "",
+        firma_zkratka:    firmaVolba || data.firma_zkratka || "UNI",
         dodavatel:        data.dodavatel || "",
         datum:            data.datum || new Date().toISOString().slice(0,10),
         castka:           parseFloat(data.castka) || 0,
