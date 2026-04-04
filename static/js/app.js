@@ -1941,6 +1941,24 @@ async function skenerZpracovat(blobs) {
 
 // ---- Konkrétní callbacky pro každou sekci ----
 
+// Pomocná funkce — sloučí více JPG obrázků do jednoho svislého obrázku
+async function sloucitStrany(files) {
+  if (files.length === 1) return files[0];
+  const bitmaps = await Promise.all(files.map(f => createImageBitmap(f)));
+  const totalH = bitmaps.reduce((s, b) => s + b.height, 0);
+  const maxW = Math.max(...bitmaps.map(b => b.width));
+  const canvas = document.createElement('canvas');
+  canvas.width = maxW; canvas.height = totalH;
+  const ctx = canvas.getContext('2d');
+  let y = 0;
+  for (const bm of bitmaps) {
+    ctx.drawImage(bm, 0, y);
+    y += bm.height;
+  }
+  const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', 0.95));
+  return new File([blob], files[0].name, { type: 'image/jpeg' });
+}
+
 // Nahrát fakturu (MAKRO)
 async function skenerCallbackNahrat(files, firma) {
   zavritSkenerModal();
@@ -1950,8 +1968,10 @@ async function skenerCallbackNahrat(files, firma) {
   const statusEl = document.getElementById('uploadStatus');
   if (statusEl) statusEl.innerHTML = '<span class="spinner"></span> Zpracovávám přes OCR…';
   try {
+    // Více stránek sloučíme do jednoho obrázku
+    const soubor = files.length > 1 ? await sloucitStrany(files) : files[0];
     const fd = new FormData();
-    fd.append('soubor', files[0]);
+    fd.append('soubor', soubor);
     fd.append('firma_zkratka', firma || document.getElementById('nahratFirma')?.value || '');
     const r = await fetch('/api/nahrat', { method: 'POST', body: fd });
     const data = await r.json();
