@@ -1962,6 +1962,8 @@ async function sloucitStrany(files) {
 // Nahrát fakturu (MAKRO)
 async function skenerCallbackNahrat(files, firma) {
   zavritSkenerModal();
+  // Přepni na záložku PDF aby byl formulář viditelný
+  switchTab('pdf');
   // Vyčisti starý formulář
   const parsedForm = document.getElementById('parsedForm');
   if (parsedForm) parsedForm.style.display = 'none';
