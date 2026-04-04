@@ -2191,7 +2191,8 @@ async function _vydajeHromadneZpracovat(files, typ, firmaVolba) {
         typ:              typ,
       };
       await api("/api/vydaje", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload)});
-      row.innerHTML = `✅ ${file.name} – uloženo ${payload.firma_zkratka ? "(" + payload.firma_zkratka + ", " : "("}${czMoneyFull(payload.castka)})`;
+      const ocrWarn = data.ocr_error ? ` ⚠️ OCR: ${data.ocr_error}` : "";
+      row.innerHTML = `✅ ${file.name} – uloženo ${payload.firma_zkratka ? "(" + payload.firma_zkratka + ", " : "("}${czMoneyFull(payload.castka)})${ocrWarn}`;
       ok++;
     } catch(e) {
       row.innerHTML = `❌ ${file.name} – ${e.message}`; err++;
