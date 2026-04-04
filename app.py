@@ -1183,9 +1183,9 @@ def parse_faktura_claude(filepath):
     try:
         ext = filepath.rsplit(".", 1)[-1].lower()
 
+        castka_z_textu = None  # výchozí hodnota pro všechny typy souborů
         # PDF — poslat přímo Claude jako dokument
         if ext == "pdf":
-            castka_z_textu = None  # OCR vypnuto - příliš pomalé na Cloud Run
             with open(filepath, "rb") as f:
                 raw = f.read()
             b64 = base64.standard_b64encode(raw).decode("utf-8")
