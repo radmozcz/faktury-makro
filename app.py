@@ -3263,56 +3263,40 @@ def api_vydaje_nahrat_path():
     return _vydaje_ocr(fpath, filename, soubor_url, firma)
 
 def _vydaje_ocr(fpath, fname, gcs_url, firma):
-    try:
-        with open(fpath, "rb") as fh:
-            raw = fh.read()
-        b64 = base64.b64encode(raw).decode()
-        ext = fname.rsplit(".", 1)[-1].lower()
-        mt = "application/pdf" if ext == "pdf" else f"image/{ext if ext in ['jpeg','jpg','png','gif','webp'] else 'jpeg'}"
-        if mt == "image/jpg": mt = "image/jpeg"
-        ico_map = json.loads(os.environ.get("ICO_MAP_JSON", "{}"))
-        ico_popis = ", ".join([f"IČO {k} nebo {['Food Plus','MR plus','Clever food factory'][i]} → {v}" for i,(k,v) in enumerate(ico_map.items())])
-        msg_content = [
-            {"type": "image" if not mt.startswith("application") else "document",
-             "source": {"type": "base64", "media_type": mt, "data": b64}},
-            {"type": "text", "text": f"""Analyzuj tento doklad nebo fakturu a extrahuj tato pole.
-Odpověz POUZE platným JSON, žádný jiný text.
-
-Pravidla:
-- dodavatel: název firmy/obchodu která doklad VYSTAVILA (prodávající), ne kdo platil
-- datum: datum vystavení nebo nákupu ve formátu YYYY-MM-DD (hledej "datum vystavení", "datum", "dne" apod.)
-- castka: CELKOVÁ částka k úhradě včetně DPH v Kč jako číslo bez měny a bez mezer (hledej "celkem", "k úhradě", "total")
-- poznamka: stručný popis co bylo nakoupeno nebo účel faktury (max 80 znaků)
-- var_sym: variabilní symbol nebo číslo faktury (hledej "variabilní symbol", "VS", "číslo faktury", "faktura č.")
-- datum_splatnosti: datum splatnosti ve formátu YYYY-MM-DD nebo prázdný string
-- zpusob_uhrady: způsob úhrady — jedna z hodnot: "hotovost", "karta", "převodem" (hledej "způsob úhrady", "forma úhrady")
-- firma_zkratka: zkratka KUPUJÍCÍHO/odběratele podle IČO: {ico_popis}; jinak prázdný string
-
-{{"dodavatel":"...","datum":"...","castka":0,"poznamka":"...","var_sym":"...","datum_splatnosti":"...","zpusob_uhrady":"...","firma_zkratka":"..."}}"""}
-        ]
-        resp = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY","")).messages.create(
-            model="claude-sonnet-4-20250514", max_tokens=500,
-            messages=[{"role": "user", "content": msg_content}]
-        )
-        import json as _json
-        text = resp.content[0].text.strip()
-        text = text.replace("```json","").replace("```","").strip()
-        parsed = _json.loads(text)
-    except Exception as e:
+    # Použijeme stejný vyladěný parser jako Nahrát fakturu
+    parsed, err = parse_faktura_claude(fpath)
+    if parsed is None:
         parsed = {}
-        ocr_err = str(e)
+    ocr_err = err or ""
+
+    # Mapování polí z parse_faktura_claude na pole pro výdaje
+    ico_map = json.loads(os.environ.get("ICO_MAP_JSON", "{}"))
+    ico_odb = str(parsed.get("ico_odberatele") or "")
+    firma_z_ocr = ico_map.get(ico_odb, "")
+
+    # Způsob úhrady — normalizace
+    zpusob_raw = (parsed.get("zpusob_uhrady") or "").lower()
+    if "kart" in zpusob_raw:
+        zpusob = "karta"
+    elif "hotov" in zpusob_raw or "cash" in zpusob_raw:
+        zpusob = "hotovost"
+    elif "převod" in zpusob_raw or "prevod" in zpusob_raw:
+        zpusob = "převodem"
     else:
-        ocr_err = ""
+        zpusob = "hotovost"
+
     return jsonify({
-        "dodavatel":      parsed.get("dodavatel", ""),
-        "datum":          parsed.get("datum", ""),
-        "castka":         parsed.get("castka", 0),
-        "poznamka":       parsed.get("poznamka", ""),
-        "soubor_cesta":   fname,
-        "soubor_gcs_url": gcs_url,
-        "var_sym":         parsed.get("var_sym", "") or "",
-        "firma_zkratka":  firma or parsed.get("firma_zkratka", ""),
-        "ocr_error":      ocr_err,
+        "dodavatel":        parsed.get("dodavatel", ""),
+        "datum":            parsed.get("datum_vystaveni", "") or "",
+        "castka":           float(parsed.get("celkem_s_dph", 0) or 0),
+        "poznamka":         parsed.get("popis", "") or "",
+        "soubor_cesta":     fname,
+        "soubor_gcs_url":   gcs_url,
+        "var_sym":          parsed.get("cislo_faktury", "") or "",
+        "datum_splatnosti": parsed.get("datum_splatnosti", "") or "",
+        "zpusob_uhrady":    zpusob,
+        "firma_zkratka":    firma or firma_z_ocr,
+        "ocr_error":        ocr_err,
     })
 
 # ── API: VYSTAVENÉ FAKTURY ────────────────────────────────────────────────────
