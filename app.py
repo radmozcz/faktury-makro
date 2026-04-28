@@ -1261,7 +1261,7 @@ PRAVIDLA:
         else:
             msg_content = [content_block, {"type": "text", "text": prompt}]
         message = client.messages.create(
-            model="claude-sonnet-4-6-20250217",
+            model="claude-sonnet-4-6",
             max_tokens=4000,
             messages=[{"role": "user", "content": msg_content}]
         )
@@ -1336,7 +1336,7 @@ Pojmy:
 Známá IČO našich firem (vystavitelů): {json.dumps(ico_map)}"""
         client = anthropic.Anthropic(api_key=api_key)
         msg = client.messages.create(
-            model="claude-sonnet-4-6-20250217", max_tokens=600,
+            model="claude-sonnet-4-6", max_tokens=600,
             messages=[{"role": "user", "content": [block, {"type": "text", "text": prompt}]}]
         )
         text = msg.content[0].text.strip()
@@ -1686,7 +1686,7 @@ NIKDY nepiš: Nada, Náda (→ je to Ráďa), ani žádné jiné jméno mimo sez
 """
 
         message = client.messages.create(
-            model="claude-sonnet-4-6-20250217",
+            model="claude-sonnet-4-6",
             max_tokens=1000,
             messages=[{
                 "role": "user",
@@ -1750,7 +1750,7 @@ Formát odpovědi:
 """
 
         message = client.messages.create(
-            model="claude-sonnet-4-6-20250217",
+            model="claude-sonnet-4-6",
             max_tokens=1000,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -5223,7 +5223,7 @@ Nikdy nevymýšlej data která nemáš."""]
         if len(kontext) > 150000:
             kontext = kontext[:150000] + "\n\n[Data zkrácena kvůli délce — zobrazena část]"
         msg = client.messages.create(
-            model="claude-sonnet-4-6-20250217",
+            model="claude-sonnet-4-6",
             max_tokens=2000,
             messages=messages
         )
@@ -6280,7 +6280,7 @@ def _ocr_faktura(fpath):
         client = anthropic.Anthropic(api_key=api_key)
         ico_map = json.loads(os.environ.get("ICO_MAP_JSON", "{}"))
         msg = client.messages.create(
-            model="claude-sonnet-4-6-20250217", max_tokens=2000,
+            model="claude-sonnet-4-6", max_tokens=2000,
             messages=[{"role": "user", "content": [block, {"type": "text", "text": f"""Analyzuj tuto MAKRO fakturu (daňový doklad).
 Odpověz POUZE platným JSON, žádný jiný text.
 
