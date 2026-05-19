@@ -6002,6 +6002,38 @@ def uploaded_file(filename):
     return send_from_directory(UPLOAD_DIR, filename)
 
 
+@app.route("/api/soubor/<int:fid>")
+def api_soubor_stream(fid):
+    with get_db() as conn:
+        row = conn.execute("SELECT soubor_cesta FROM faktury WHERE id=?", (fid,)).fetchone()
+    if not row or not row["soubor_cesta"]:
+        return jsonify({"error": "Faktura nema prilohu"}), 404
+    gcs_path = row["soubor_cesta"]
+    if "/" not in gcs_path:
+        gcs_path = f"faktury/{gcs_path}"
+    if not GCS_SUPPORT:
+        fname = gcs_path.split("/")[-1]
+        return send_from_directory(UPLOAD_DIR, fname)
+    try:
+        client = gcs_storage.Client()
+        bucket = client.bucket(GCS_BUCKET)
+        blob = bucket.blob(gcs_path)
+        data = blob.download_as_bytes()
+        ext = gcs_path.rsplit(".", 1)[-1].lower()
+        mime_map = {"pdf": "application/pdf", "png": "image/png",
+                    "jpg": "image/jpeg", "jpeg": "image/jpeg"}
+        mime = mime_map.get(ext, "application/octet-stream")
+        from flask import Response
+        return Response(data, mimetype=mime,
+                        headers={"Content-Disposition": f"inline; filename={gcs_path.split('/')[-1]}"})
+    except Exception as e:
+        fname = gcs_path.split("/")[-1]
+        local = os.path.join(UPLOAD_DIR, fname)
+        if os.path.exists(local):
+            return send_from_directory(UPLOAD_DIR, fname)
+        return jsonify({"error": str(e)}), 404
+
+
 init_db()
 migrate_db()
 
