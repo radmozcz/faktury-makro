@@ -6053,6 +6053,89 @@ def api_soubor_stream(fid):
     return jsonify({"error": "Soubor neni dostupny"}), 404
 
 
+@app.route("/api/report-foto/<int:rid>")
+def api_report_foto_stream(rid):
+    with get_db() as conn:
+        row = conn.execute("SELECT soubor_url, foto_cesta FROM reporty WHERE id=?", (rid,)).fetchone()
+    if not row:
+        return jsonify({"error": "Report nenalezen"}), 404
+    soubor_url = row["soubor_url"] if row["soubor_url"] else ""
+    foto_cesta = row["foto_cesta"] if row["foto_cesta"] else ""
+    gcs_filename = None
+    if foto_cesta:
+        gcs_filename = foto_cesta.split("/")[-1]
+    elif soubor_url:
+        import re as _re
+        m = _re.search(r'/reporty/([^?]+)', soubor_url)
+        if m:
+            gcs_filename = m.group(1)
+        else:
+            m2 = _re.search(r'faktury-makro-docs/(.+?)(?:\?|$)', soubor_url)
+            if m2:
+                gcs_filename = m2.group(1).split("/")[-1]
+    if not gcs_filename:
+        return jsonify({"error": "Report nema prilohu"}), 404
+    bucket = get_gcs_client()
+    if bucket:
+        try:
+            from flask import Response
+            blob = bucket.blob(f"reporty/{gcs_filename}")
+            if not blob.exists():
+                return jsonify({"error": "Foto nenalezeno v GCS"}), 404
+            data = blob.download_as_bytes()
+            ext = gcs_filename.rsplit(".", 1)[-1].lower()
+            mime_map = {"pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
+            mime = mime_map.get(ext, "application/octet-stream")
+            return Response(data, mimetype=mime, headers={"Content-Disposition": f"inline; filename={gcs_filename}"})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    local = os.path.join(UPLOAD_DIR, gcs_filename)
+    if os.path.exists(local):
+        return send_from_directory(UPLOAD_DIR, gcs_filename)
+    return jsonify({"error": "Foto neni dostupne"}), 404
+
+
+@app.route("/api/vydaj-soubor/<int:vid>")
+def api_vydaj_soubor_stream(vid):
+    with get_db() as conn:
+        row = conn.execute("SELECT soubor_url FROM vydaje WHERE id=?", (vid,)).fetchone()
+        if not row:
+            row = conn.execute("SELECT soubor_url FROM soukrome_vydaje WHERE id=?", (vid,)).fetchone()
+    if not row or not row["soubor_url"]:
+        return jsonify({"error": "Vydaj nema prilohu"}), 404
+    soubor_url = row["soubor_url"]
+    import re as _re
+    gcs_filename = None
+    m = _re.search(r'/(vydaje|faktury)/([^?]+)', soubor_url)
+    if m:
+        gcs_filename = m.group(2)
+    else:
+        m2 = _re.search(r'faktury-makro-docs/(.+?)(?:\?|$)', soubor_url)
+        if m2:
+            gcs_filename = m2.group(1).split("/")[-1]
+    if not gcs_filename:
+        return jsonify({"error": "Soubor nema prilohu"}), 404
+    bucket = get_gcs_client()
+    if bucket:
+        try:
+            from flask import Response
+            for folder in ["vydaje", "faktury"]:
+                blob = bucket.blob(f"{folder}/{gcs_filename}")
+                if blob.exists():
+                    data = blob.download_as_bytes()
+                    ext = gcs_filename.rsplit(".", 1)[-1].lower()
+                    mime_map = {"pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
+                    mime = mime_map.get(ext, "application/octet-stream")
+                    return Response(data, mimetype=mime, headers={"Content-Disposition": f"inline; filename={gcs_filename}"})
+            return jsonify({"error": "Soubor nenalezen v GCS"}), 404
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
+    local = os.path.join(UPLOAD_DIR, gcs_filename)
+    if os.path.exists(local):
+        return send_from_directory(UPLOAD_DIR, gcs_filename)
+    return jsonify({"error": "Soubor neni dostupny"}), 404
+
+
 init_db()
 migrate_db()
 
