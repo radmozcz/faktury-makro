@@ -5549,7 +5549,7 @@ function renderReportyTable(rows) {
             <td style="font-size:.82rem"><strong>${escHtml(r.firma_zkratka||"")}</strong></td>
             <td style="font-size:.82rem;color:var(--txt2)">${escHtml(r.smena||"")}</td>
             <td style="white-space:nowrap">
-              ${r.soubor_url ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();window.open('${r.soubor_url}','_blank')" title="Originál">📎</button>` : ''}
+              ${r.id ? `<button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();otevritStreamSoubor('/api/report-foto/'+${r.id})" title="Originál">📎</button>` : ''}
               <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();editReport(${r.id})" title="Upravit">✏️</button>
               ${r.duplicita_id ? `<button class="btn btn-sm" style="background:#f59e0b;color:#fff;border:none" onclick="event.stopPropagation();reportNeniDuplicita(${r.id})" title="Není duplicita">✅</button>` : ''}
               <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteReport(${r.id})" title="Smazat">🗑</button>
@@ -5588,7 +5588,7 @@ function reportFormHtml(r = {}) {
         ${App.config.firmy.map(f=>`<option value="${f}" ${(r.firma_zkratka||App._lastReportFirma||App._aktivniFirma||"")==f?"selected":""}>${f}</option>`).join("")}
       </select>
     </div>
-    ${r.soubor_url ? `<div style="margin-bottom:.8rem"><a href="${r.soubor_url}" target="_blank" class="btn btn-secondary btn-sm">📎 Zobrazit originál fotku</a></div>` : ""}
+    ${r.id ? `<div style="margin-bottom:.8rem"><button class="btn btn-secondary btn-sm" onclick="otevritStreamSoubor('/api/report-foto/'+${r.id})">📎 Zobrazit originál fotku</button></div>` : ""}
     <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:2px solid var(--border);padding-bottom:0">
       <button id="rtabFoto"  class="tab-btn tab-active" onclick="switchRTab('foto')">📷 Fotka</button>
       <button id="rtabText"  class="tab-btn" onclick="switchRTab('text')">📋 Vložit text</button>
@@ -6878,7 +6878,7 @@ async function loadVydaje() {
             ${v.datum_uhrady ? `${czDate(v.datum_uhrady)}${v.banka_uhrady ? `<br><small>${escHtml(v.banka_uhrady)}</small>` : ""}` : "—"}
           </td>
           <td style="text-align:right;font-weight:600;color:${v.stav==='zaplaceno'?'var(--txt2)':'#dc2626'}">${czMoneyFull(v.castka)}</td>
-          <td>${v.soubor_url?`<a href="${v.soubor_url}" target="_blank" onclick="event.stopPropagation()" style="font-size:.85rem">📎</a>`:""}</td>
+          <td>${v.id?`<button class="btn btn-sm btn-secondary" style="padding:.2rem .4rem;font-size:.85rem" onclick="event.stopPropagation();otevritStreamSoubor('/api/vydaj-soubor/'+${v.id})" title="Zobrazit originál">📎</button>`:""}</td>
           <td onclick="event.stopPropagation()">
             ${mozeUpravit ? `<button class="btn btn-sm btn-secondary" style="padding:.2rem .4rem" onclick="openVydajEdit(${v.id})">✏️</button>` : ""}
             ${mozeSmazat?`<button class="btn btn-sm" style="background:#fee2e2;color:#991b1b;border:none;padding:.2rem .4rem;border-radius:4px" onclick="smazatVydaj(${v.id})">🗑</button>`:""}
@@ -6997,7 +6997,7 @@ function _vydajModal(titul, v, onSave, typ) {
       <div class="form-group" style="grid-column:1/-1">
         <label class="form-label">Originál dokladu</label>
         <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
-          ${v.soubor_url ? `<a href="${v.soubor_url}" target="_blank" class="btn btn-sm btn-secondary">📎 Zobrazit originál</a>` : `<span style="color:var(--txt2);font-size:.85rem">Žádný originál</span>`}
+          ${v.id ? `<button class="btn btn-sm btn-secondary" onclick="otevritStreamSoubor('/api/vydaj-soubor/'+${v.id})">📎 Zobrazit originál</button>` : `<span style="color:var(--txt2);font-size:.85rem">Žádný originál</span>`}
           <input type="file" id="evSouborNovy" accept=".pdf,.png,.jpg,.jpeg" style="font-size:.85rem">
         </div>
       </div>
