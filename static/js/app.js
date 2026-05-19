@@ -6029,6 +6029,19 @@ async function doImportXlsx(file) {
 }
 
 
+
+async function otevritStreamSoubor(url) {
+  try {
+    const r = await fetch(url);
+    if (!r.ok) { toast("Soubor není k dispozici", true); return; }
+    const blob = await r.blob();
+    const objUrl = URL.createObjectURL(blob);
+    window.open(objUrl, "_blank");
+  } catch(e) {
+    toast("Chyba při otevírání souboru", true);
+  }
+}
+
 async function otevritSoubor(fid) {
   try {
     const r = await fetch(`/api/soubor/${fid}`);
