@@ -6009,49 +6009,48 @@ def api_soubor_stream(fid):
     if not row:
         return jsonify({"error": "Faktura nenalezena"}), 404
 
-    # Zjisti GCS cestu - buď z soubor_cesta nebo z soubor_url
-    gcs_path = None
     soubor_cesta = row["soubor_cesta"] if row["soubor_cesta"] else ""
-    soubor_url = row["soubor_url"] if row["soubor_url"] else ""
+    soubor_url   = row["soubor_url"]   if row["soubor_url"]   else ""
 
+    # Zjisti GCS název souboru
+    gcs_filename = None
     if soubor_cesta:
-        # Pokud cesta obsahuje lomítko, je to již GCS cesta
-        if "/" in soubor_cesta:
-            gcs_path = soubor_cesta
-        else:
-            gcs_path = f"faktury/{soubor_cesta}"
-
-    if not gcs_path and soubor_url:
-        # Extrahuj GCS cestu z URL (část mezi bucket name a ?)
+        # soubor_cesta může být "faktury/xxx.pdf" nebo jen "xxx.pdf"
+        gcs_filename = soubor_cesta.split("/")[-1]
+    elif soubor_url:
+        # Extrahuj název souboru z URL
         import re as _re
-        m = _re.search(r'faktury-makro-docs/(.+?)(?:\?|$)', soubor_url)
+        m = _re.search(r'/faktury/([^?]+)', soubor_url)
         if m:
-            gcs_path = m.group(1)
+            gcs_filename = m.group(1)
 
-    if not gcs_path:
+    if not gcs_filename:
         return jsonify({"error": "Faktura nema prilohu"}), 404
 
-    if not GCS_SUPPORT:
-        fname = gcs_path.split("/")[-1]
-        return send_from_directory(UPLOAD_DIR, fname)
-    try:
-        client = gcs_storage.Client()
-        bucket = client.bucket(GCS_BUCKET)
-        blob = bucket.blob(gcs_path)
-        data = blob.download_as_bytes()
-        ext = gcs_path.rsplit(".", 1)[-1].lower()
-        mime_map = {"pdf": "application/pdf", "png": "image/png",
-                    "jpg": "image/jpeg", "jpeg": "image/jpeg"}
-        mime = mime_map.get(ext, "application/octet-stream")
-        from flask import Response
-        return Response(data, mimetype=mime,
-                        headers={"Content-Disposition": f"inline; filename={gcs_path.split('/')[-1]}"})
-    except Exception as e:
-        fname = gcs_path.split("/")[-1]
-        local = os.path.join(UPLOAD_DIR, fname)
-        if os.path.exists(local):
-            return send_from_directory(UPLOAD_DIR, fname)
-        return jsonify({"error": str(e)}), 404
+    # Zkus načíst z GCS přes get_gcs_client()
+    bucket = get_gcs_client()
+    if bucket:
+        try:
+            from flask import Response
+            blob = bucket.blob(f"faktury/{gcs_filename}")
+            if not blob.exists():
+                return jsonify({"error": f"Soubor nenalezen v GCS: faktury/{gcs_filename}"}), 404
+            data = blob.download_as_bytes()
+            ext = gcs_filename.rsplit(".", 1)[-1].lower()
+            mime_map = {"pdf": "application/pdf", "png": "image/png",
+                        "jpg": "image/jpeg", "jpeg": "image/jpeg"}
+            mime = mime_map.get(ext, "application/octet-stream")
+            return Response(data, mimetype=mime,
+                            headers={"Content-Disposition": f"inline; filename={gcs_filename}"})
+        except Exception as e:
+            print(f"GCS stream error: {e}")
+            return jsonify({"error": str(e)}), 500
+
+    # Fallback na lokální soubor
+    local = os.path.join(UPLOAD_DIR, gcs_filename)
+    if os.path.exists(local):
+        return send_from_directory(UPLOAD_DIR, gcs_filename)
+    return jsonify({"error": "Soubor neni dostupny"}), 404
 
 
 init_db()
