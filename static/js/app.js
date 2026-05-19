@@ -1132,7 +1132,7 @@ async function openFakturaDetail(id) {
         </div>
       </div>
     </div>
-    ${(f.soubor_url || f.soubor_cesta) ? `<div style="margin-bottom:1rem"><a href="${f.soubor_url || '/uploads/' + f.soubor_cesta}" target="_blank" class="btn btn-secondary btn-sm">📎 Zobrazit originál</a></div>` : ""}
+    ${f.soubor_cesta ? `<div style="margin-bottom:1rem"><button class="btn btn-secondary btn-sm" onclick="otevritSoubor(${f.id})">📎 Zobrazit originál</button></div>` : ""}
     <h4 style="font-family:var(--font-head);margin-bottom:.7rem">Položky</h4>
     <div class="table-wrap">
       <table>
@@ -6028,6 +6028,18 @@ async function doImportXlsx(file) {
   }
 }
 
+
+async function otevritSoubor(fid) {
+  try {
+    const r = await fetch(`/api/soubor/${fid}`);
+    if (!r.ok) { toast("Soubor není k dispozici", true); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+  } catch(e) {
+    toast("Chyba při otevírání souboru", true);
+  }
+}
 function exportReporty(fmt) {
   const params = new URLSearchParams({
     format: fmt,
