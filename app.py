@@ -6079,14 +6079,16 @@ def api_report_foto_stream(rid):
     if bucket:
         try:
             from flask import Response
-            blob = bucket.blob(f"reporty/{gcs_filename}")
-            if not blob.exists():
-                return jsonify({"error": "Foto nenalezeno v GCS"}), 404
-            data = blob.download_as_bytes()
-            ext = gcs_filename.rsplit(".", 1)[-1].lower()
-            mime_map = {"pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
-            mime = mime_map.get(ext, "application/octet-stream")
-            return Response(data, mimetype=mime, headers={"Content-Disposition": f"inline; filename={gcs_filename}"})
+            # Zkus různé cesty v GCS
+            for gcs_try in [f"faktury/reporty/{gcs_filename}", f"reporty/{gcs_filename}", gcs_filename]:
+                blob = bucket.blob(gcs_try)
+                if blob.exists():
+                    data = blob.download_as_bytes()
+                    ext = gcs_filename.rsplit(".", 1)[-1].lower()
+                    mime_map = {"pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg"}
+                    mime = mime_map.get(ext, "application/octet-stream")
+                    return Response(data, mimetype=mime, headers={"Content-Disposition": f"inline; filename={gcs_filename}"})
+            return jsonify({"error": f"Foto nenalezeno v GCS: {gcs_filename}"}), 404
         except Exception as e:
             return jsonify({"error": str(e)}), 500
     local = os.path.join(UPLOAD_DIR, gcs_filename)
