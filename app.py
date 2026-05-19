@@ -6005,12 +6005,32 @@ def uploaded_file(filename):
 @app.route("/api/soubor/<int:fid>")
 def api_soubor_stream(fid):
     with get_db() as conn:
-        row = conn.execute("SELECT soubor_cesta FROM faktury WHERE id=?", (fid,)).fetchone()
-    if not row or not row["soubor_cesta"]:
+        row = conn.execute("SELECT soubor_cesta, soubor_url FROM faktury WHERE id=?", (fid,)).fetchone()
+    if not row:
+        return jsonify({"error": "Faktura nenalezena"}), 404
+
+    # Zjisti GCS cestu - buď z soubor_cesta nebo z soubor_url
+    gcs_path = None
+    soubor_cesta = row["soubor_cesta"] if row["soubor_cesta"] else ""
+    soubor_url = row["soubor_url"] if row["soubor_url"] else ""
+
+    if soubor_cesta:
+        # Pokud cesta obsahuje lomítko, je to již GCS cesta
+        if "/" in soubor_cesta:
+            gcs_path = soubor_cesta
+        else:
+            gcs_path = f"faktury/{soubor_cesta}"
+
+    if not gcs_path and soubor_url:
+        # Extrahuj GCS cestu z URL (část mezi bucket name a ?)
+        import re as _re
+        m = _re.search(r'faktury-makro-docs/(.+?)(?:\?|$)', soubor_url)
+        if m:
+            gcs_path = m.group(1)
+
+    if not gcs_path:
         return jsonify({"error": "Faktura nema prilohu"}), 404
-    gcs_path = row["soubor_cesta"]
-    if "/" not in gcs_path:
-        gcs_path = f"faktury/{gcs_path}"
+
     if not GCS_SUPPORT:
         fname = gcs_path.split("/")[-1]
         return send_from_directory(UPLOAD_DIR, fname)
