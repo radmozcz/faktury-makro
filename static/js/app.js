@@ -5609,8 +5609,11 @@ function reportFormHtml(r = {}) {
 
     <div id="rtabPanelText" style="display:none">
       <p style="color:var(--txt2);font-size:.88rem;margin-bottom:.5rem">
-        Zkopírujte text ze zprávy (WhatsApp, SMS) a vložte sem (Ctrl+V):
+        Zkopírujte text ze zprávy (WhatsApp, SMS) a vložte sem (Ctrl+V nebo tlačítkem):
       </p>
+      <button class="btn btn-secondary btn-sm" style="margin-bottom:.5rem" onclick="vlozitZeSchranky()">
+        📋 Vložit ze schránky
+      </button>
       <textarea id="reportTextInput" class="form-control" rows="6"
         placeholder="Např: Datum: 1.3, Den: neděle, Směna: Vali/Renata&#10;Karty: 5500, KOV: 211, Papír: 3800&#10;Tržba: 9664, Pizza celá: 6x, čtvrt: 4x..."></textarea>
       <button class="btn btn-primary btn-sm" style="margin-top:.5rem" onclick="zpracovatReportText()">
@@ -5886,6 +5889,16 @@ async function uploadReportFoto(file) {
     }
   } catch (e) {
     statusEl.textContent = "❌ Chyba: " + e.message;
+  }
+}
+
+async function vlozitZeSchranky() {
+  const statusEl = document.getElementById("reportTextStatus");
+  try {
+    const text = await navigator.clipboard.readText();
+    document.getElementById("reportTextInput").value = text;
+  } catch (e) {
+    if (statusEl) statusEl.textContent = "Nepodařilo se přečíst schránku – použij Ctrl+V přímo do pole.";
   }
 }
 
