@@ -1174,131 +1174,60 @@ def _precti_celkovou_castku_z_pdf(filepath):
     return None
 
 
+from google.cloud import documentai_v1 as documentai
+
+DOCAI_PROJECT_ID = "904528626460"
+DOCAI_LOCATION = "eu"
+DOCAI_PROCESSOR_ID = "961411265e55135a"
+
 def parse_faktura_claude(filepath):
-    """Univerzální parser faktur a účtenek přes Claude API – funguje pro PDF i obrázky."""
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return None, "ANTHROPIC_API_KEY není nastaven"
-
+    """Parser faktur přes Google Document AI (Invoice Parser)."""
     try:
-        ext = filepath.rsplit(".", 1)[-1].lower()
-
-        castka_z_textu = None  # výchozí hodnota pro všechny typy souborů
-        # PDF — poslat přímo Claude jako dokument
-        if ext == "pdf":
-            with open(filepath, "rb") as f:
-                raw = f.read()
-            b64 = base64.standard_b64encode(raw).decode("utf-8")
-            content_block = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}}
-            content_blocks = None
-        else:
-            # Obrázek (JPG, PNG...)
-            media_map = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
-                         "bmp": "image/bmp", "tiff": "image/tiff", "webp": "image/webp"}
-            media_type = media_map.get(ext, "image/jpeg")
-            if OCR_SUPPORT and ext in ("jpg", "jpeg", "png", "bmp", "tiff"):
-                try:
-                    import io as _io
-                    _img = Image.open(filepath)
-                    # Zmenšit pokud přesahuje limit Claude API (8000px)
-                    _max = 3500
-                    if _img.width > _max or _img.height > _max:
-                        _img.thumbnail((_max, _max), Image.LANCZOS)
-                    _buf = _io.BytesIO()
-                    _img.save(_buf, format="JPEG", quality=85)
-                    b64 = base64.standard_b64encode(_buf.getvalue()).decode("utf-8")
-                    media_type = "image/jpeg"
-                except Exception:
-                    with open(filepath, "rb") as f:
-                        b64 = base64.standard_b64encode(f.read()).decode("utf-8")
-            else:
-                with open(filepath, "rb") as f:
-                    b64 = base64.standard_b64encode(f.read()).decode("utf-8")
-            content_block = {
-                "type": "image",
-                "source": {"type": "base64", "media_type": media_type, "data": b64}
-            }
-            content_blocks = None
-
-        prompt = """Jsi expert na čtení faktur a účtenek. Přečti tento doklad VELMI PEČLIVĚ.
-DŮLEŽITÉ: Dokument může být otočený o 90, 180 nebo 270 stupňů — přečti ho správně bez ohledu na orientaci.
-Odpověz POUZE platným JSON objektem, žádný jiný text, žádné backticky, žádné komentáře.
-
-Formát odpovědi:
-{
-  "dodavatel": "název dodavatele nebo obchodu",
-  "cislo_faktury": "pro MAKRO faktury: číslo POUZE z pole Faktura c. / VS (10 číslic, např. 0415000291) — IGNORUJ číslo vpravo nahoře (formát 0015/0135) a IGNORUJ c. zákazníka. Pro ostatní faktury: číslo faktury nebo VS nebo null",
-  "datum_vystaveni": "YYYY-MM-DD nebo null",
-  "datum_splatnosti": "YYYY-MM-DD nebo null",
-  "zpusob_uhrady": "hotově/kartou/převodem nebo null",
-  "celkem_s_dph": číslo (celková částka včetně DPH),
-  "polozky": [
-    {
-      "nazev": "název položky",
-      "mnozstvi": číslo,
-      "jednotka": "ks/kg/l/...",
-      "cena_za_jednotku_s_dph": číslo,
-      "celkem_s_dph": číslo
-    }
-  ]
-}
-
-PRAVIDLA:
-- Všechny částky jsou v Kč, piš jen číslo bez symbolu Kč
-- Desetinná čárka nebo tečka = desetinné místo (475,55 = 475.55)
-- Pokud není datum splatnosti, vrať null
-- Pokud není číslo faktury/VS, vrať null
-- Způsob úhrady: pokud vidíš "karta", "card", "kartou" → "kartou"; "cash", "hotov" → "hotově"
-- Položky: zahrň všechny položky které vidíš na dokladu
-- celkem_s_dph u položky = množství × cena za jednotku
-- CELKOVÁ ČÁSTKA (celkem_s_dph): Hledej pole "Celková částka" — je to JEDINÝ řádek s tímto textem na celém dokumentu. U MAKRO faktur je na poslední straně pod tabulkou DPH, těsně nad "Platba kartou/hotově". IGNORUJ: "Strana celkem bez DPH", "Poslední strana celkem bez DPH", čísla v tabulce DPH (hodnota zboží, částka daně, Celkem v DPH tabulce). Správná celková částka je VŽDY nižší než součet položek kvůli slevám CLAP.
-"""
-
-        client = anthropic.Anthropic(api_key=api_key)
-        # Sestavit obsah zprávy - buď více stránek (content_blocks) nebo jeden blok
-        if content_blocks:
-            msg_content = content_blocks + [{"type": "text", "text": prompt}]
-        else:
-            msg_content = [content_block, {"type": "text", "text": prompt}]
-        message = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=4000,
-            messages=[{"role": "user", "content": msg_content}]
+        client = documentai.DocumentProcessorServiceClient(
+            client_options={"api_endpoint": f"{DOCAI_LOCATION}-documentai.googleapis.com"}
         )
+        name = client.processor_path(DOCAI_PROJECT_ID, DOCAI_LOCATION, DOCAI_PROCESSOR_ID)
 
-        text = message.content[0].text.strip()
-        text = re.sub(r"^```json\s*", "", text)
-        text = re.sub(r"```$", "", text).strip()
-        parsed = json.loads(text)
+        ext = filepath.rsplit(".", 1)[-1].lower()
+        mime_map = {"pdf": "application/pdf", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                    "png": "image/png", "tiff": "image/tiff", "bmp": "image/bmp"}
+        with open(filepath, "rb") as f:
+            raw = f.read()
 
-        # Normalizace výstupu
-        app.logger.info(f"[PARSE] Finální castka_z_textu={castka_z_textu}, claude_castka={parsed.get('celkem_s_dph')}")
-        result = {
-            "dodavatel":        parsed.get("dodavatel", ""),
-            "cislo_faktury":    parsed.get("cislo_faktury") or "",
-            "datum_vystaveni":  parsed.get("datum_vystaveni") or "",
-            "datum_splatnosti": parsed.get("datum_splatnosti") or "",
-            "zpusob_uhrady":    parsed.get("zpusob_uhrady") or "",
-            "celkem_s_dph":     castka_z_textu if castka_z_textu else float(parsed.get("celkem_s_dph") or 0),
-            "polozky": [
-                {
-                    "nazev":                   p.get("nazev", ""),
-                    "mnozstvi":                float(p.get("mnozstvi", 1) or 1),
-                    "jednotka":                p.get("jednotka", "ks"),
-                    "cena_za_jednotku_s_dph":  float(p.get("cena_za_jednotku_s_dph", 0) or 0),
-                    "celkem_s_dph":            float(p.get("celkem_s_dph", 0) or 0),
-                }
-                for p in parsed.get("polozky", [])
-                if p.get("nazev", "").strip()
-            ]
+        raw_document = documentai.RawDocument(content=raw, mime_type=mime_map.get(ext, "application/pdf"))
+        result = client.process_document(
+            request=documentai.ProcessRequest(name=name, raw_document=raw_document)
+        )
+        doc = result.document
+
+        fields = {}
+        polozky = []
+        for entity in doc.entities:
+            if entity.type_ == "line_item":
+                item = {p.type_: p.mention_text for p in entity.properties}
+                polozky.append({
+                    "nazev": item.get("line_item/description", ""),
+                    "mnozstvi": float(item.get("line_item/quantity", 1) or 1),
+                    "jednotka": "ks",
+                    "cena_za_jednotku_s_dph": float((item.get("line_item/unit_price", "0") or "0").replace(",", ".")),
+                    "celkem_s_dph": float((item.get("line_item/amount", "0") or "0").replace(",", ".")),
+                })
+            else:
+                fields[entity.type_] = entity.mention_text
+
+        result_dict = {
+            "dodavatel": fields.get("supplier_name", ""),
+            "cislo_faktury": fields.get("invoice_id", ""),
+            "datum_vystaveni": fields.get("invoice_date", ""),
+            "datum_splatnosti": fields.get("due_date", ""),
+            "zpusob_uhrady": "",  # Document AI toto pole nevrací
+            "celkem_s_dph": float((fields.get("total_amount", "0") or "0").replace(",", ".")),
+            "polozky": [p for p in polozky if p["nazev"].strip()],
         }
-        return result, None
+        return result_dict, None
 
     except Exception as e:
         return None, str(e)
-
-
-def parse_vystavena_faktura_claude(filepath):
     """Parser pro naše VYSTAVENÉ faktury — vrátí odberatele, vystavitele, částku, popis."""
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
