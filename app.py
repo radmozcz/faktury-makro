@@ -1228,7 +1228,7 @@ def parse_faktura_claude(filepath):
 
     except Exception as e:
         return None, str(e)
-    """Parser pro naše VYSTAVENÉ faktury — vrátí odberatele, vystavitele, částku, popis."""
+    def parse_vystavena_faktura_claude(filepath):"""Parser pro naše VYSTAVENÉ faktury — vrátí odberatele, vystavitele, částku, popis."""
     api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if not api_key:
         return None, "ANTHROPIC_API_KEY není nastaven"
