@@ -1325,7 +1325,7 @@ Známá IČO našich firem (vystavitelů): {json.dumps(ico_map)}"""
         return parsed, None
     except Exception as e:
         return None, str(e)
-        def parse_makro_image(filepath):
+def parse_makro_image(filepath):
     if not OCR_SUPPORT:
         return None, "pytesseract/Pillow není nainstalován"
     try:
