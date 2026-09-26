@@ -5893,11 +5893,22 @@ async function uploadReportFoto(file) {
 async function vlozitZeSchranky() {
   switchRTab("text");
   const statusEl = document.getElementById("reportTextStatus");
+  const pole = document.getElementById("reportTextInput");
+  pole.focus();
   try {
+    if (!navigator.clipboard || !navigator.clipboard.readText) {
+      if (statusEl) statusEl.textContent = "Tenhle prohlížeč nepodporuje vložení tlačítkem – použij Ctrl+V.";
+      return;
+    }
     const text = await navigator.clipboard.readText();
-    document.getElementById("reportTextInput").value = text;
+    if (!text) {
+      if (statusEl) statusEl.textContent = "Schránka je prázdná – nejdřív něco zkopíruj (Ctrl+C).";
+      return;
+    }
+    pole.value = text;
+    if (statusEl) statusEl.textContent = "";
   } catch (e) {
-    if (statusEl) statusEl.textContent = "Nepodařilo se přečíst schránku – použij Ctrl+V přímo do pole.";
+    if (statusEl) statusEl.textContent = "Nejde přečíst schránku (" + e.message + ") – povol přístup v prohlížeči nebo použij Ctrl+V.";
   }
 }
 
