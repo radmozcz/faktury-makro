@@ -1277,7 +1277,54 @@ Známá IČO našich firem (vystavitelů): {json.dumps(ico_map)}"""
         return None, str(e)
 
 
-def parse_makro_image(filepath):
+def parse_vystavena_faktura_claude(filepath):
+    """Parser pro naše VYSTAVENÉ faktury — vrátí odberatele, vystavitele, částku, popis."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return None, "ANTHROPIC_API_KEY není nastaven"
+    try:
+        ext = filepath.rsplit(".", 1)[-1].lower()
+        with open(filepath, "rb") as f:
+            raw = f.read()
+        b64 = base64.standard_b64encode(raw).decode("utf-8")
+        if ext == "pdf":
+            block = {"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": b64}}
+        else:
+            mt = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}.get(ext, "image/jpeg")
+            block = {"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}}
+        ico_map = json.loads(os.environ.get("ICO_MAP_JSON", "{}"))
+        prompt = f"""Analyzuj tuto VYSTAVENOU fakturu a extrahuj tato pole.
+Odpověz POUZE platným JSON objektem, žádný jiný text ani backticky.
+
+Pojmy:
+- VYSTAVITEL = firma která fakturu vystavila (prodávající, dodavatel služby)
+- ODBĚRATEL = firma nebo osoba která fakturu dostala (kupující, příjemce)
+
+{{
+  "vystavitel": "název firmy která fakturu VYSTAVILA",
+  "ico_vystavitele": "IČO vystavitele nebo null",
+  "odberatel": "název odběratele (kdo fakturu PŘIJAL / komu je určena)",
+  "ico_odberatele": "IČO odběratele nebo null",
+  "cislo_faktury": "číslo faktury nebo VS nebo null",
+  "datum_vystaveni": "YYYY-MM-DD nebo null",
+  "datum_splatnosti": "YYYY-MM-DD nebo null",
+  "castka": číslo (celková částka k úhradě včetně DPH v Kč),
+  "popis": "stručný popis předmětu plnění nebo účelu faktury (max 100 znaků)"
+}}
+
+Známá IČO našich firem (vystavitelů): {json.dumps(ico_map)}"""
+        client = anthropic.Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model="claude-sonnet-4-6", max_tokens=600,
+            messages=[{"role": "user", "content": [block, {"type": "text", "text": prompt}]}]
+        )
+        text = msg.content[0].text.strip()
+        text = re.sub(r"^```json\s*", "", text)
+        text = re.sub(r"```$", "", text).strip()
+        parsed = json.loads(text)
+        return parsed, None
+    except Exception as e:
+        return None, str(e)def parse_makro_image(filepath):
     if not OCR_SUPPORT:
         return None, "pytesseract/Pillow není nainstalován"
     try:
