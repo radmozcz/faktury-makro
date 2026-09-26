@@ -12,3 +12,4 @@ reportlab
 google-api-python-client
 google-auth
 requests
+google-cloud-documentai
