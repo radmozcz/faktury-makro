@@ -1184,6 +1184,16 @@ DOCAI_PROJECT_ID = "904528626460"
 DOCAI_LOCATION = "eu"
 DOCAI_PROCESSOR_ID = "961411265e55135a"
 
+def _extract_date_near(text, keyword_regex):
+    for line in (text or "").splitlines():
+        if re.search(keyword_regex, line, re.IGNORECASE):
+            m = re.search(r"(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})", line)
+            if m:
+                d, mth, y = m.groups()
+                return f"{y}-{int(mth):02d}-{int(d):02d}"
+    return ""
+
+
 def _money(s):
     s = str(s or "0").strip()
     s = re.sub(r"[^\d,.\-]", "", s)
@@ -1235,14 +1245,21 @@ def parse_faktura_claude(filepath):
             else:
                 fields[entity.type_] = entity.mention_text
 
+        datum_vystaveni = fields.get("invoice_date", "")
+        datum_splatnosti = fields.get("due_date", "")
+        if not datum_vystaveni:
+            datum_vystaveni = _extract_date_near(doc.text, r"datum\s+vystaven")
+        if not datum_splatnosti:
+            datum_splatnosti = _extract_date_near(doc.text, r"datum\s+splatnost")
+
         result_dict = {
             "dodavatel": fields.get("supplier_name", ""),
             "cislo_faktury": fields.get("invoice_id", ""),
-            "datum_vystaveni": fields.get("invoice_date", ""),
-            "datum_splatnosti": fields.get("due_date", ""),
+            "datum_vystaveni": datum_vystaveni,
+            "datum_splatnosti": datum_splatnosti,
             "zpusob_uhrady": "",  # Document AI toto pole nevrací
             "celkem_s_dph": _money(fields.get("total_amount", "0")),
-            "polozky": [p for p in polozky if p["nazev"].strip()],
+            "polozky": [p for p in polozky if p["nazev"].strip() and (p["celkem_s_dph"] or p["cena_za_jednotku_s_dph"])],
         }
         return result_dict, None
 
