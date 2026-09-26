@@ -5590,6 +5590,7 @@ function reportFormHtml(r = {}) {
     </div>
     ${r.id ? `<div style="margin-bottom:.8rem"><button class="btn btn-secondary btn-sm" onclick="otevritStreamSoubor('/api/report-foto/'+${r.id})">📎 Zobrazit originál fotku</button></div>` : ""}
     <div style="display:flex;gap:.4rem;margin-bottom:1rem;border-bottom:2px solid var(--border);padding-bottom:0">
+      <button class="btn btn-secondary btn-sm" onclick="vlozitZeSchranky()">📋 Vložit ze schránky</button>
       <button id="rtabFoto"  class="tab-btn tab-active" onclick="switchRTab('foto')">📷 Fotka</button>
       <button id="rtabText"  class="tab-btn" onclick="switchRTab('text')">📋 Vložit text</button>
       <button id="rtabRucni" class="tab-btn" onclick="switchRTab('rucni')">✏️ Ruční</button>
@@ -5611,9 +5612,6 @@ function reportFormHtml(r = {}) {
       <p style="color:var(--txt2);font-size:.88rem;margin-bottom:.5rem">
         Zkopírujte text ze zprávy (WhatsApp, SMS) a vložte sem (Ctrl+V nebo tlačítkem):
       </p>
-      <button class="btn btn-secondary btn-sm" style="margin-bottom:.5rem" onclick="vlozitZeSchranky()">
-        📋 Vložit ze schránky
-      </button>
       <textarea id="reportTextInput" class="form-control" rows="6"
         placeholder="Např: Datum: 1.3, Den: neděle, Směna: Vali/Renata&#10;Karty: 5500, KOV: 211, Papír: 3800&#10;Tržba: 9664, Pizza celá: 6x, čtvrt: 4x..."></textarea>
       <button class="btn btn-primary btn-sm" style="margin-top:.5rem" onclick="zpracovatReportText()">
@@ -5893,6 +5891,7 @@ async function uploadReportFoto(file) {
 }
 
 async function vlozitZeSchranky() {
+  switchRTab("text");
   const statusEl = document.getElementById("reportTextStatus");
   try {
     const text = await navigator.clipboard.readText();
