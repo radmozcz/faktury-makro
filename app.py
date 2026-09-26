@@ -1184,6 +1184,22 @@ DOCAI_PROJECT_ID = "904528626460"
 DOCAI_LOCATION = "eu"
 DOCAI_PROCESSOR_ID = "961411265e55135a"
 
+def _money(s):
+    s = str(s or "0").strip()
+    s = re.sub(r"[^\d,.\-]", "", s)
+    if "," in s and "." in s:
+        if s.rfind(",") > s.rfind("."):
+            s = s.replace(".", "").replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    elif "," in s:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
 def parse_faktura_claude(filepath):
     """Parser faktur přes Google Document AI (Invoice Parser)."""
     try:
@@ -1211,10 +1227,10 @@ def parse_faktura_claude(filepath):
                 item = {p.type_: p.mention_text for p in entity.properties}
                 polozky.append({
                     "nazev": item.get("line_item/description", ""),
-                    "mnozstvi": float(item.get("line_item/quantity", 1) or 1),
+                    "mnozstvi": _money(item.get("line_item/quantity", "1")) or 1,
                     "jednotka": "ks",
-                    "cena_za_jednotku_s_dph": float((item.get("line_item/unit_price", "0") or "0").replace(",", ".")),
-                    "celkem_s_dph": float((item.get("line_item/amount", "0") or "0").replace(",", ".")),
+                    "cena_za_jednotku_s_dph": _money(item.get("line_item/unit_price", "0")),
+                    "celkem_s_dph": _money(item.get("line_item/amount", "0")),
                 })
             else:
                 fields[entity.type_] = entity.mention_text
@@ -1225,7 +1241,7 @@ def parse_faktura_claude(filepath):
             "datum_vystaveni": fields.get("invoice_date", ""),
             "datum_splatnosti": fields.get("due_date", ""),
             "zpusob_uhrady": "",  # Document AI toto pole nevrací
-            "celkem_s_dph": float((fields.get("total_amount", "0") or "0").replace(",", ".")),
+            "celkem_s_dph": _money(fields.get("total_amount", "0")),
             "polozky": [p for p in polozky if p["nazev"].strip()],
         }
         return result_dict, None
