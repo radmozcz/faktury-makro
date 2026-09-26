@@ -1185,13 +1185,32 @@ DOCAI_LOCATION = "eu"
 DOCAI_PROCESSOR_ID = "961411265e55135a"
 
 def _extract_date_near(text, keyword_regex):
-    for line in (text or "").splitlines():
+    date_pat = r"(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})"
+    lines = (text or "").splitlines()
+    for i, line in enumerate(lines):
         if re.search(keyword_regex, line, re.IGNORECASE):
-            m = re.search(r"(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})", line)
-            if m:
-                d, mth, y = m.groups()
-                return f"{y}-{int(mth):02d}-{int(d):02d}"
+            for candidate in lines[i:i+3]:
+                m = re.search(date_pat, candidate)
+                if m:
+                    d, mth, y = m.groups()
+                    return f"{y}-{int(mth):02d}-{int(d):02d}"
     return ""
+
+
+def _extract_first_dates(text, count=2):
+    date_pat = r"(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})"
+    found = []
+    for m in re.finditer(date_pat, text or ""):
+        d, mth, y = m.groups()
+        try:
+            iso = f"{y}-{int(mth):02d}-{int(d):02d}"
+        except Exception:
+            continue
+        if iso not in found:
+            found.append(iso)
+        if len(found) >= count:
+            break
+    return found
 
 
 def _money(s):
@@ -1248,9 +1267,13 @@ def parse_faktura_claude(filepath):
         datum_vystaveni = fields.get("invoice_date", "")
         datum_splatnosti = fields.get("due_date", "")
         if not datum_vystaveni:
-            datum_vystaveni = _extract_date_near(doc.text, r"datum\s+vystaven")
+            datum_vystaveni = _extract_date_near(doc.text, r"vystaven")
         if not datum_splatnosti:
-            datum_splatnosti = _extract_date_near(doc.text, r"datum\s+splatnost")
+            datum_splatnosti = _extract_date_near(doc.text, r"splat")
+        if not datum_vystaveni and not datum_splatnosti:
+            prvni_data = _extract_first_dates(doc.text, 2)
+            if len(prvni_data) >= 1: datum_vystaveni = prvni_data[0]
+            if len(prvni_data) >= 2: datum_splatnosti = prvni_data[1]
 
         result_dict = {
             "dodavatel": fields.get("supplier_name", ""),
