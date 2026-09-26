@@ -866,8 +866,12 @@ def parse_makro_pdf(filepath):
             if "Súpistovaru" in first_despaced and "FAKTURA" not in first_despaced:
                 return None, "Tento soubor je 'Súpis tovaru' (interní doklad MAKRO) – není to daňová faktura. Soubor nebyl nahrán."
 
-            # Naskenované PDF — žádný text → předat Claude API s MAKRO kontextem
+            # Naskenované PDF — žádný text → OCR přes Tesseract (MAKRO šablona), fallback na Document AI/Claude
             if not first_text.strip():
+                if OCR_SUPPORT:
+                    vysledek, chyba = parse_makro_scanned_pdf(filepath)
+                    if vysledek:
+                        return vysledek, None
                 api_key = os.environ.get("ANTHROPIC_API_KEY", "")
                 if api_key:
                     return parse_faktura_claude(filepath)
@@ -1348,71 +1352,104 @@ def parse_makro_image(filepath):
                     continue
 
         lines = text.splitlines()
-        result = {
-            "cislo_faktury":   "",
-            "datum_vystaveni": "",
-            "datum_splatnosti":"",
-            "zpusob_uhrady":   "Hotovost",
-            "stav":            "zaplaceno",
-            "dodavatel":       "MAKRO Cash & Carry ČR s.r.o.",
-            "celkem_s_dph":    0,
-            "firma_zkratka":   "",
-            "polozky":         []
-        }
+        result = _parse_makro_ocr_lines(lines)
+        return result, None
+    except Exception as e:
+        return None, str(e)
 
-        for line in lines:
-            ls = line.strip()
-            if not result["cislo_faktury"]:
-                m = re.search(r"Faktura.*?[Vv][Ss]\s*[;:,.]?\s*([\d\s]{7,15})", ls, re.IGNORECASE)
-                if m:
-                    vs = re.sub(r"\s+", "", m.group(1))[:12]
-                    if vs.isdigit() and len(vs) >= 7: result["cislo_faktury"] = vs
-            m = re.search(r"(\d{2})[.\-](\d{2})[.\-](\d{4})", ls)
+
+def _parse_makro_ocr_lines(lines):
+    """Sdílená logika: z OCR řádků (obrázek i naskenované PDF) vytáhne pole MAKRO faktury."""
+    result = {
+        "cislo_faktury":   "",
+        "datum_vystaveni": "",
+        "datum_splatnosti":"",
+        "zpusob_uhrady":   "Hotovost",
+        "stav":            "zaplaceno",
+        "dodavatel":       "MAKRO Cash & Carry ČR s.r.o.",
+        "celkem_s_dph":    0,
+        "firma_zkratka":   "",
+        "polozky":         []
+    }
+
+    for line in lines:
+        ls = line.strip()
+        if not result["cislo_faktury"]:
+            m = re.search(r"Faktura.*?[Vv][Ss]\s*[;:,.]?\s*([\d\s]{7,15})", ls, re.IGNORECASE)
             if m:
-                den, mes, rok = m.group(1), m.group(2), m.group(3)
-                if int(mes) > 12:
-                    mes = mes.replace("8", "0")
-                try:
-                    from datetime import datetime
-                    datetime(int(rok), int(mes), int(den))
-                    d = f"{rok}-{mes}-{den}"
-                    if not result["datum_vystaveni"]: result["datum_vystaveni"] = d
-                    elif not result["datum_splatnosti"]: result["datum_splatnosti"] = d
-                except Exception:
-                    pass
-            if not result["zpusob_uhrady"] or result["zpusob_uhrady"] == "Hotovost":
-                if "Platba kartou" in ls or "platba kartou" in ls:
-                    result["zpusob_uhrady"] = "Platba kartou"
-            if not result["firma_zkratka"]:
-                m = re.search(r"IČ\s*:\s*(\d{8})", ls)
-                if m: result["firma_zkratka"] = _ico_na_firmu(m.group(1))
-            m = re.search(r"Celkov[aá]\s+[čc][aá]stka\s+([\d\s]{1,10}[,.]\d{2})", ls, re.IGNORECASE)
-            if m: result["celkem_s_dph"] = _parse_money(m.group(1))
-            m2 = re.search(r"[Ss]trana.{0,10}celkem.{0,10}bez.{0,5}DPH.{0,5}([\d\s]+[,.]\d{2})", ls, re.IGNORECASE)
-            if m2 and not result.get("ocr_strana_celkem_bez_dph"):
-                result["ocr_strana_celkem_bez_dph"] = _parse_money(m2.group(1))
-            m3 = re.search(r"celkem\s+bez\s+DPH\s+([\d\s]+[,.]\d{2})", ls, re.IGNORECASE)
-            if m3 and not result.get("ocr_strana_celkem_bez_dph"):
-                result["ocr_strana_celkem_bez_dph"] = _parse_money(m3.group(1))
-
-        result["polozky"] = _parse_ocr_items(lines)
-        suma_polozek = round(sum(p["celkem_s_dph"] for p in result["polozky"]), 2)
-        if result["celkem_s_dph"] == 0:
-            result["celkem_s_dph"] = suma_polozek
-
+                vs = re.sub(r"\s+", "", m.group(1))[:12]
+                if vs.isdigit() and len(vs) >= 7: result["cislo_faktury"] = vs
+        m = re.search(r"(\d{2})[.\-](\d{2})[.\-](\d{4})", ls)
+        if m:
+            den, mes, rok = m.group(1), m.group(2), m.group(3)
+            if int(mes) > 12:
+                mes = mes.replace("8", "0")
+            try:
+                from datetime import datetime
+                datetime(int(rok), int(mes), int(den))
+                d = f"{rok}-{mes}-{den}"
+                if not result["datum_vystaveni"]: result["datum_vystaveni"] = d
+                elif not result["datum_splatnosti"]: result["datum_splatnosti"] = d
+            except Exception:
+                pass
+        if not result["zpusob_uhrady"] or result["zpusob_uhrady"] == "Hotovost":
+            if "Platba kartou" in ls or "platba kartou" in ls:
+                result["zpusob_uhrady"] = "Platba kartou"
         if not result["firma_zkratka"]:
-            result["firma_zkratka"] = "UNI"
+            m = re.search(r"IČ\s*:\s*(\d{8})", ls)
+            if m: result["firma_zkratka"] = _ico_na_firmu(m.group(1))
+        m = re.search(r"Celkov[aá]\s+[čc][aá]stka\s+([\d\s]{1,10}[,.]\d{2})", ls, re.IGNORECASE)
+        if m: result["celkem_s_dph"] = _parse_money(m.group(1))
+        m2 = re.search(r"[Ss]trana.{0,10}celkem.{0,10}bez.{0,5}DPH.{0,5}([\d\s]+[,.]\d{2})", ls, re.IGNORECASE)
+        if m2 and not result.get("ocr_strana_celkem_bez_dph"):
+            result["ocr_strana_celkem_bez_dph"] = _parse_money(m2.group(1))
+        m3 = re.search(r"celkem\s+bez\s+DPH\s+([\d\s]+[,.]\d{2})", ls, re.IGNORECASE)
+        if m3 and not result.get("ocr_strana_celkem_bez_dph"):
+            result["ocr_strana_celkem_bez_dph"] = _parse_money(m3.group(1))
 
-        ocr_bez = result.get("ocr_strana_celkem_bez_dph", 0)
-        podezrele = [i for i, p in enumerate(result["polozky"])
-                     if p["celkem_s_dph"] == 0 or p["mnozstvi"] > 500]
-        result["ocr_kontrola"] = {
-            "suma_polozek": suma_polozek,
-            "ocr_bez_dph": ocr_bez,
-            "ma_celkem": ocr_bez > 0,
-            "podezrele_indexy": podezrele,
-        }
+    result["polozky"] = _parse_ocr_items(lines)
+    suma_polozek = round(sum(p["celkem_s_dph"] for p in result["polozky"]), 2)
+    if result["celkem_s_dph"] == 0:
+        result["celkem_s_dph"] = suma_polozek
 
+    if not result["firma_zkratka"]:
+        result["firma_zkratka"] = "UNI"
+
+    ocr_bez = result.get("ocr_strana_celkem_bez_dph", 0)
+    podezrele = [i for i, p in enumerate(result["polozky"])
+                 if p["celkem_s_dph"] == 0 or p["mnozstvi"] > 500]
+    result["ocr_kontrola"] = {
+        "suma_polozek": suma_polozek,
+        "ocr_bez_dph": ocr_bez,
+        "ma_celkem": ocr_bez > 0,
+        "podezrele_indexy": podezrele,
+    }
+    return result
+
+
+def parse_makro_scanned_pdf(filepath):
+    """Naskenované MAKRO PDF (bez textové vrstvy) — OCR všech stran přes Tesseract, stejná logika jako u foto/JPG."""
+    if not OCR_SUPPORT or not PDF_SUPPORT:
+        return None, "pytesseract/pdfplumber není nainstalován"
+    try:
+        all_lines = []
+        with pdfplumber.open(filepath) as pdf:
+            for page in pdf.pages:
+                pil_img = page.to_image(resolution=200).original.convert("L")
+                w, h = pil_img.size
+                if w < 1200:
+                    scale = 1200 / w
+                    pil_img = pil_img.resize((int(w*scale), int(h*scale)), Image.LANCZOS)
+                text = ""
+                for lang in ["ces+eng", "ces", "eng"]:
+                    try:
+                        text = pytesseract.image_to_string(pil_img, lang=lang, config="--psm 6 --oem 3")
+                        break
+                    except Exception:
+                        continue
+                all_lines += text.splitlines()
+
+        result = _parse_makro_ocr_lines(all_lines)
         return result, None
     except Exception as e:
         return None, str(e)
