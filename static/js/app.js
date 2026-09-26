@@ -5891,24 +5891,26 @@ async function uploadReportFoto(file) {
 }
 
 async function vlozitZeSchranky() {
-  switchRTab("text");
-  const statusEl = document.getElementById("reportTextStatus");
-  const pole = document.getElementById("reportTextInput");
-  pole.focus();
+  switchRTab("foto");
+  const statusEl = document.getElementById("reportFotoStatus");
   try {
-    if (!navigator.clipboard || !navigator.clipboard.readText) {
+    if (!navigator.clipboard || !navigator.clipboard.read) {
       if (statusEl) statusEl.textContent = "Tenhle prohlížeč nepodporuje vložení tlačítkem – použij Ctrl+V.";
       return;
     }
-    const text = await navigator.clipboard.readText();
-    if (!text) {
-      if (statusEl) statusEl.textContent = "Schránka je prázdná – nejdřív něco zkopíruj (Ctrl+C).";
-      return;
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      const imgType = item.types.find(t => t.startsWith("image/"));
+      if (imgType) {
+        const blob = await item.getType(imgType);
+        const file = new File([blob], "vlozeno.png", { type: imgType });
+        uploadReportFoto(file);
+        return;
+      }
     }
-    pole.value = text;
-    if (statusEl) statusEl.textContent = "";
+    if (statusEl) statusEl.textContent = "Ve schránce není obrázek – nejdřív fotku/screenshot zkopíruj.";
   } catch (e) {
-    if (statusEl) statusEl.textContent = "Nejde přečíst schránku (" + e.message + ") – povol přístup v prohlížeči nebo použij Ctrl+V.";
+    if (statusEl) statusEl.textContent = "Nejde přečíst schránku (" + e.message + ") – použij Ctrl+V.";
   }
 }
 
