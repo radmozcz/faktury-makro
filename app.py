@@ -1185,15 +1185,20 @@ DOCAI_LOCATION = "eu"
 DOCAI_PROCESSOR_ID = "961411265e55135a"
 
 def _extract_date_near(text, keyword_regex):
+    """Najde datum na řádku s klíčovým slovem, nebo na nejbližším řádku s datem (v obou směrech) —
+    řeší i rozvržení, kde jsou nejdřív všechny popisky a pak všechny hodnoty."""
     date_pat = r"(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})"
     lines = (text or "").splitlines()
+    date_line_idx = [i for i, l in enumerate(lines) if re.search(date_pat, l)]
+    if not date_line_idx:
+        return ""
     for i, line in enumerate(lines):
         if re.search(keyword_regex, line, re.IGNORECASE):
-            for candidate in lines[i:i+3]:
-                m = re.search(date_pat, candidate)
-                if m:
-                    d, mth, y = m.groups()
-                    return f"{y}-{int(mth):02d}-{int(d):02d}"
+            nejblizsi = min(date_line_idx, key=lambda di: abs(di - i))
+            m = re.search(date_pat, lines[nejblizsi])
+            if m:
+                d, mth, y = m.groups()
+                return f"{y}-{int(mth):02d}-{int(d):02d}"
     return ""
 
 
